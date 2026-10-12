@@ -1,0 +1,6 @@
+{
+  "name": "NexTrade Broker OS",
+  "description": "Enterprise broker and user trading management panel with real-time market watch, orders, positions, client ledger, risk controls, and multi-tenant administration.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
