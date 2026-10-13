@@ -22,6 +22,8 @@ import {
   AnalyticsData,
 } from '../types';
 
+export const API_BASE_URL = (import.meta.env.VITE_API_BASE_URL || 'http://localhost:5000/api').replace(/\/+$/, '');
+
 let currentAuthToken = '';
 
 export function setAuthToken(token: string) {
@@ -29,7 +31,18 @@ export function setAuthToken(token: string) {
 }
 
 export function getAuthToken(): string {
-  return currentAuthToken;
+  if (currentAuthToken) return currentAuthToken;
+  if (typeof window !== 'undefined' && window.localStorage) {
+    return (
+      localStorage.getItem('token') ||
+      localStorage.getItem('admin_token') ||
+      localStorage.getItem('broker_token') ||
+      localStorage.getItem('authToken') ||
+      localStorage.getItem('access_token') ||
+      ''
+    );
+  }
+  return '';
 }
 
 function generateIdempotencyKey(): string {
@@ -39,11 +52,22 @@ function generateIdempotencyKey(): string {
   return `IDEMP-${Date.now()}-${Math.random().toString(36).slice(2, 9)}`;
 }
 
+export function buildApiUrl(endpoint: string): string {
+  if (/^https?:\/\//i.test(endpoint)) return endpoint;
+  const cleanEndpoint = endpoint.startsWith('/') ? endpoint : `/${endpoint}`;
+  
+  if (API_BASE_URL.endsWith('/api') && cleanEndpoint.startsWith('/api/')) {
+    return `${API_BASE_URL}${cleanEndpoint.substring(4)}`;
+  }
+  return `${API_BASE_URL}${cleanEndpoint}`;
+}
+
 async function authenticatedFetch(input: RequestInfo | URL, init: RequestInit = {}): Promise<Response> {
+  const token = getAuthToken();
   const headers = new Headers(init.headers || {});
   
-  if (currentAuthToken && !headers.has('Authorization')) {
-    headers.set('Authorization', `Bearer ${currentAuthToken}`);
+  if (token && !headers.has('Authorization')) {
+    headers.set('Authorization', `Bearer ${token}`);
   }
 
   // Set default content type if body is present
@@ -51,10 +75,61 @@ async function authenticatedFetch(input: RequestInfo | URL, init: RequestInit = 
     headers.set('Content-Type', 'application/json');
   }
 
-  return fetch(input, {
-    ...init,
-    headers,
-  });
+  const url = typeof input === 'string' ? buildApiUrl(input) : input;
+
+  try {
+    const res = await fetch(url, {
+      ...init,
+      headers,
+    });
+    return res;
+  } catch (err) {
+    // If external host is unreachable, fallback to relative local route
+    if (typeof input === 'string' && !input.startsWith('http')) {
+      return fetch(input, { ...init, headers });
+    }
+    throw err;
+  }
+}
+
+function normalizeClients(data: any): Client[] {
+  let list: any[] = [];
+  if (Array.isArray(data)) {
+    list = data;
+  } else if (Array.isArray(data?.clients)) {
+    list = data.clients;
+  } else if (Array.isArray(data?.data)) {
+    list = data.data;
+  } else if (Array.isArray(data?.items)) {
+    list = data.items;
+  }
+
+  return list.map((item: any) => ({
+    id: String(item.id || item._id || item.clientId || `CLI-${Math.random().toString(36).slice(2, 7).toUpperCase()}`),
+    name: String(item.name || item.fullName || item.username || 'Unnamed Client'),
+    email: String(item.email || ''),
+    phone: String(item.phone || item.mobile || ''),
+    pan: String(item.pan || 'N/A'),
+    status: (item.status === 'Active' || item.status === 'Inactive' || item.status === 'Suspended')
+      ? item.status
+      : (item.isActive === false ? 'Inactive' : 'Active'),
+    isDemo: item.isDemo !== undefined ? Boolean(item.isDemo) : Boolean(item.accountType === 'demo' || item.type === 'demo'),
+    ledgerBalance: Number(item.ledgerBalance ?? item.balance ?? 0),
+    openPnL: Number(item.openPnL ?? item.pnl ?? 0),
+    peakLedger: Number(item.peakLedger ?? item.ledgerBalance ?? 0),
+    marginUsed: Number(item.marginUsed ?? 0),
+    income: Number(item.income ?? 0),
+    marginAvailable: Number(item.marginAvailable ?? item.availableMargin ?? (item.ledgerBalance ?? 0)),
+    brokerId: String(item.brokerId || 'BRK-01'),
+    brokerName: String(item.brokerName || 'Apex Capital Partners'),
+    kycStatus: (item.kycStatus === 'Verified' || item.kycStatus === 'Pending' || item.kycStatus === 'Rejected')
+      ? item.kycStatus
+      : 'Verified',
+    kycDocuments: Array.isArray(item.kycDocuments) ? item.kycDocuments : ['PAN_Card.pdf'],
+    createdDate: String(item.createdDate || item.createdAt || new Date().toISOString().slice(0, 10)),
+    lastActive: String(item.lastActive || item.updatedAt || 'Just now'),
+    riskLimit: Number(item.riskLimit ?? 500000),
+  }));
 }
 
 export const api = {
@@ -109,15 +184,27 @@ export const api = {
   },
 
   // Clients
-  async getClients(params?: { q?: string; status?: string; hideDemo?: boolean }): Promise<Client[]> {
+  async getClients(params?: { q?: string; status?: string; hideDemo?: boolean; accountType?: string }): Promise<Client[]> {
     const query = new URLSearchParams();
     if (params?.q) query.set('q', params.q);
-    if (params?.status) query.set('status', params.status);
+    if (params?.status && params.status !== 'All statuses') query.set('status', params.status);
     if (params?.hideDemo) query.set('hideDemo', 'true');
+    if (params?.accountType) query.set('accountType', params.accountType);
 
-    const res = await authenticatedFetch(`/api/clients?${query.toString()}`);
+    const queryString = query.toString() ? `?${query.toString()}` : '';
+    let res = await authenticatedFetch(`/api/admin/clients${queryString}`);
+    if (!res.ok && res.status === 404) {
+      res = await authenticatedFetch(`/api/clients${queryString}`);
+    }
+    if (!res.ok) {
+      throw new Error(`Failed to fetch clients: ${res.statusText}`);
+    }
     const data = await res.json();
-    return data.clients;
+    return normalizeClients(data);
+  },
+
+  async fetchClients(params?: { q?: string; status?: string; hideDemo?: boolean; accountType?: string }): Promise<Client[]> {
+    return this.getClients(params);
   },
 
   async getClientById(id: string): Promise<{ client: Client; orders: Order[]; positions: Position[] }> {
