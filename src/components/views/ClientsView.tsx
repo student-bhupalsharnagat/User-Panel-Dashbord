@@ -38,21 +38,29 @@ export const ClientsView: React.FC = () => {
   const [searchQuery, setSearchQuery] = useState('');
   const [statusFilter, setStatusFilter] = useState('All statuses');
   const [hideDemo, setHideDemo] = useState(false);
+  const [accountTypeTab, setAccountTypeTab] = useState<'All' | 'Real' | 'Demo'>('All');
   const [pageSize, setPageSize] = useState(10);
   const [page, setPage] = useState(1);
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
     setLoading(true);
-    api.getClients({ q: searchQuery, status: statusFilter, hideDemo })
+    api.getClients({ q: searchQuery, status: statusFilter, hideDemo: hideDemo || accountTypeTab === 'Real' })
       .then((data) => setClients(data))
       .catch((err) => console.error('Failed to load clients:', err))
       .finally(() => setLoading(false));
-  }, [searchQuery, statusFilter, hideDemo, refreshTrigger]);
+  }, [searchQuery, statusFilter, hideDemo, accountTypeTab, refreshTrigger]);
+
+  const filteredClients = clients.filter((c) => {
+    if (accountTypeTab === 'Real' && c.isDemo) return false;
+    if (accountTypeTab === 'Demo' && !c.isDemo) return false;
+    if (accountTypeTab === 'All' && hideDemo && c.isDemo) return false;
+    return true;
+  });
 
   const activeCount = clients.filter(c => c.status === 'Active').length;
   const inactiveCount = clients.filter(c => c.status !== 'Active').length;
-  const paginatedClients = clients.slice((page - 1) * pageSize, page * pageSize);
+  const paginatedClients = filteredClients.slice((page - 1) * pageSize, page * pageSize);
 
   const handleExportCSV = () => {
     if (clients.length === 0) return;
@@ -179,7 +187,7 @@ export const ClientsView: React.FC = () => {
           <div>
             <h3 className="text-sm font-bold text-white">Client directory</h3>
             <p className="text-[11px] text-slate-400">
-              {clients.length} matching client records · Updated moments ago
+              {filteredClients.length} matching client records · Updated moments ago
             </p>
           </div>
 
@@ -202,7 +210,28 @@ export const ClientsView: React.FC = () => {
             />
           </div>
 
-          <div className="flex items-center gap-3">
+          <div className="flex flex-wrap items-center gap-3">
+            {/* Filter Toggle ('All', 'Real', 'Demo') */}
+            <div className="flex items-center bg-[#131b2e] border border-[#1e2a42] rounded-lg p-0.5 text-xs">
+              {(['All', 'Real', 'Demo'] as const).map((tab) => (
+                <button
+                  key={tab}
+                  type="button"
+                  onClick={() => {
+                    setAccountTypeTab(tab);
+                    setPage(1);
+                  }}
+                  className={`px-2.5 py-1 rounded-md text-[11px] font-medium transition-colors cursor-pointer ${
+                    accountTypeTab === tab
+                      ? 'bg-indigo-600 text-white font-semibold shadow-sm'
+                      : 'text-slate-400 hover:text-slate-200 hover:bg-slate-800/60'
+                  }`}
+                >
+                  {tab}
+                </button>
+              ))}
+            </div>
+
             {/* Hide Demo ID Toggle */}
             <label className="flex items-center gap-2 text-xs text-slate-300 cursor-pointer select-none">
               <input
@@ -254,7 +283,26 @@ export const ClientsView: React.FC = () => {
               </tr>
             </thead>
             <tbody className="divide-y divide-slate-800/80 bg-slate-900/60 font-mono">
-              {paginatedClients.map((client) => {
+              {loading ? (
+                <tr>
+                  <td colSpan={10} className="px-4 py-12 text-center text-slate-400 font-sans">
+                    <div className="flex flex-col items-center justify-center gap-2">
+                      <div className="w-5 h-5 border-2 border-indigo-500 border-t-transparent rounded-full animate-spin" />
+                      <span className="text-xs text-slate-400">Loading client directory...</span>
+                    </div>
+                  </td>
+                </tr>
+              ) : paginatedClients.length === 0 ? (
+                <tr>
+                  <td colSpan={10} className="px-4 py-12 text-center text-slate-400 font-sans">
+                    <div className="flex flex-col items-center justify-center gap-2">
+                      <Users className="w-8 h-8 text-slate-600 stroke-[1.5]" />
+                      <span className="text-xs font-medium text-slate-300">No clients found</span>
+                      <span className="text-[11px] text-slate-500">Try adjusting your search query or filters</span>
+                    </div>
+                  </td>
+                </tr>
+              ) : paginatedClients.map((client) => {
                 const isPositivePnL = client.openPnL >= 0;
                 return (
                   <tr
@@ -330,7 +378,7 @@ export const ClientsView: React.FC = () => {
         {/* Footer & Pagination */}
         <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 text-xs text-slate-400 pt-2">
           <div className="text-[11px]">
-            Showing {paginatedClients.length} of {clients.length} clients
+            Showing {paginatedClients.length} of {filteredClients.length} clients
           </div>
 
           <div className="flex items-center gap-3">
@@ -338,7 +386,10 @@ export const ClientsView: React.FC = () => {
               <span>Rows per page:</span>
               <select
                 value={pageSize}
-                onChange={(e) => setPageSize(Number(e.target.value))}
+                onChange={(e) => {
+                  setPageSize(Number(e.target.value));
+                  setPage(1);
+                }}
                 className="bg-[#131b2e] border border-[#1e2a42] rounded px-2 py-1 text-xs text-slate-200"
               >
                 <option value={5}>5 rows</option>
@@ -359,7 +410,7 @@ export const ClientsView: React.FC = () => {
                 {page}
               </span>
               <button
-                disabled={page * pageSize >= clients.length}
+                disabled={page * pageSize >= filteredClients.length}
                 onClick={() => setPage(p => p + 1)}
                 className="w-7 h-7 rounded border border-slate-800 bg-[#131b2e] flex items-center justify-center text-slate-400 disabled:opacity-40"
               >

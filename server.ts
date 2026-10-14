@@ -1527,7 +1527,7 @@ app.get('/api/market-watch', authMiddleware, (_req: Request, res: Response) => {
 });
 
 // Clients API with Hierarchy & RBAC isolation
-app.get('/api/clients', authMiddleware, (req: AuthenticatedRequest, res: Response) => {
+app.get(['/api/clients', '/api/admin/clients'], authMiddleware, (req: AuthenticatedRequest, res: Response) => {
   const user = req.user!;
   const { q, status, hideDemo } = req.query;
 
