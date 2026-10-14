@@ -23,13 +23,20 @@ import {
   AuthenticatedUser,
   SettingsState,
 } from './src/types/index.ts';
+import {
+  initDatabase,
+  getDatabaseStatus,
+  isUsingPostgres,
+  dbRepo,
+} from './src/db.ts';
+import { tradingPlatformClient } from './src/services/tradingPlatformClient.ts';
 
 dotenv.config();
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
-const PORT = 3000;
+const PORT = parseInt(process.env.PORT || '3000', 10);
 const app = express();
 app.use(express.json());
 
@@ -43,6 +50,27 @@ const INTERNAL_API_SECRET = process.env.INTERNAL_API_SECRET || 'nextrade-interna
 const TRADING_PLATFORM_URL = process.env.TRADING_PLATFORM_URL || 'https://trading-platform-3-1v13.onrender.com';
 const CENTRAL_ADMIN_URL = process.env.CENTRAL_ADMIN_URL || 'https://admin-dashbord-2.onrender.com';
 const DEFAULT_TENANT_ID = process.env.DEFAULT_TENANT_ID || 'TENANT-NEXTRADE-01';
+
+// Exact CORS Origins Configuration
+const rawAllowedOrigins = process.env.ALLOWED_ORIGINS || `${CENTRAL_ADMIN_URL},http://localhost:3000,http://localhost:5173,http://127.0.0.1:3000,http://127.0.0.1:5173`;
+const allowedOriginsList = rawAllowedOrigins.split(',').map(o => o.trim().toLowerCase());
+
+app.use((req: Request, res: Response, next: NextFunction) => {
+  const origin = req.headers.origin;
+  if (origin) {
+    const originLower = origin.toLowerCase();
+    if (APP_ENV !== 'production' || allowedOriginsList.includes(originLower)) {
+      res.setHeader('Access-Control-Allow-Origin', origin);
+      res.setHeader('Access-Control-Allow-Credentials', 'true');
+      res.setHeader('Access-Control-Allow-Methods', 'GET, POST, PUT, PATCH, DELETE, OPTIONS');
+      res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization, x-idempotency-key, x-tenant-id');
+    }
+  }
+  if (req.method === 'OPTIONS') {
+    return res.status(204).end();
+  }
+  next();
+});
 
 // ==========================================
 // TOKEN & CRYPTO HELPERS
@@ -1017,42 +1045,24 @@ let upstreamCentralAdminStatus: any = {
 };
 
 export async function probeUpstreamTradingPlatform(timeoutMs = 6000) {
-  const start = Date.now();
-  try {
-    const controller = new AbortController();
-    const timer = setTimeout(() => controller.abort(), timeoutMs);
-    const res = await fetch(`${TRADING_PLATFORM_URL}/health`, { signal: controller.signal });
-    clearTimeout(timer);
-    const latencyMs = Date.now() - start;
-    if (res.ok) {
-      const data: any = await res.json();
-      upstreamTradingPlatformStatus = {
-        reachable: true,
-        url: TRADING_PLATFORM_URL,
-        lastChecked: new Date().toISOString(),
-        latencyMs,
-        status: data.status,
-        service: data.service,
-        dependencies: data.dependencies,
-        system: data.system,
-      };
-      return upstreamTradingPlatformStatus;
-    }
-    upstreamTradingPlatformStatus = {
-      reachable: false,
-      url: TRADING_PLATFORM_URL,
-      lastChecked: new Date().toISOString(),
-      latencyMs,
-      error: `HTTP ${res.status}`,
-    };
-  } catch (err: any) {
-    upstreamTradingPlatformStatus = {
-      reachable: false,
-      url: TRADING_PLATFORM_URL,
-      lastChecked: new Date().toISOString(),
-      latencyMs: Date.now() - start,
-      error: err.name === 'AbortError' ? 'Connection timeout' : err.message,
-    };
+  const status = await tradingPlatformClient.probeHealth(timeoutMs);
+  upstreamTradingPlatformStatus = {
+    reachable: status.reachable,
+    url: TRADING_PLATFORM_URL,
+    lastChecked: status.lastChecked,
+    latencyMs: status.latencyMs,
+    service: status.service,
+    dependencies: {
+      postgresql: {
+        status: status.postgresStatus,
+        latencyMs: status.postgresLatencyMs,
+        authoritativeSourceOfTruth: status.authoritativeSourceOfTruth,
+      },
+    },
+    error: status.error,
+  };
+  if (status.reachable && !status.wsConnected) {
+    tradingPlatformClient.connectWebSocket().catch(() => {});
   }
   return upstreamTradingPlatformStatus;
 }
@@ -1098,26 +1108,20 @@ export async function probeUpstreamCentralAdmin(timeoutMs = 6000) {
 
 export async function syncUpstreamMarketInstruments() {
   try {
-    const controller = new AbortController();
-    const timer = setTimeout(() => controller.abort(), 6000);
-    const res = await fetch(`${TRADING_PLATFORM_URL}/api/trading/instruments`, { signal: controller.signal });
-    clearTimeout(timer);
-    if (res.ok) {
-      const data: any = await res.json();
-      if (Array.isArray(data.instruments)) {
-        data.instruments.forEach((remoteInst: any) => {
-          const match = instruments.find(i => i.symbol === remoteInst.symbol);
-          if (match) {
-            match.lastPrice = remoteInst.lastPrice ?? match.lastPrice;
-            match.change = remoteInst.change ?? match.change;
-            match.changePercent = remoteInst.changePercent ?? match.changePercent;
-            match.high = remoteInst.highPrice ?? match.high;
-            match.low = remoteInst.lowPrice ?? match.low;
-          }
-        });
-        savePersistence();
-        console.log(`[Upstream Sync] Synced ${data.instruments.length} market instruments from Trading Platform PostgreSQL engine.`);
-      }
+    const upstreamInstruments = await tradingPlatformClient.fetchInstruments();
+    if (Array.isArray(upstreamInstruments) && upstreamInstruments.length > 0) {
+      upstreamInstruments.forEach((remoteInst: any) => {
+        const match = instruments.find(i => i.symbol === remoteInst.symbol);
+        if (match) {
+          match.lastPrice = remoteInst.lastPrice ?? match.lastPrice;
+          match.change = remoteInst.change ?? match.change;
+          match.changePercent = remoteInst.changePercent ?? match.changePercent;
+          match.high = remoteInst.highPrice ?? match.high;
+          match.low = remoteInst.lowPrice ?? match.low;
+        }
+      });
+      savePersistence();
+      console.log(`[Upstream Sync] Synced ${upstreamInstruments.length} market instruments from Trading Platform.`);
     }
   } catch (err: any) {
     console.warn('[Upstream Sync] Notice syncing market instruments from upstream:', err.message);
@@ -1434,6 +1438,12 @@ app.get('/api/auth/me', authMiddleware, (req: AuthenticatedRequest, res: Respons
 });
 
 app.post('/api/auth/switch-role', (req: Request, res: Response) => {
+  if (APP_ENV === 'production' && process.env.ALLOW_ROLE_SWITCH !== 'true') {
+    return res.status(403).json({
+      success: false,
+      message: 'Role switching is disabled in production. Authenticate with your assigned credentials.',
+    });
+  }
   const { role } = req.body;
   const targetUser = systemUsers[role] || systemUsers['broker_admin'];
 
@@ -1659,7 +1669,7 @@ app.get('/api/orders', authMiddleware, (req: AuthenticatedRequest, res: Response
   res.json({ success: true, orders: result, total: result.length });
 });
 
-app.post('/api/orders', authMiddleware, (req: AuthenticatedRequest, res: Response) => {
+app.post('/api/orders', authMiddleware, async (req: AuthenticatedRequest, res: Response) => {
   if (checkIdempotency(req, res)) return;
 
   const user = req.user!;
@@ -1709,6 +1719,9 @@ app.post('/api/orders', authMiddleware, (req: AuthenticatedRequest, res: Respons
     };
     orders.unshift(rejectedOrder);
     savePersistence();
+    if (isUsingPostgres()) {
+      dbRepo.insertOrder(rejectedOrder).catch(console.warn);
+    }
 
     auditLogs.unshift({
       id: `LOG-${Date.now().toString().slice(-4)}`,
@@ -1727,10 +1740,38 @@ app.post('/api/orders', authMiddleware, (req: AuthenticatedRequest, res: Respons
     return res.status(400).json({ success: false, message: rejectedOrder.rejectionReason, order: rejectedOrder });
   }
 
-  // Atomic execution
+  // Upstream proxy if Trading Platform is online
+  let upstreamOrderId: string | undefined;
+  if (upstreamTradingPlatformStatus.reachable) {
+    try {
+      const upstreamResult = await tradingPlatformClient.placeOrder({
+        symbol: targetInst.symbol,
+        type: side as 'BUY' | 'SELL',
+        lots: Math.max(1, Math.round(qty / (targetInst.lotSize || 1))),
+        orderType: type as string,
+        product: product || 'INTRADAY',
+        price,
+      });
+
+      if (upstreamResult && !upstreamResult.success && upstreamResult.message) {
+        return res.status(400).json({
+          success: false,
+          message: `Trading Platform Engine: ${upstreamResult.message}`,
+        });
+      }
+
+      if (upstreamResult?.order?.id) {
+        upstreamOrderId = upstreamResult.order.id;
+      }
+    } catch (proxyErr: any) {
+      console.warn('[Order Proxy] Upstream placeOrder warning, falling back to local persistence:', proxyErr.message);
+    }
+  }
+
+  // Atomic local execution and persistence
   const isExecuted = type === 'MARKET';
   const newOrder: Order = {
-    id: `ORD-${Math.floor(98000 + Math.random() * 1999)}`,
+    id: upstreamOrderId || `ORD-${Math.floor(98000 + Math.random() * 1999)}`,
     clientId: client.id,
     clientName: client.name,
     instrument: targetInst.symbol,
@@ -1764,8 +1805,9 @@ app.post('/api/orders', authMiddleware, (req: AuthenticatedRequest, res: Respons
         existingPos.sellQty += qty;
       }
       existingPos.marginUsed += marginRequired;
+      if (isUsingPostgres()) dbRepo.upsertPosition(existingPos).catch(console.warn);
     } else {
-      positions.unshift({
+      const newPos: Position = {
         id: `POS-${Math.floor(77000 + Math.random() * 999)}`,
         clientId: client.id,
         clientName: client.name,
@@ -1782,11 +1824,16 @@ app.post('/api/orders', authMiddleware, (req: AuthenticatedRequest, res: Respons
         totalPnL: 0,
         marginUsed: marginRequired,
         brokerId: client.brokerId,
-      });
+      };
+      positions.unshift(newPos);
+      if (isUsingPostgres()) dbRepo.upsertPosition(newPos).catch(console.warn);
     }
   }
 
   savePersistence();
+  if (isUsingPostgres()) {
+    dbRepo.insertOrder(newOrder).catch(console.warn);
+  }
 
   auditLogs.unshift({
     id: `LOG-${Date.now().toString().slice(-4)}`,
@@ -1805,7 +1852,7 @@ app.post('/api/orders', authMiddleware, (req: AuthenticatedRequest, res: Respons
   res.json({ success: true, order: newOrder });
 });
 
-app.patch('/api/orders/:id/cancel', authMiddleware, (req: AuthenticatedRequest, res: Response) => {
+app.patch(['/api/orders/:id/cancel', '/api/orders/:id/cancel-order'], authMiddleware, (req: AuthenticatedRequest, res: Response) => {
   const user = req.user!;
   const order = orders.find(o => o.id === req.params.id);
 
@@ -1828,6 +1875,13 @@ app.patch('/api/orders/:id/cancel', authMiddleware, (req: AuthenticatedRequest, 
   order.rejectionReason = `Cancelled by ${user.name} (${user.roleTitle})`;
   savePersistence();
 
+  if (upstreamTradingPlatformStatus.reachable) {
+    tradingPlatformClient.cancelOrder(order.id).catch((e: any) => console.warn('[Cancel Proxy] Notice:', e.message));
+  }
+  if (isUsingPostgres()) {
+    dbRepo.updateOrderStatus(order.id, 'Cancelled', order.rejectionReason).catch(console.warn);
+  }
+
   auditLogs.unshift({
     id: `LOG-${Date.now().toString().slice(-4)}`,
     timestamp: new Date().toLocaleTimeString('en-GB') + ', Today',
@@ -1842,6 +1896,15 @@ app.patch('/api/orders/:id/cancel', authMiddleware, (req: AuthenticatedRequest, 
 
   broadcastScopedEvent('order_cancelled', order, { brokerId: order.brokerId, clientId: order.clientId });
   res.json({ success: true, order });
+});
+
+app.post('/api/orders/:id/cancel', authMiddleware, (req: AuthenticatedRequest, res: Response) => {
+  // Delegate to cancel handler
+  (app as any)._router.handle(
+    Object.assign(req, { method: 'PATCH', url: `/api/orders/${req.params.id}/cancel` }),
+    res,
+    () => {}
+  );
 });
 
 // Positions API & Authoritative Square-Off
@@ -1914,6 +1977,13 @@ app.post('/api/positions/:id/square-off', authMiddleware, (req: AuthenticatedReq
   positions.splice(positionIndex, 1);
   savePersistence();
 
+  if (upstreamTradingPlatformStatus.reachable) {
+    tradingPlatformClient.squareOffPosition(pos.id).catch((e: any) => console.warn('[Square-off Proxy] Notice:', e.message));
+  }
+  if (isUsingPostgres()) {
+    dbRepo.deletePosition(pos.id).catch(console.warn);
+  }
+
   auditLogs.unshift({
     id: `LOG-${Date.now().toString().slice(-4)}`,
     timestamp: new Date().toLocaleTimeString('en-GB') + ', Today',
@@ -1928,6 +1998,70 @@ app.post('/api/positions/:id/square-off', authMiddleware, (req: AuthenticatedReq
 
   broadcastScopedEvent('position_squared_off', { id: pos.id, pnl: squaredPnL }, { brokerId: pos.brokerId, clientId: pos.clientId });
   res.json({ success: true, message: 'Position squared off successfully', pnl: squaredPnL });
+});
+
+// Support Ticket Submission Route (Durable PostgreSQL & Upstream Platform Routing)
+app.post('/api/tickets', authMiddleware, async (req: AuthenticatedRequest, res: Response) => {
+  const user = req.user!;
+  const { category, subject, message, priority } = req.body;
+
+  if (!subject || !message) {
+    return res.status(400).json({ success: false, message: 'Subject and message are required' });
+  }
+
+  const ticketId = `TCK-${Date.now().toString().slice(-6)}`;
+  const ticket = {
+    id: ticketId,
+    clientId: user.sub,
+    clientName: user.name,
+    category: category || 'General',
+    subject,
+    message,
+    priority: priority || 'Medium',
+    status: 'Open',
+    createdAt: new Date().toISOString(),
+  };
+
+  if (upstreamTradingPlatformStatus.reachable) {
+    fetch(`${TRADING_PLATFORM_URL}/api/trading/tickets`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'x-tenant-id': DEFAULT_TENANT_ID,
+      },
+      body: JSON.stringify({
+        subject,
+        category,
+        message,
+        description: message,
+        priority,
+        userId: user.sub,
+      }),
+    }).catch((e: any) => console.warn('[Ticket Upstream Sync] Notice:', e.message));
+  }
+
+  if (isUsingPostgres()) {
+    dbRepo.insertTicket(ticket).catch(console.warn);
+  }
+
+  auditLogs.unshift({
+    id: `LOG-${Date.now().toString().slice(-4)}`,
+    timestamp: new Date().toLocaleTimeString('en-GB') + ', Today',
+    user: user.name,
+    role: user.roleTitle,
+    action: 'Support Ticket Submitted',
+    relatedEntity: ticketId,
+    ipAddress: req.ip || '127.0.0.1',
+    result: 'Success',
+    details: `${category}: ${subject}`,
+  });
+  savePersistence();
+
+  res.json({
+    success: true,
+    id: ticketId,
+    message: 'Support ticket submitted successfully. Our operations desk will respond shortly.',
+  });
 });
 
 // Pay-in / Pay-out (Funds)
@@ -1995,6 +2129,22 @@ app.post('/api/funds/:id/approve', authMiddleware, requireRole(['broker_admin', 
   }
 
   savePersistence();
+  if (isUsingPostgres()) {
+    dbRepo.updateFundStatus(txn.id, txn.status, txn.verification, txn.approvedBy, txn.rejectionReason).catch(console.warn);
+  }
+  if (upstreamTradingPlatformStatus.reachable) {
+    fetch(`${TRADING_PLATFORM_URL}/api/admin/funds/process`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'x-tenant-id': DEFAULT_TENANT_ID,
+      },
+      body: JSON.stringify({
+        transactionId: txn.id,
+        action: 'APPROVE',
+      }),
+    }).catch((e: any) => console.warn('[Fund Upstream Sync] Notice:', e.message));
+  }
 
   auditLogs.unshift({
     id: `LOG-${Date.now().toString().slice(-4)}`,
@@ -2032,6 +2182,23 @@ app.post('/api/funds/:id/reject', authMiddleware, requireRole(['broker_admin', '
   txn.verification = 'Rejected by administrator';
   txn.rejectionReason = reason || 'Bank UTR reference mismatch';
   savePersistence();
+  if (isUsingPostgres()) {
+    dbRepo.updateFundStatus(txn.id, txn.status, txn.verification, txn.approvedBy, txn.rejectionReason).catch(console.warn);
+  }
+  if (upstreamTradingPlatformStatus.reachable) {
+    fetch(`${TRADING_PLATFORM_URL}/api/admin/funds/process`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'x-tenant-id': DEFAULT_TENANT_ID,
+      },
+      body: JSON.stringify({
+        transactionId: txn.id,
+        action: 'REJECT',
+        reason: txn.rejectionReason,
+      }),
+    }).catch((e: any) => console.warn('[Fund Upstream Sync] Notice:', e.message));
+  }
 
   auditLogs.unshift({
     id: `LOG-${Date.now().toString().slice(-4)}`,
@@ -2355,11 +2522,12 @@ app.get('/api/health', async (_req: Request, res: Response) => {
     environment: APP_ENV,
     deployedAppUrl: process.env.APP_URL || 'https://ais-dev-wcn5ndw62hl5ucqjkti42l-488743233447.asia-east1.run.app',
     persistence: {
-      adapter: 'Transactional Disk Snapshot & State Journal',
+      adapter: isUsingPostgres() ? 'PostgreSQL (Render cloud / Neon)' : 'Transactional Disk Snapshot & State Journal',
       storePath: PERSISTENCE_FILE,
       durableAcrossRestarts: true,
       lastSaved: fs.existsSync(PERSISTENCE_FILE) ? fs.statSync(PERSISTENCE_FILE).mtime.toISOString() : null,
       sizeBytes: fs.existsSync(PERSISTENCE_FILE) ? fs.statSync(PERSISTENCE_FILE).size : 0,
+      postgresEngine: getDatabaseStatus(),
     },
     upstreamEcosystem: {
       tradingPlatform: {
@@ -2398,6 +2566,41 @@ app.get('/api/health', async (_req: Request, res: Response) => {
 // VITE SPA MIDDLEWARE MOUNTING
 // ==========================================
 async function startServer() {
+  // Initialize durable PostgreSQL database persistence
+  await initDatabase(APP_ENV);
+
+  // Probe upstream Trading Platform & Central Admin
+  try {
+    const probe = await tradingPlatformClient.probeHealth();
+    console.log(`[TradingPlatformClient] Authoritative probe: ${probe.reachable ? 'ONLINE' : 'OFFLINE'} (${probe.latencyMs}ms)`);
+    if (probe.reachable) {
+      await tradingPlatformClient.connectWebSocket();
+    }
+  } catch (err: any) {
+    console.warn('[TradingPlatformClient] Probe notice:', err.message);
+  }
+
+  // Hook Trading Platform real-time events into User Panel SSE broadcast stream
+  tradingPlatformClient.on('realtime_event', (event: any) => {
+    if (event.event === 'market.ticks' && Array.isArray(event.data)) {
+      for (const tick of event.data) {
+        const inst = instruments.find(i => i.symbol === tick.symbol);
+        if (inst) {
+          inst.lastPrice = tick.price;
+          inst.change = tick.change;
+          inst.changePercent = tick.changePercent;
+        }
+      }
+      broadcastScopedEvent('market_tick', event.data);
+    } else if (event.event === 'trade.executed' || event.event === 'order.updated') {
+      broadcastScopedEvent('order_update', event.data);
+    } else if (event.event === 'position.updated') {
+      broadcastScopedEvent('position_update', event.data);
+    } else if (event.event === 'wallet.updated') {
+      broadcastScopedEvent('wallet_update', event.data);
+    }
+  });
+
   const isProduction = process.env.NODE_ENV === 'production';
 
   if (!isProduction) {

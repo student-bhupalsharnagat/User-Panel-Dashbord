@@ -22,6 +22,18 @@ import {
   AnalyticsData,
 } from '../types';
 
+const RAW_API_BASE = (typeof import.meta !== 'undefined' && (import.meta as any).env?.VITE_API_URL ? (import.meta as any).env.VITE_API_URL : '').replace(/\/$/, '');
+// Safeguard: Never target localhost in production bundle
+const isProd = typeof import.meta !== 'undefined' && Boolean((import.meta as any).env?.PROD);
+export const API_BASE = (isProd && (RAW_API_BASE.includes('localhost') || RAW_API_BASE.includes('127.0.0.1')))
+  ? ''
+  : RAW_API_BASE;
+
+export function resolveApiUrl(path: string): string {
+  const cleanPath = path.startsWith('/') ? path : `/${path}`;
+  return `${API_BASE}${cleanPath}`;
+}
+
 let currentAuthToken = '';
 
 export function setAuthToken(token: string) {
@@ -39,7 +51,7 @@ function generateIdempotencyKey(): string {
   return `IDEMP-${Date.now()}-${Math.random().toString(36).slice(2, 9)}`;
 }
 
-async function authenticatedFetch(input: RequestInfo | URL, init: RequestInit = {}): Promise<Response> {
+async function authenticatedFetch(input: string, init: RequestInit = {}): Promise<Response> {
   const headers = new Headers(init.headers || {});
   
   if (currentAuthToken && !headers.has('Authorization')) {
@@ -51,7 +63,7 @@ async function authenticatedFetch(input: RequestInfo | URL, init: RequestInit = 
     headers.set('Content-Type', 'application/json');
   }
 
-  return fetch(input, {
+  return fetch(resolveApiUrl(input), {
     ...init,
     headers,
   });
@@ -72,7 +84,7 @@ export const api = {
   },
 
   async switchRole(role: string): Promise<{ user: AuthenticatedUser; token: string }> {
-    const res = await fetch('/api/auth/switch-role', {
+    const res = await fetch(resolveApiUrl('/api/auth/switch-role'), {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ role }),
@@ -301,7 +313,7 @@ export const api = {
 
   // White-label Branding
   async getBranding(): Promise<TenantBranding> {
-    const res = await fetch('/api/tenant/branding');
+    const res = await fetch(resolveApiUrl('/api/tenant/branding'));
     const data = await res.json();
     return data.branding;
   },
@@ -313,5 +325,21 @@ export const api = {
     });
     const data = await res.json();
     return data.branding;
+  },
+
+  // Support Tickets (Persistent server-dispatched workflow)
+  async submitTicket(ticketData: {
+    category: string;
+    subject: string;
+    message: string;
+    priority?: string;
+  }): Promise<{ success: boolean; id: string; message: string }> {
+    const res = await authenticatedFetch('/api/tickets', {
+      method: 'POST',
+      body: JSON.stringify(ticketData),
+    });
+    const data = await res.json();
+    if (!data.success) throw new Error(data.message || 'Failed to submit support ticket');
+    return data;
   },
 };

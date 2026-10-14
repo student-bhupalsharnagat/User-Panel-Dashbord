@@ -6,6 +6,7 @@
 import React, { useState } from 'react';
 import { X, HelpCircle, Send } from 'lucide-react';
 import { useApp } from '../../context/AppContext';
+import { api } from '../../services/api';
 
 export const SupportTicketModal: React.FC = () => {
   const { isSupportModalOpen, setIsSupportModalOpen, showToast, currentUser } = useApp();
@@ -17,16 +18,25 @@ export const SupportTicketModal: React.FC = () => {
 
   if (!isSupportModalOpen) return null;
 
-  const handleSubmit = (e: React.FormEvent) => {
+  const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setIsSubmitting(true);
-    setTimeout(() => {
-      setIsSubmitting(false);
+    try {
+      const res = await api.submitTicket({
+        category,
+        subject,
+        message,
+        priority,
+      });
       setIsSupportModalOpen(false);
-      showToast('Support ticket #TCK-4819 dispatched to Central Admin desk', 'success');
+      showToast(res.message || `Support ticket #${res.id} dispatched to Central Admin desk`, 'success');
       setSubject('');
       setMessage('');
-    }, 600);
+    } catch (err: any) {
+      showToast(err.message || 'Failed to submit support ticket', 'error');
+    } finally {
+      setIsSubmitting(false);
+    }
   };
 
   return (

@@ -17,7 +17,7 @@ import {
   SettingsState,
   TenantBranding,
 } from '../types';
-import { api, getAuthToken } from '../services/api';
+import { api, getAuthToken, resolveApiUrl } from '../services/api';
 
 export interface ToastItem {
   id: string;
@@ -247,11 +247,12 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
     let eventSource: EventSource | null = null;
     try {
       const token = getAuthToken();
-      const sseUrl = token ? `/api/realtime/stream?token=${encodeURIComponent(token)}` : '/api/realtime/stream';
-      eventSource = new EventSource(sseUrl);
+      const ssePath = token ? `/api/realtime/stream?token=${encodeURIComponent(token)}` : '/api/realtime/stream';
+      eventSource = new EventSource(resolveApiUrl(ssePath));
       
       eventSource.addEventListener('connected', () => {
         setIsRealtimeConnected(true);
+        setIsLiveMode(true);
       });
 
       eventSource.addEventListener('tick', () => {

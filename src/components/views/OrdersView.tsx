@@ -26,6 +26,7 @@ export const OrdersView: React.FC = () => {
     refreshTrigger,
     showToast,
     triggerRefresh,
+    isLiveMode,
   } = useApp();
 
   const [orders, setOrders] = useState<Order[]>([]);
@@ -92,8 +93,12 @@ export const OrdersView: React.FC = () => {
         <div>
           <div className="flex items-center gap-2.5">
             <h2 className="text-xl font-bold tracking-tight text-white">Orders</h2>
-            <span className="px-2 py-0.5 rounded text-[11px] font-semibold bg-indigo-500/15 text-indigo-400 border border-indigo-500/30">
-              Demo data
+            <span className={`px-2 py-0.5 rounded text-[11px] font-semibold border ${
+              isLiveMode 
+                ? 'bg-emerald-500/15 text-emerald-400 border-emerald-500/30' 
+                : 'bg-indigo-500/15 text-indigo-400 border-indigo-500/30'
+            }`}>
+              {isLiveMode ? 'Live engine' : 'Demo data'}
             </span>
           </div>
           <p className="text-xs text-slate-400 mt-0.5">
