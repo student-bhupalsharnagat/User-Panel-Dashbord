@@ -2616,8 +2616,15 @@ async function startServer() {
     });
   }
 
-  app.listen(PORT, '0.0.0.0', () => {
-    console.log(`[NexTrade Broker OS] Production Integration Engine running at http://0.0.0.0:${PORT}`);
+  const HOST = process.env.HOST || '0.0.0.0';
+
+  app.listen(PORT, HOST, () => {
+    console.log(`[NexTrade Broker OS] Integration Engine running:`);
+    console.log(`  ➜ Local:   http://localhost:${PORT}`);
+    console.log(`  ➜ Network: http://127.0.0.1:${PORT}`);
+    if (HOST !== '0.0.0.0' && HOST !== 'localhost' && HOST !== '127.0.0.1') {
+      console.log(`  ➜ Host:    http://${HOST}:${PORT}`);
+    }
   });
 }
 
