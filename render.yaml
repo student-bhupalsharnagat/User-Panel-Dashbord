@@ -1,0 +1,25 @@
+services:
+  - type: web
+    name: user-panel-dashboard
+    runtime: node
+    plan: free
+    buildCommand: npm install && npm run build
+    startCommand: npm run start
+    healthCheckPath: /api/health
+    envVars:
+      - key: NODE_ENV
+        value: production
+      - key: APP_ENV
+        value: production
+      - key: DEFAULT_TENANT_ID
+        value: vertex-default
+      - key: TRADING_PLATFORM_URL
+        value: https://trading-platform-3-1v13.onrender.com
+      - key: CENTRAL_ADMIN_URL
+        value: https://admin-dashbord-2.onrender.com
+      - key: INTERNAL_API_SECRET
+        value: nextrade-internal-hmac-secret-2026
+      - key: JWT_SECRET
+        value: nextrade-session-jwt-token-secret-2026
+      - key: DATABASE_URL
+        sync: false

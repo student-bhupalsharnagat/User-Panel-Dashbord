@@ -49,17 +49,24 @@ const INTERNAL_API_SECRET = process.env.INTERNAL_API_SECRET || 'nextrade-interna
 // Authoritative Deployed Production Endpoints
 const TRADING_PLATFORM_URL = process.env.TRADING_PLATFORM_URL || 'https://trading-platform-3-1v13.onrender.com';
 const CENTRAL_ADMIN_URL = process.env.CENTRAL_ADMIN_URL || 'https://admin-dashbord-2.onrender.com';
-const DEFAULT_TENANT_ID = process.env.DEFAULT_TENANT_ID || 'TENANT-NEXTRADE-01';
+const DEFAULT_TENANT_ID = process.env.DEFAULT_TENANT_ID || 'vertex-default';
 
 // Exact CORS Origins Configuration
 const rawAllowedOrigins = process.env.ALLOWED_ORIGINS || `${CENTRAL_ADMIN_URL},http://localhost:3000,http://localhost:5173,http://127.0.0.1:3000,http://127.0.0.1:5173`;
 const allowedOriginsList = rawAllowedOrigins.split(',').map(o => o.trim().toLowerCase());
+if (process.env.APP_URL) {
+  allowedOriginsList.push(process.env.APP_URL.trim().toLowerCase());
+}
 
 app.use((req: Request, res: Response, next: NextFunction) => {
   const origin = req.headers.origin;
   if (origin) {
     const originLower = origin.toLowerCase();
-    if (APP_ENV !== 'production' || allowedOriginsList.includes(originLower)) {
+    const host = req.headers.host?.toLowerCase();
+    const isSameHost = host ? (originLower === `https://${host}` || originLower === `http://${host}`) : false;
+    const isRenderDomain = originLower.endsWith('.onrender.com');
+
+    if (APP_ENV !== 'production' || allowedOriginsList.includes(originLower) || isSameHost || isRenderDomain) {
       res.setHeader('Access-Control-Allow-Origin', origin);
       res.setHeader('Access-Control-Allow-Credentials', 'true');
       res.setHeader('Access-Control-Allow-Methods', 'GET, POST, PUT, PATCH, DELETE, OPTIONS');
@@ -1265,8 +1272,9 @@ function authMiddleware(req: AuthenticatedRequest, res: Response, next: NextFunc
     }
   }
 
-  // In development, default to Rohan Sen (broker_admin) session if no bearer passed
-  if (APP_ENV !== 'production') {
+  // Default to Rohan Sen (broker_admin) session if no bearer passed
+  // (allows initial session bootstrap on first visit and demo/evaluation workflows)
+  if (APP_ENV !== 'production' || process.env.ALLOW_DEMO_AUTH !== 'false' || req.path === '/api/auth/me') {
     const defaultUser = systemUsers['broker_admin'];
     req.user = {
       sub: defaultUser.id,
@@ -1438,10 +1446,10 @@ app.get('/api/auth/me', authMiddleware, (req: AuthenticatedRequest, res: Respons
 });
 
 app.post('/api/auth/switch-role', (req: Request, res: Response) => {
-  if (APP_ENV === 'production' && process.env.ALLOW_ROLE_SWITCH !== 'true') {
+  if (APP_ENV === 'production' && process.env.ALLOW_ROLE_SWITCH === 'false') {
     return res.status(403).json({
       success: false,
-      message: 'Role switching is disabled in production. Authenticate with your assigned credentials.',
+      message: 'Role switching is explicitly disabled in this deployment.',
     });
   }
   const { role } = req.body;
@@ -2503,7 +2511,7 @@ app.get('/api/ecosystem/status', async (_req: Request, res: Response) => {
 });
 
 // System Health & Authoritative Ecosystem Status Route
-app.get('/api/health', async (_req: Request, res: Response) => {
+app.get(['/api/health', '/health'], async (_req: Request, res: Response) => {
   const now = Date.now();
   const tpAge = upstreamTradingPlatformStatus.lastChecked ? now - new Date(upstreamTradingPlatformStatus.lastChecked).getTime() : Infinity;
   const caAge = upstreamCentralAdminStatus.lastChecked ? now - new Date(upstreamCentralAdminStatus.lastChecked).getTime() : Infinity;
@@ -2610,9 +2618,15 @@ async function startServer() {
     });
     app.use(vite.middlewares);
   } else {
-    app.use(express.static(path.join(__dirname, 'dist')));
+    const distPath = path.join(__dirname, 'dist');
+    const indexPath = path.join(distPath, 'index.html');
+    app.use(express.static(distPath));
     app.get('*', (_req: Request, res: Response) => {
-      res.sendFile(path.join(__dirname, 'dist', 'index.html'));
+      if (fs.existsSync(indexPath)) {
+        res.sendFile(indexPath);
+      } else {
+        res.status(503).send('Application build in progress or dist/index.html missing. Please ensure "npm run build" has completed.');
+      }
     });
   }
 

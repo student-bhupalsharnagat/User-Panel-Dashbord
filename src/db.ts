@@ -62,19 +62,20 @@ export function getPgPool(): Pool | null {
  */
 export async function initDatabase(appEnv: string = 'development'): Promise<boolean> {
   const databaseUrl = process.env.DATABASE_URL;
+  const isProduction = process.env.NODE_ENV === 'production' || appEnv === 'production';
 
   if (!databaseUrl) {
-    if (appEnv === 'production') {
-      lastDbError = 'CRITICAL: DATABASE_URL is required in production environment. Refusing silent fallback.';
+    if (isProduction) {
+      lastDbError = 'CRITICAL: DATABASE_URL is required in production environment. Refusing silent fallback to JSON snapshot.';
       console.error(`[Database Error] ${lastDbError}`);
-      return false;
+      throw new Error(`[Database Error] ${lastDbError}`);
     }
     console.log('[Database] No DATABASE_URL provided. Operating in local development storage mode (JSON snapshot).');
     return false;
   }
 
   try {
-    const isSsl = !databaseUrl.includes('localhost') && !databaseUrl.includes('127.0.0.1');
+    const isSsl = isProduction || (!databaseUrl.includes('localhost') && !databaseUrl.includes('127.0.0.1'));
     pgPool = new Pool({
       connectionString: databaseUrl,
       ssl: isSsl ? { rejectUnauthorized: false } : false,
@@ -104,10 +105,10 @@ export async function initDatabase(appEnv: string = 'development'): Promise<bool
   } catch (err: any) {
     lastDbError = `PostgreSQL Connection/Migration Failed: ${err.message}`;
     console.error(`[Database Error] ${lastDbError}`);
-    if (appEnv === 'production') {
+    if (isProduction) {
       // In production, do not silently fallback
       isPostgresReady = false;
-      return false;
+      throw new Error(`[Database Error] ${lastDbError}. Refusing silent fallback to JSON snapshot in production.`);
     }
     console.warn('[Database] Falling back to JSON journal for local development only.');
     return false;
