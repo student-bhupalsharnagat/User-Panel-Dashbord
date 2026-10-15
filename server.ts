@@ -1118,13 +1118,68 @@ export async function syncUpstreamMarketInstruments() {
     const upstreamInstruments = await tradingPlatformClient.fetchInstruments();
     if (Array.isArray(upstreamInstruments) && upstreamInstruments.length > 0) {
       upstreamInstruments.forEach((remoteInst: any) => {
-        const match = instruments.find(i => i.symbol === remoteInst.symbol);
+        const symbol = String(remoteInst.symbol || '').trim();
+        if (!symbol) return;
+        const match = instruments.find(i => i.symbol === symbol);
+        const lastPrice = Number(remoteInst.lastPrice ?? remoteInst.price ?? 0);
+        const change = Number(remoteInst.change ?? 0);
+        const changePercent = Number(remoteInst.changePercent ?? 0);
+        const high = Number(remoteInst.highPrice ?? remoteInst.high ?? lastPrice);
+        const low = Number(remoteInst.lowPrice ?? remoteInst.low ?? lastPrice);
+        const bid = Number(remoteInst.bid ?? (lastPrice > 0 ? +(lastPrice - 0.5).toFixed(2) : 0));
+        const ask = Number(remoteInst.ask ?? (lastPrice > 0 ? +(lastPrice + 0.5).toFixed(2) : 0));
+        const lotSize = Number(remoteInst.lotSize ?? 1);
+
         if (match) {
-          match.lastPrice = remoteInst.lastPrice ?? match.lastPrice;
-          match.change = remoteInst.change ?? match.change;
-          match.changePercent = remoteInst.changePercent ?? match.changePercent;
-          match.high = remoteInst.highPrice ?? match.high;
-          match.low = remoteInst.lowPrice ?? match.low;
+          match.lastPrice = lastPrice;
+          match.change = change;
+          match.changePercent = changePercent;
+          match.high = high;
+          match.low = low;
+          match.bid = bid;
+          match.ask = ask;
+          match.lotSize = lotSize;
+          match.status = 'Enabled';
+          match.lastUpdated = new Date().toISOString();
+        } else {
+          let exchange: 'NSE' | 'BSE' | 'NFO' | 'MCX' = 'NSE';
+          let type: 'Equity' | 'Futures' | 'Index' | 'Options' = 'Equity';
+
+          if (symbol.includes('/') || remoteInst.category === 'CRYPTO') {
+            exchange = 'MCX';
+            type = 'Futures';
+          } else if (symbol.includes('FUT') || remoteInst.category === 'FUTURES') {
+            exchange = 'NFO';
+            type = 'Futures';
+          } else if (remoteInst.category === 'INDEX' || symbol === 'NIFTY' || symbol === 'BANKNIFTY') {
+            exchange = 'NSE';
+            type = 'Index';
+          } else if (remoteInst.category === 'OPTIONS') {
+            exchange = 'NFO';
+            type = 'Options';
+          } else if (remoteInst.sectionName?.includes('BSE')) {
+            exchange = 'BSE';
+          }
+
+          instruments.push({
+            symbol,
+            name: String(remoteInst.name || symbol),
+            exchange,
+            lastPrice,
+            change,
+            changePercent,
+            bid,
+            ask,
+            volume: remoteInst.volume || '1.2M',
+            high,
+            low,
+            type,
+            contractExpiry: remoteInst.expiry || 'Spot',
+            lotSize,
+            tickSize: 0.05,
+            status: 'Enabled',
+            lastUpdated: new Date().toISOString(),
+          });
         }
       });
       savePersistence();
@@ -1135,12 +1190,131 @@ export async function syncUpstreamMarketInstruments() {
   }
 }
 
+export async function syncUpstreamPortfolio() {
+  try {
+    const portfolio = await tradingPlatformClient.fetchPortfolio();
+    if (!portfolio) return;
+
+    if (Array.isArray(portfolio.orders) && portfolio.orders.length > 0) {
+      portfolio.orders.forEach((remoteOrder: any) => {
+        const orderId = String(remoteOrder.id || '').trim();
+        if (!orderId) return;
+
+        const match = orders.find(o => o.id === orderId);
+        const qty = Number(remoteOrder.qty || remoteOrder.lots || 1);
+        const price = Number(remoteOrder.price || 0);
+        const statusMap: Record<string, Order['status']> = {
+          EXECUTED: 'Executed',
+          OPEN: 'Open',
+          PENDING: 'Pending',
+          REJECTED: 'Rejected',
+          CANCELLED: 'Cancelled',
+        };
+        const status: Order['status'] = statusMap[String(remoteOrder.status).toUpperCase()] || 'Executed';
+        const side: 'BUY' | 'SELL' = remoteOrder.type === 'SELL' ? 'SELL' : 'BUY';
+        const type: 'LIMIT' | 'MARKET' | 'SL-M' = remoteOrder.orderType === 'LIMIT' ? 'LIMIT' : 'MARKET';
+
+        const orderObj: Order = {
+          id: orderId,
+          clientId: clients[0]?.id || 'NT10482',
+          clientName: clients[0]?.name || 'Aarav Mehta',
+          instrument: remoteOrder.symbol || 'RELIANCE',
+          exchange: remoteOrder.symbol?.includes('FUT') ? 'NFO' : (remoteOrder.symbol?.includes('/') ? 'MCX' : 'NSE'),
+          side,
+          type,
+          quantity: qty,
+          orderPrice: price > 0 ? price : 'Market',
+          executedQty: status === 'Executed' ? qty : 0,
+          avgPrice: price,
+          status,
+          created: remoteOrder.time ? `${remoteOrder.time}, ${remoteOrder.date || 'Today'}` : new Date().toLocaleTimeString('en-GB'),
+          brokerId: clients[0]?.brokerId || 'BRK-ROHAN-01',
+        };
+
+        if (match) {
+          Object.assign(match, orderObj);
+        } else {
+          orders.unshift(orderObj);
+        }
+      });
+    }
+
+    if (Array.isArray(portfolio.positions) && portfolio.positions.length > 0) {
+      portfolio.positions.forEach((remotePos: any) => {
+        const posId = String(remotePos.id || `POS-${remotePos.symbol}`).trim();
+        const match = positions.find(p => p.id === posId || p.instrument === remotePos.symbol);
+        const buyQty = Number(remotePos.buyQty || 0);
+        const sellQty = Number(remotePos.sellQty || 0);
+        const netQty = Number(remotePos.netQty ?? (buyQty - sellQty));
+        const avgPrice = Number(remotePos.avgPrice || remotePos.price || 0);
+        const currentPrice = Number(remotePos.currentPrice || remotePos.lastPrice || avgPrice);
+        const realisedPnL = Number(remotePos.realisedPnL || 0);
+        const unrealisedPnL = Number(remotePos.unrealisedPnL || (netQty * (currentPrice - avgPrice)));
+
+        const posObj: Position = {
+          id: posId,
+          clientId: clients[0]?.id || 'NT10482',
+          clientName: clients[0]?.name || 'Aarav Mehta',
+          instrument: remotePos.symbol,
+          exchange: remotePos.symbol?.includes('FUT') ? 'NFO' : (remotePos.symbol?.includes('/') ? 'MCX' : 'NSE'),
+          product: remotePos.product === 'CNC' ? 'CNC' : 'MIS',
+          buyQty,
+          sellQty,
+          netQty,
+          avgPrice,
+          currentPrice,
+          realisedPnL,
+          unrealisedPnL,
+          totalPnL: realisedPnL + unrealisedPnL,
+          marginUsed: Number(remotePos.marginUsed || 0),
+          brokerId: clients[0]?.brokerId || 'BRK-ROHAN-01',
+        };
+
+        if (match) {
+          Object.assign(match, posObj);
+        } else {
+          positions.unshift(posObj);
+        }
+      });
+    }
+
+    if (portfolio.wallet && typeof portfolio.wallet.availableBalance === 'number') {
+      if (clients[0]) {
+        clients[0].marginAvailable = portfolio.wallet.availableBalance;
+        clients[0].marginUsed = Number(portfolio.wallet.usedMargin || 0);
+        clients[0].openPnL = Number(portfolio.wallet.totalPnL || 0);
+        clients[0].ledgerBalance = Number(portfolio.wallet.availableBalance + (portfolio.wallet.usedMargin || 0));
+      }
+    }
+
+    savePersistence();
+    console.log(`[Upstream Sync] Synced portfolio: ${orders.length} orders, ${positions.length} positions, wallet balance: ₹${portfolio.wallet?.availableBalance?.toLocaleString('en-IN')}`);
+  } catch (err: any) {
+    console.warn('[Upstream Sync] Notice syncing portfolio from upstream:', err.message);
+  }
+}
+
 // Background initial probe and sync
-setTimeout(() => {
-  probeUpstreamTradingPlatform().catch(() => {});
-  probeUpstreamCentralAdmin().catch(() => {});
-  syncUpstreamMarketInstruments().catch(() => {});
+setTimeout(async () => {
+  await probeUpstreamTradingPlatform().catch(() => {});
+  await probeUpstreamCentralAdmin().catch(() => {});
+  await syncUpstreamMarketInstruments().catch(() => {});
+  await syncUpstreamPortfolio().catch(() => {});
 }, 1000);
+
+// Continuous background sync with authoritative Trading Platform (25s interval)
+setInterval(async () => {
+  if (upstreamTradingPlatformStatus.reachable) {
+    await syncUpstreamMarketInstruments().catch(() => {});
+    await syncUpstreamPortfolio().catch(() => {});
+  } else {
+    const probe = await probeUpstreamTradingPlatform(4000).catch(() => null);
+    if (probe?.reachable) {
+      await syncUpstreamMarketInstruments().catch(() => {});
+      await syncUpstreamPortfolio().catch(() => {});
+    }
+  }
+}, 25000);
 
 // ==========================================
 // IDEMPOTENCY CACHE & OUTBOX
@@ -2583,6 +2757,8 @@ async function startServer() {
     console.log(`[TradingPlatformClient] Authoritative probe: ${probe.reachable ? 'ONLINE' : 'OFFLINE'} (${probe.latencyMs}ms)`);
     if (probe.reachable) {
       await tradingPlatformClient.connectWebSocket();
+      await syncUpstreamMarketInstruments().catch(() => {});
+      await syncUpstreamPortfolio().catch(() => {});
     }
   } catch (err: any) {
     console.warn('[TradingPlatformClient] Probe notice:', err.message);
@@ -2597,14 +2773,21 @@ async function startServer() {
           inst.lastPrice = tick.price;
           inst.change = tick.change;
           inst.changePercent = tick.changePercent;
+          inst.lastUpdated = new Date().toISOString();
         }
       }
       broadcastScopedEvent('market_tick', event.data);
+      if (event.data[0]) {
+        broadcastScopedEvent('tick', event.data[0]);
+      }
     } else if (event.event === 'trade.executed' || event.event === 'order.updated') {
+      syncUpstreamPortfolio().catch(() => {});
       broadcastScopedEvent('order_update', event.data);
     } else if (event.event === 'position.updated') {
+      syncUpstreamPortfolio().catch(() => {});
       broadcastScopedEvent('position_update', event.data);
     } else if (event.event === 'wallet.updated') {
+      syncUpstreamPortfolio().catch(() => {});
       broadcastScopedEvent('wallet_update', event.data);
     }
   });

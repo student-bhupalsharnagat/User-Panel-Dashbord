@@ -65,7 +65,11 @@ export class TradingPlatformClient extends EventEmitter {
     try {
       const res = await fetch(`${this.baseUrl}/api/auth/demo`, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: {
+          'Content-Type': 'application/json',
+          'x-tenant-id': this.tenantId,
+        },
+        body: JSON.stringify({ fullName: 'NexTrade Broker Client', tenantId: this.tenantId }),
       });
       if (res.ok) {
         const data = await res.json();
@@ -150,7 +154,10 @@ export class TradingPlatformClient extends EventEmitter {
   public async fetchInstruments(): Promise<any[]> {
     try {
       const res = await fetch(`${this.baseUrl}/api/trading/instruments`, {
-        headers: { 'Accept': 'application/json' },
+        headers: {
+          'Accept': 'application/json',
+          'x-tenant-id': this.tenantId,
+        },
       });
       if (res.ok) {
         const data = await res.json();

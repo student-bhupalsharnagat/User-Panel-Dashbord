@@ -257,6 +257,12 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
 
       eventSource.addEventListener('tick', () => {
         setLastTickTimestamp('Live streaming');
+        setIsLiveMode(true);
+      });
+
+      eventSource.addEventListener('market_tick', () => {
+        setLastTickTimestamp('Live streaming');
+        setIsLiveMode(true);
       });
 
       eventSource.addEventListener('order_placed', (e) => {
@@ -265,6 +271,18 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
           showToast(`Order ${order.id}: ${order.side} ${order.quantity} ${order.instrument} ${order.status}`, order.status === 'Executed' ? 'success' : 'info');
           triggerRefresh();
         } catch {}
+      });
+
+      eventSource.addEventListener('order_update', () => {
+        triggerRefresh();
+      });
+
+      eventSource.addEventListener('position_update', () => {
+        triggerRefresh();
+      });
+
+      eventSource.addEventListener('wallet_update', () => {
+        triggerRefresh();
       });
 
       eventSource.addEventListener('order_cancelled', (e) => {
@@ -305,7 +323,7 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
     return () => {
       eventSource?.close();
     };
-  }, [showToast, triggerRefresh]);
+  }, [showToast, triggerRefresh, currentUser]);
 
   // Modal actions
   const openOrderModal = (instrument?: MarketInstrument | null, side: 'BUY' | 'SELL' = 'BUY', existingOrder?: Order | null) => {

@@ -55,15 +55,25 @@ async function runTests() {
   assert(typeof tpStatus.authoritativeDatabase === 'string', 'Authoritative database target identified');
 
   if (tpStatus.reachable) {
-    console.log('\n--- TEST 3: Live Trading Platform Endpoints Verification ---');
+    console.log('\n--- TEST 3: Live Trading Platform Endpoints & Normalization ---');
     const instruments = await tradingPlatformClient.fetchInstruments();
-    assert(Array.isArray(instruments) && instruments.length > 0, `Fetched ${instruments.length} live instruments from Trading Platform`);
-    
+    assert(Array.isArray(instruments) && instruments.length >= 100, `Fetched ${instruments.length} live instruments (>= 100 catalog symbols)`);
+    if (instruments[0]) {
+      assert(typeof instruments[0].symbol === 'string' && typeof instruments[0].lastPrice === 'number', `Normalized instrument quote verified (${instruments[0].symbol}: ₹${instruments[0].lastPrice})`);
+    }
+
     const token = await tradingPlatformClient.authenticate();
-    assert(typeof token === 'string' && token.length > 0, 'Acquired session token from Trading Platform');
+    assert(typeof token === 'string' && token.length > 0, 'Acquired session token from Trading Platform with tenant scoping');
 
     const portfolio = await tradingPlatformClient.fetchPortfolio();
     assert(portfolio !== null && typeof portfolio.wallet === 'object', 'Fetched authoritative portfolio wallet');
+    assert(typeof portfolio?.wallet?.availableBalance === 'number' && portfolio.wallet.availableBalance > 0, `Authoritative wallet balance verified: ₹${portfolio?.wallet?.availableBalance?.toLocaleString('en-IN')}`);
+    assert(Array.isArray(portfolio?.orders) && portfolio.orders.length > 0, `Authoritative matching engine orders verified (${portfolio?.orders?.length} orders)`);
+
+    // Verify tenant scoping
+    const tenantRes = await fetch(`${tradingPlatformClient.getBaseUrl()}/api/tenant/current`);
+    const tenantData: any = await tenantRes.json();
+    assert(tenantData.data?.tenant?.id === 'vertex-default', `Tenant contract matches authoritative configuration (${tenantData.data?.tenant?.id})`);
   } else {
     console.log('\n--- TEST 3: Live Trading Platform Endpoints (Skipped: Upstream offline) ---');
   }
