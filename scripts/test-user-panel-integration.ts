@@ -74,8 +74,19 @@ async function runTests() {
     const tenantRes = await fetch(`${tradingPlatformClient.getBaseUrl()}/api/tenant/current`);
     const tenantData: any = await tenantRes.json();
     assert(tenantData.data?.tenant?.id === 'vertex-default', `Tenant contract matches authoritative configuration (${tenantData.data?.tenant?.id})`);
+
+    // TEST 4: Probe Resilience, Timeout and Error Categorization
+    console.log('\n--- TEST 4: Probe Error Categorization & Timeout Resilience ---');
+    assert(tpStatus.status === 'healthy', `Probe reports valid upstream health status: ${tpStatus.status}`);
+    assert(tpStatus.errorCategory === 'NONE', 'Healthy probe categorizes error as NONE');
+
+    // Test timeout handling with 1ms probe
+    const timeoutClient = new (tradingPlatformClient.constructor as any)({ baseUrl: tradingPlatformClient.getBaseUrl() });
+    const timeoutProbe = await timeoutClient.probeHealth(1);
+    assert(timeoutProbe.reachable === false, '1ms probe correctly reports unreachable');
+    assert(timeoutProbe.errorCategory === 'TIMEOUT', `Timeout error properly categorized as TIMEOUT (${timeoutProbe.error})`);
   } else {
-    console.log('\n--- TEST 3: Live Trading Platform Endpoints (Skipped: Upstream offline) ---');
+    console.log('\n--- TEST 3 & 4: Live Trading Platform Endpoints (Skipped: Upstream offline) ---');
   }
 
   console.log('\n================================================================');

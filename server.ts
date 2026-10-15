@@ -1051,7 +1051,7 @@ let upstreamCentralAdminStatus: any = {
   details: null,
 };
 
-export async function probeUpstreamTradingPlatform(timeoutMs = 6000) {
+export async function probeUpstreamTradingPlatform(timeoutMs = 7000) {
   const status = await tradingPlatformClient.probeHealth(timeoutMs);
   upstreamTradingPlatformStatus = {
     reachable: status.reachable,
@@ -1059,6 +1059,7 @@ export async function probeUpstreamTradingPlatform(timeoutMs = 6000) {
     lastChecked: status.lastChecked,
     latencyMs: status.latencyMs,
     service: status.service,
+    status: status.status || (status.reachable ? 'healthy' : 'unreachable'),
     dependencies: {
       postgresql: {
         status: status.postgresStatus,
@@ -2634,8 +2635,8 @@ app.post('/api/instruments/sync', authMiddleware, async (_req: Request, res: Res
 // Ecosystem Live Status & Upstream Connectivity Route
 app.get('/api/ecosystem/status', async (_req: Request, res: Response) => {
   const [tp, ca] = await Promise.all([
-    probeUpstreamTradingPlatform(4000),
-    probeUpstreamCentralAdmin(4000),
+    probeUpstreamTradingPlatform(7000),
+    probeUpstreamCentralAdmin(7000),
   ]);
 
   res.json({
@@ -2646,11 +2647,11 @@ app.get('/api/ecosystem/status', async (_req: Request, res: Response) => {
         name: 'NexTrade Broker OS (User & Broker Panel)',
         role: 'Broker Admin Dashboard, Client Directory, Order Management & Ledger',
         localUrl: `http://localhost:${PORT}`,
-        deployedUrl: process.env.APP_URL || 'https://ais-dev-wcn5ndw62hl5ucqjkti42l-488743233447.asia-east1.run.app',
+        deployedUrl: process.env.APP_URL || process.env.RENDER_EXTERNAL_URL || 'https://user-panel-dashbord.onrender.com',
         status: 'ONLINE',
-        persistenceEngine: 'Transactional State Journal & Snapshot',
-        persistenceFile: PERSISTENCE_FILE,
-        durableAcrossRestarts: true,
+        persistenceEngine: isUsingPostgres() ? 'PostgreSQL (Neon / Render cloud)' : 'Transactional State Journal & Snapshot (Local JSON)',
+        persistenceFile: isUsingPostgres() ? 'PostgreSQL Database' : PERSISTENCE_FILE,
+        durableAcrossRestarts: isUsingPostgres(),
         records: {
           clients: clients.length,
           orders: orders.length,
@@ -2670,6 +2671,7 @@ app.get('/api/ecosystem/status', async (_req: Request, res: Response) => {
         postgresStatus: tp.dependencies?.postgresql?.status || (tp.reachable ? 'healthy' : 'unknown'),
         postgresLatencyMs: tp.dependencies?.postgresql?.latencyMs || 0,
         authoritativeSourceOfTruth: tp.dependencies?.postgresql?.authoritativeSourceOfTruth ?? true,
+        error: tp.error || null,
       },
       centralAdminPanel: {
         name: 'TradeMatrix Central Admin Panel',
@@ -2679,6 +2681,7 @@ app.get('/api/ecosystem/status', async (_req: Request, res: Response) => {
         latencyMs: ca.latencyMs,
         status: ca.status || (ca.reachable ? 'healthy' : 'unreachable'),
         uptime: ca.uptime || 0,
+        error: ca.error || null,
       },
     },
   });
@@ -2691,10 +2694,10 @@ app.get(['/api/health', '/health'], async (_req: Request, res: Response) => {
   const caAge = upstreamCentralAdminStatus.lastChecked ? now - new Date(upstreamCentralAdminStatus.lastChecked).getTime() : Infinity;
 
   if (tpAge > 10000) {
-    await probeUpstreamTradingPlatform(3000);
+    await probeUpstreamTradingPlatform(7000);
   }
   if (caAge > 10000) {
-    await probeUpstreamCentralAdmin(3000);
+    await probeUpstreamCentralAdmin(7000);
   }
 
   res.json({
@@ -2702,11 +2705,11 @@ app.get(['/api/health', '/health'], async (_req: Request, res: Response) => {
     service: 'NexTrade Broker OS & Execution Gateway',
     timestamp: new Date().toISOString(),
     environment: APP_ENV,
-    deployedAppUrl: process.env.APP_URL || 'https://ais-dev-wcn5ndw62hl5ucqjkti42l-488743233447.asia-east1.run.app',
+    deployedAppUrl: process.env.APP_URL || process.env.RENDER_EXTERNAL_URL || 'https://user-panel-dashbord.onrender.com',
     persistence: {
       adapter: isUsingPostgres() ? 'PostgreSQL (Render cloud / Neon)' : 'Transactional Disk Snapshot & State Journal',
-      storePath: PERSISTENCE_FILE,
-      durableAcrossRestarts: true,
+      storePath: isUsingPostgres() ? 'PostgreSQL Database' : PERSISTENCE_FILE,
+      durableAcrossRestarts: isUsingPostgres(),
       lastSaved: fs.existsSync(PERSISTENCE_FILE) ? fs.statSync(PERSISTENCE_FILE).mtime.toISOString() : null,
       sizeBytes: fs.existsSync(PERSISTENCE_FILE) ? fs.statSync(PERSISTENCE_FILE).size : 0,
       postgresEngine: getDatabaseStatus(),

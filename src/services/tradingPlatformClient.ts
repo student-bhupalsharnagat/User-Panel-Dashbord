@@ -15,6 +15,7 @@ export interface UpstreamStatus {
   latencyMs: number;
   lastChecked: string | null;
   service: string | null;
+  status?: string;
   authoritativeDatabase: string;
   postgresStatus: string;
   postgresLatencyMs: number;
@@ -22,6 +23,7 @@ export interface UpstreamStatus {
   wsConnected: boolean;
   lastWsEvent: string | null;
   error?: string | null;
+  errorCategory?: 'NONE' | 'TIMEOUT' | 'HTTP_ERROR' | 'NETWORK_ERROR';
 }
 
 export class TradingPlatformClient extends EventEmitter {
@@ -36,12 +38,14 @@ export class TradingPlatformClient extends EventEmitter {
     latencyMs: 0,
     lastChecked: null,
     service: null,
+    status: 'unreachable',
     authoritativeDatabase: 'PostgreSQL (Render cloud)',
     postgresStatus: 'unknown',
     postgresLatencyMs: 0,
     authoritativeSourceOfTruth: true,
     wsConnected: false,
     lastWsEvent: null,
+    errorCategory: 'NONE',
   };
 
   constructor(config?: Partial<TradingPlatformConfig>) {
@@ -102,7 +106,7 @@ export class TradingPlatformClient extends EventEmitter {
   /**
    * Probe platform health & authoritative PostgreSQL engine status
    */
-  public async probeHealth(timeoutMs = 5000): Promise<UpstreamStatus> {
+  public async probeHealth(timeoutMs = 7000): Promise<UpstreamStatus> {
     const start = Date.now();
     try {
       const controller = new AbortController();
@@ -113,11 +117,13 @@ export class TradingPlatformClient extends EventEmitter {
 
       if (res.ok) {
         const data: any = await res.json();
+        const healthStatus = data.status || 'healthy';
         this.status = {
           reachable: true,
           latencyMs,
           lastChecked: new Date().toISOString(),
           service: data.service || 'VERTEX Multi-Tenant Trading Platform Engine',
+          status: healthStatus,
           authoritativeDatabase: 'PostgreSQL (Render cloud)',
           postgresStatus: data.dependencies?.postgresql?.status || 'healthy',
           postgresLatencyMs: data.dependencies?.postgresql?.latencyMs || 0,
@@ -125,8 +131,19 @@ export class TradingPlatformClient extends EventEmitter {
           wsConnected: this.status.wsConnected,
           lastWsEvent: this.status.lastWsEvent,
           error: null,
+          errorCategory: 'NONE',
         };
+        console.log(`[TradingPlatformProbe] GET ${this.baseUrl}/health -> HTTP ${res.status} (${latencyMs}ms) - Status: ${healthStatus}, PostgreSQL: ${this.status.postgresStatus}`);
         return this.status;
+      }
+
+      let errorMsg = `HTTP ${res.status}`;
+      if (res.status === 502 || res.status === 503) {
+        errorMsg += ' (Upstream service waking up or proxy unavailable)';
+      } else if (res.status === 404) {
+        errorMsg += ' (Health route not found)';
+      } else if (res.status === 401 || res.status === 403) {
+        errorMsg += ' (Authentication/authorization rejected)';
       }
 
       this.status = {
@@ -134,16 +151,25 @@ export class TradingPlatformClient extends EventEmitter {
         reachable: false,
         latencyMs,
         lastChecked: new Date().toISOString(),
-        error: `HTTP ${res.status}`,
+        status: 'unreachable',
+        error: errorMsg,
+        errorCategory: 'HTTP_ERROR',
       };
+      console.warn(`[TradingPlatformProbe] GET ${this.baseUrl}/health -> HTTP ${res.status} (${latencyMs}ms) - [HTTP_ERROR] ${errorMsg}`);
     } catch (err: any) {
+      const isTimeout = err.name === 'AbortError';
+      const errorCategory = isTimeout ? 'TIMEOUT' : 'NETWORK_ERROR';
+      const errorMsg = isTimeout ? `Connection timed out after ${timeoutMs}ms` : (err.message || 'Connection failed');
       this.status = {
         ...this.status,
         reachable: false,
         latencyMs: Date.now() - start,
         lastChecked: new Date().toISOString(),
-        error: err.name === 'AbortError' ? 'Connection timeout' : err.message,
+        status: 'unreachable',
+        error: errorMsg,
+        errorCategory,
       };
+      console.warn(`[TradingPlatformProbe] GET ${this.baseUrl}/health -> FAILED (${this.status.latencyMs}ms) - [${errorCategory}] ${errorMsg}`);
     }
     return this.status;
   }
