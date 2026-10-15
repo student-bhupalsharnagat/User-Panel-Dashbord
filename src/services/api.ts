@@ -22,21 +22,30 @@ import {
   AnalyticsData,
 } from '../types';
 
-<<<<<<< HEAD
-const RAW_API_BASE = (typeof import.meta !== 'undefined' && (import.meta as any).env?.VITE_API_URL ? (import.meta as any).env.VITE_API_URL : '').replace(/\/$/, '');
+const RAW_API_BASE = (
+  typeof import.meta !== 'undefined' && ((import.meta as any).env?.VITE_API_URL || (import.meta as any).env?.VITE_API_BASE_URL)
+    ? ((import.meta as any).env.VITE_API_URL || (import.meta as any).env.VITE_API_BASE_URL)
+    : ''
+).replace(/\/+$/, '');
+
 // Safeguard: Never target localhost in production bundle
 const isProd = typeof import.meta !== 'undefined' && Boolean((import.meta as any).env?.PROD);
 export const API_BASE = (isProd && (RAW_API_BASE.includes('localhost') || RAW_API_BASE.includes('127.0.0.1')))
   ? ''
   : RAW_API_BASE;
 
+export const API_BASE_URL = API_BASE;
+
 export function resolveApiUrl(path: string): string {
+  if (/^https?:\/\//i.test(path)) return path;
   const cleanPath = path.startsWith('/') ? path : `/${path}`;
+  if (API_BASE.endsWith('/api') && cleanPath.startsWith('/api/')) {
+    return `${API_BASE}${cleanPath.substring(4)}`;
+  }
   return `${API_BASE}${cleanPath}`;
 }
-=======
-export const API_BASE_URL = (import.meta.env.VITE_API_BASE_URL || 'http://localhost:5000/api').replace(/\/+$/, '');
->>>>>>> 8cd1a529e7c7aecea373e8529f61ae2ae9af3770
+
+export const buildApiUrl = resolveApiUrl;
 
 let currentAuthToken = '';
 
@@ -66,22 +75,8 @@ function generateIdempotencyKey(): string {
   return `IDEMP-${Date.now()}-${Math.random().toString(36).slice(2, 9)}`;
 }
 
-<<<<<<< HEAD
-async function authenticatedFetch(input: string, init: RequestInit = {}): Promise<Response> {
-=======
-export function buildApiUrl(endpoint: string): string {
-  if (/^https?:\/\//i.test(endpoint)) return endpoint;
-  const cleanEndpoint = endpoint.startsWith('/') ? endpoint : `/${endpoint}`;
-  
-  if (API_BASE_URL.endsWith('/api') && cleanEndpoint.startsWith('/api/')) {
-    return `${API_BASE_URL}${cleanEndpoint.substring(4)}`;
-  }
-  return `${API_BASE_URL}${cleanEndpoint}`;
-}
-
 async function authenticatedFetch(input: RequestInfo | URL, init: RequestInit = {}): Promise<Response> {
   const token = getAuthToken();
->>>>>>> 8cd1a529e7c7aecea373e8529f61ae2ae9af3770
   const headers = new Headers(init.headers || {});
   
   if (token && !headers.has('Authorization')) {
@@ -93,13 +88,7 @@ async function authenticatedFetch(input: RequestInfo | URL, init: RequestInit = 
     headers.set('Content-Type', 'application/json');
   }
 
-<<<<<<< HEAD
-  return fetch(resolveApiUrl(input), {
-    ...init,
-    headers,
-  });
-=======
-  const url = typeof input === 'string' ? buildApiUrl(input) : input;
+  const url = typeof input === 'string' ? resolveApiUrl(input) : input;
 
   try {
     const res = await fetch(url, {
@@ -154,7 +143,6 @@ function normalizeClients(data: any): Client[] {
     lastActive: String(item.lastActive || item.updatedAt || 'Just now'),
     riskLimit: Number(item.riskLimit ?? 500000),
   }));
->>>>>>> 8cd1a529e7c7aecea373e8529f61ae2ae9af3770
 }
 
 export const api = {
