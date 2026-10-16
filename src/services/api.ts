@@ -205,9 +205,9 @@ export const api = {
     if (params?.accountType) query.set('accountType', params.accountType);
 
     const queryString = query.toString() ? `?${query.toString()}` : '';
-    let res = await authenticatedFetch(`/api/admin/clients${queryString}`);
-    if (!res.ok && res.status === 404) {
-      res = await authenticatedFetch(`/api/clients${queryString}`);
+    let res = await authenticatedFetch(`/api/clients${queryString}`);
+    if (!res.ok) {
+      res = await authenticatedFetch(`/api/admin/clients${queryString}`);
     }
     if (!res.ok) {
       throw new Error(`Failed to fetch clients: ${res.statusText}`);

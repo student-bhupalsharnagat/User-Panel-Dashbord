@@ -44,9 +44,15 @@ export const ClientsView: React.FC = () => {
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
-    setLoading(true);
+    if (clients.length === 0) {
+      setLoading(true);
+    }
     api.getClients({ q: searchQuery, status: statusFilter, hideDemo: hideDemo || accountTypeTab === 'Real' })
-      .then((data) => setClients(data))
+      .then((data) => {
+        if (Array.isArray(data)) {
+          setClients(data);
+        }
+      })
       .catch((err) => console.error('Failed to load clients:', err))
       .finally(() => setLoading(false));
   }, [searchQuery, statusFilter, hideDemo, accountTypeTab, refreshTrigger]);
