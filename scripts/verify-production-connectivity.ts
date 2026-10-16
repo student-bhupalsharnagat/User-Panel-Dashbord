@@ -8,8 +8,8 @@ import fs from 'fs';
 import path from 'path';
 
 const LOCAL_BASE_URL = 'http://localhost:3000';
-const TRADING_PLATFORM_URL = process.env.TRADING_PLATFORM_URL || 'https://trading-platform-3-1v13.onrender.com';
-const CENTRAL_ADMIN_URL = process.env.CENTRAL_ADMIN_URL || 'https://admin-dashbord-2.onrender.com';
+const TRADING_PLATFORM_URL = process.env.TRADING_PLATFORM_URL || 'https://trading-platform-2t6r.onrender.com';
+const CENTRAL_ADMIN_URL = process.env.CENTRAL_ADMIN_URL || 'https://admin-dashbord-wxcq.onrender.com';
 const INTERNAL_API_SECRET = process.env.INTERNAL_API_SECRET || 'nextrade-internal-hmac-secret-2026';
 const PERSISTENCE_FILE = path.join(process.cwd(), 'data', 'persistence-store.json');
 

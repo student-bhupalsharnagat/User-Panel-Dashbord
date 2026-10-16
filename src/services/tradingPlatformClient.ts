@@ -50,7 +50,7 @@ export class TradingPlatformClient extends EventEmitter {
 
   constructor(config?: Partial<TradingPlatformConfig>) {
     super();
-    this.baseUrl = (config?.baseUrl || process.env.TRADING_PLATFORM_URL || 'https://trading-platform-3-1v13.onrender.com').replace(/\/$/, '');
+    this.baseUrl = (config?.baseUrl || process.env.TRADING_PLATFORM_URL || 'https://trading-platform-2t6r.onrender.com').replace(/\/$/, '');
     this.tenantId = config?.tenantId || process.env.DEFAULT_TENANT_ID || 'vertex-default';
   }
 

@@ -14,9 +14,9 @@ services:
       - key: DEFAULT_TENANT_ID
         value: vertex-default
       - key: TRADING_PLATFORM_URL
-        value: https://trading-platform-3-1v13.onrender.com
+        value: https://trading-platform-2t6r.onrender.com
       - key: CENTRAL_ADMIN_URL
-        value: https://admin-dashbord-2.onrender.com
+        value: https://admin-dashbord-wxcq.onrender.com
       - key: INTERNAL_API_SECRET
         value: nextrade-internal-hmac-secret-2026
       - key: JWT_SECRET

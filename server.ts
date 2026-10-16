@@ -47,8 +47,8 @@ const APP_ENV = process.env.APP_ENV || 'development';
 const JWT_SECRET = process.env.JWT_SECRET || 'nextrade-session-jwt-token-secret-2026';
 const INTERNAL_API_SECRET = process.env.INTERNAL_API_SECRET || 'nextrade-internal-hmac-secret-2026';
 // Authoritative Deployed Production Endpoints
-const TRADING_PLATFORM_URL = process.env.TRADING_PLATFORM_URL || 'https://trading-platform-3-1v13.onrender.com';
-const CENTRAL_ADMIN_URL = process.env.CENTRAL_ADMIN_URL || 'https://admin-dashbord-2.onrender.com';
+const TRADING_PLATFORM_URL = process.env.TRADING_PLATFORM_URL || 'https://trading-platform-2t6r.onrender.com';
+const CENTRAL_ADMIN_URL = process.env.CENTRAL_ADMIN_URL || 'https://admin-dashbord-wxcq.onrender.com';
 const DEFAULT_TENANT_ID = process.env.DEFAULT_TENANT_ID || 'vertex-default';
 
 // Exact CORS Origins Configuration

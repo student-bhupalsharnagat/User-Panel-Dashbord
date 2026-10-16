@@ -1,8 +1,8 @@
 import http from 'http';
 
 async function probe() {
-  const tradingUrl = 'https://trading-platform-3-1v13.onrender.com';
-  const adminUrl = 'https://admin-dashbord-2.onrender.com';
+  const tradingUrl = 'https://trading-platform-2t6r.onrender.com';
+  const adminUrl = 'https://admin-dashbord-wxcq.onrender.com';
 
   console.log('================================================================');
   console.log('   LIVE POST-DEPLOYMENT ECOSYSTEM PROBE');
