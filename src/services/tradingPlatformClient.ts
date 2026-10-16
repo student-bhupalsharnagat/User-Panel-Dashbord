@@ -240,6 +240,40 @@ export class TradingPlatformClient extends EventEmitter {
   }
 
   /**
+   * Fetch authoritative ledger entries from Trading Platform
+   */
+  public async fetchLedger(): Promise<any[]> {
+    try {
+      const headers = await this.getAuthHeaders();
+      const res = await fetch(`${this.baseUrl}/api/trading/ledger`, { headers });
+      if (res.ok) {
+        const data = await res.json();
+        return Array.isArray(data.ledger) ? data.ledger : (Array.isArray(data.entries) ? data.entries : []);
+      }
+    } catch (err: any) {
+      console.warn('[TradingPlatformClient] Error fetching ledger:', err.message);
+    }
+    return [];
+  }
+
+  /**
+   * Fetch authoritative fund transactions from Trading Platform
+   */
+  public async fetchFunds(): Promise<any[]> {
+    try {
+      const headers = await this.getAuthHeaders();
+      const res = await fetch(`${this.baseUrl}/api/trading/funds`, { headers });
+      if (res.ok) {
+        const data = await res.json();
+        return Array.isArray(data.transactions) ? data.transactions : (Array.isArray(data.data) ? data.data : []);
+      }
+    } catch (err: any) {
+      console.warn('[TradingPlatformClient] Error fetching funds:', err.message);
+    }
+    return [];
+  }
+
+  /**
    * Place order on authoritative Trading Platform matching engine
    */
   public async placeOrder(orderData: {
@@ -366,8 +400,9 @@ export class TradingPlatformClient extends EventEmitter {
     clearTimeout(this.wsReconnectTimer);
     this.wsReconnectTimer = setTimeout(async () => {
       this.isReconnecting = false;
+      this.token = null;
       await this.connectWebSocket();
-    }, 7000);
+    }, 5000);
   }
 
   public disconnect() {

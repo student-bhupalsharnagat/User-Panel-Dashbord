@@ -28,6 +28,7 @@ export const MarketWatchView: React.FC = () => {
     isRealtimeConnected,
     lastTickTimestamp,
     isLiveMode,
+    latestTicks,
   } = useApp();
 
   const [instruments, setInstruments] = useState<MarketInstrument[]>([]);
@@ -50,6 +51,27 @@ export const MarketWatchView: React.FC = () => {
       })
       .finally(() => setLoading(false));
   }, [refreshTrigger]);
+
+  // Merge live streaming ticks without requiring a page refresh
+  useEffect(() => {
+    if (!latestTicks || Object.keys(latestTicks).length === 0) return;
+    setInstruments((prev) =>
+      prev.map((inst) => {
+        const update = latestTicks[inst.symbol];
+        if (!update) return inst;
+        return {
+          ...inst,
+          lastPrice: update.lastPrice ?? inst.lastPrice,
+          change: update.change !== undefined ? update.change : inst.change,
+          changePercent: update.changePercent !== undefined ? update.changePercent : inst.changePercent,
+          bid: update.bid ?? inst.bid,
+          ask: update.ask ?? inst.ask,
+          high: update.high ?? inst.high,
+          low: update.low ?? inst.low,
+        };
+      })
+    );
+  }, [latestTicks]);
 
   const filteredInstruments = instruments.filter((inst) => {
     const matchesSearch =

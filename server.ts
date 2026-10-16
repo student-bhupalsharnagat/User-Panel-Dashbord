@@ -1244,18 +1244,18 @@ export async function syncUpstreamPortfolio() {
       portfolio.positions.forEach((remotePos: any) => {
         const posId = String(remotePos.id || `POS-${remotePos.symbol}`).trim();
         const match = positions.find(p => p.id === posId || p.instrument === remotePos.symbol);
-        const buyQty = Number(remotePos.buyQty || 0);
-        const sellQty = Number(remotePos.sellQty || 0);
-        const netQty = Number(remotePos.netQty ?? (buyQty - sellQty));
+        const buyQty = Number(remotePos.buyQty || (remotePos.type === 'BUY' ? remotePos.qty : 0));
+        const sellQty = Number(remotePos.sellQty || (remotePos.type === 'SELL' ? remotePos.qty : 0));
+        const netQty = Number(remotePos.netQty ?? (remotePos.type === 'SELL' ? -remotePos.qty : (remotePos.qty || (buyQty - sellQty))));
         const avgPrice = Number(remotePos.avgPrice || remotePos.price || 0);
-        const currentPrice = Number(remotePos.currentPrice || remotePos.lastPrice || avgPrice);
+        const currentPrice = Number(remotePos.currentPrice || remotePos.ltp || remotePos.lastPrice || avgPrice);
         const realisedPnL = Number(remotePos.realisedPnL || 0);
-        const unrealisedPnL = Number(remotePos.unrealisedPnL || (netQty * (currentPrice - avgPrice)));
+        const unrealisedPnL = Number(remotePos.unrealisedPnL ?? remotePos.pnl ?? (netQty * (currentPrice - avgPrice)));
 
         const posObj: Position = {
           id: posId,
-          clientId: clients[0]?.id || 'NT10482',
-          clientName: clients[0]?.name || 'Aarav Mehta',
+          clientId: remotePos.clientId || remotePos.userId || clients[0]?.id || 'NT10482',
+          clientName: remotePos.clientName || clients[0]?.name || 'Aarav Mehta',
           instrument: remotePos.symbol,
           exchange: remotePos.symbol?.includes('FUT') ? 'NFO' : (remotePos.symbol?.includes('/') ? 'MCX' : 'NSE'),
           product: remotePos.product === 'CNC' ? 'CNC' : 'MIS',
@@ -1389,9 +1389,13 @@ setInterval(() => {
   });
 }, 15000);
 
-// In development or demo mode, tick market instruments with controlled realistic variations
+// In development or demo mode, tick market instruments with controlled realistic variations (fallback only)
 if (APP_ENV !== 'production') {
   setInterval(() => {
+    // If upstream WebSocket is connected and streaming live ticks, skip synthetic variations
+    if (tradingPlatformClient.getStatus().wsConnected) {
+      return;
+    }
     const target = instruments[Math.floor(Math.random() * instruments.length)];
     if (target && target.status === 'Enabled') {
       const delta = +( (Math.random() - 0.49) * (target.lastPrice * 0.001) ).toFixed(2);
@@ -2769,29 +2773,80 @@ async function startServer() {
 
   // Hook Trading Platform real-time events into User Panel SSE broadcast stream
   tradingPlatformClient.on('realtime_event', (event: any) => {
-    if (event.event === 'market.ticks' && Array.isArray(event.data)) {
-      for (const tick of event.data) {
-        const inst = instruments.find(i => i.symbol === tick.symbol);
-        if (inst) {
-          inst.lastPrice = tick.price;
-          inst.change = tick.change;
-          inst.changePercent = tick.changePercent;
-          inst.lastUpdated = new Date().toISOString();
+    const tenantId = event.tenantId || DEFAULT_TENANT_ID;
+    const rawPayload = event.payload ?? event.data;
+
+    if (event.event === 'market.ticks') {
+      const rawTicks = Array.isArray(rawPayload?.ticks)
+        ? rawPayload.ticks
+        : Array.isArray(rawPayload)
+        ? rawPayload
+        : Array.isArray(rawPayload?.instruments)
+        ? rawPayload.instruments
+        : [];
+
+      if (rawTicks.length > 0) {
+        for (const tick of rawTicks) {
+          const symbol = tick.symbol;
+          if (!symbol) continue;
+          const inst = instruments.find(i => i.symbol === symbol);
+          const lastPrice = Number(tick.lastPrice ?? tick.price ?? (inst ? inst.lastPrice : 0));
+          const change = Number(tick.change ?? (inst ? inst.change : 0));
+          const changePercent = Number(tick.changePercent ?? (inst ? inst.changePercent : 0));
+          const bid = Number(tick.bid ?? (lastPrice > 0 ? +(lastPrice - 0.5).toFixed(2) : 0));
+          const ask = Number(tick.ask ?? (lastPrice > 0 ? +(lastPrice + 0.5).toFixed(2) : 0));
+          const high = Number(tick.highPrice ?? tick.high ?? lastPrice);
+          const low = Number(tick.lowPrice ?? tick.low ?? lastPrice);
+
+          if (inst) {
+            inst.lastPrice = lastPrice;
+            inst.change = change;
+            inst.changePercent = changePercent;
+            inst.bid = bid;
+            inst.ask = ask;
+            inst.high = high;
+            inst.low = low;
+            inst.lastUpdated = new Date().toISOString();
+          }
+
+          // Recalculate open positions MTM for this instrument
+          positions.forEach((pos) => {
+            if (pos.instrument === symbol) {
+              pos.currentPrice = lastPrice;
+              pos.unrealisedPnL = Math.round((pos.currentPrice - pos.avgPrice) * pos.netQty);
+              pos.totalPnL = pos.realisedPnL + pos.unrealisedPnL;
+            }
+          });
+        }
+
+        broadcastScopedEvent('market_tick', { ticks: rawTicks, timestamp: new Date().toISOString() }, { tenantId });
+        if (rawTicks[0]) {
+          broadcastScopedEvent('tick', rawTicks[0], { tenantId });
         }
       }
-      broadcastScopedEvent('market_tick', event.data);
-      if (event.data[0]) {
-        broadcastScopedEvent('tick', event.data[0]);
-      }
-    } else if (event.event === 'trade.executed' || event.event === 'order.updated') {
+    } else if (
+      event.event === 'trade.executed' ||
+      event.event === 'order.created' ||
+      event.event === 'order.cancelled' ||
+      event.event === 'order.modified' ||
+      event.event === 'order.updated'
+    ) {
       syncUpstreamPortfolio().catch(() => {});
-      broadcastScopedEvent('order_update', event.data);
-    } else if (event.event === 'position.updated') {
+      broadcastScopedEvent('order_update', rawPayload, { tenantId });
+    } else if (event.event === 'position.updated' || event.event === 'portfolio.mtm') {
       syncUpstreamPortfolio().catch(() => {});
-      broadcastScopedEvent('position_update', event.data);
+      broadcastScopedEvent('position_update', rawPayload, { tenantId });
     } else if (event.event === 'wallet.updated') {
       syncUpstreamPortfolio().catch(() => {});
-      broadcastScopedEvent('wallet_update', event.data);
+      broadcastScopedEvent('wallet_update', rawPayload, { tenantId });
+    } else if (
+      event.event === 'emergency.updated' ||
+      event.event === 'emergency.trading_halt' ||
+      event.event === 'emergency.trading_resume'
+    ) {
+      broadcastScopedEvent('emergency_alert', rawPayload, { tenantId });
+    } else if (event.event === 'branding.updated') {
+      broadcastScopedEvent('branding_update', rawPayload, { tenantId });
     }
   });
 

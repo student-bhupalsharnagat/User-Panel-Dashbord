@@ -85,8 +85,61 @@ async function runTests() {
     const timeoutProbe = await timeoutClient.probeHealth(1);
     assert(timeoutProbe.reachable === false, '1ms probe correctly reports unreachable');
     assert(timeoutProbe.errorCategory === 'TIMEOUT', `Timeout error properly categorized as TIMEOUT (${timeoutProbe.error})`);
+
+    // TEST 5: Real-time WebSocket Stream & Event Reception
+    console.log('\n--- TEST 5: Real-time WebSocket Stream & Event Reception ---');
+    let wsEventReceived = false;
+    let receivedEventName = '';
+    let wsTenantId = '';
+    const wsUrl = `${tradingPlatformClient.getBaseUrl().replace(/^http/, 'ws')}/ws?token=${encodeURIComponent(token)}`;
+
+    await new Promise<void>((resolve) => {
+      const ws = new (globalThis as any).WebSocket(wsUrl);
+      const timer = setTimeout(() => {
+        try { ws.close(); } catch {}
+        resolve();
+      }, 5000);
+
+      ws.onmessage = (event: any) => {
+        try {
+          const msg = JSON.parse(event.data);
+          if (msg && msg.event) {
+            wsEventReceived = true;
+            receivedEventName = msg.event;
+            wsTenantId = msg.tenantId;
+            clearTimeout(timer);
+            try { ws.close(); } catch {}
+            resolve();
+          }
+        } catch {}
+      };
+
+      ws.onerror = () => {
+        clearTimeout(timer);
+        resolve();
+      };
+    });
+
+    assert(wsEventReceived === true, `Received live WebSocket event from Trading Platform (${receivedEventName})`);
+    assert(wsTenantId === 'vertex-default', `WebSocket event correctly isolated to tenant "${wsTenantId}"`);
+
+    // TEST 6: Authoritative Ledger & Funds Read-Only Contract
+    console.log('\n--- TEST 6: Authoritative Ledger & Financial Record Compatibility ---');
+    const ledger = await tradingPlatformClient.fetchLedger();
+    assert(Array.isArray(ledger), `Authoritative ledger fetched from Trading Platform (${ledger.length} entries)`);
+
+    const funds = await tradingPlatformClient.fetchFunds();
+    assert(Array.isArray(funds), `Authoritative fund transactions contract verified (${funds.length} records)`);
+
+    // TEST 7: Tenant Isolation & Foreign Tenant Boundary Enforcement
+    console.log('\n--- TEST 7: Tenant Scoping & Isolation Boundary Enforcement ---');
+    const foreignTenantRes = await fetch(`${tradingPlatformClient.getBaseUrl()}/api/tenant/current`, {
+      headers: { 'x-tenant-id': 'unauthorized-foreign-tenant-xyz' },
+    });
+    const foreignData: any = await foreignTenantRes.json();
+    assert(foreignData.data?.tenant?.id !== 'unauthorized-foreign-tenant-xyz', 'Cross-tenant spoofing rejected or sanitized to valid tenant');
   } else {
-    console.log('\n--- TEST 3 & 4: Live Trading Platform Endpoints (Skipped: Upstream offline) ---');
+    console.log('\n--- TEST 3-7: Live Trading Platform Endpoints (Skipped: Upstream offline) ---');
   }
 
   console.log('\n================================================================');

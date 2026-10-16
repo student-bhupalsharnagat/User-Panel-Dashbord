@@ -25,6 +25,7 @@ export const PositionsView: React.FC = () => {
     refreshTrigger,
     showToast,
     isLiveMode,
+    latestTicks,
   } = useApp();
 
   const [positions, setPositions] = useState<Position[]>([]);
@@ -45,6 +46,25 @@ export const PositionsView: React.FC = () => {
       .catch((err) => console.error('Failed to load positions:', err))
       .finally(() => setLoading(false));
   }, [refreshTrigger]);
+
+  // Recalculate MTM and current prices when live streaming ticks arrive
+  useEffect(() => {
+    if (!latestTicks || Object.keys(latestTicks).length === 0) return;
+    setPositions((prev) =>
+      prev.map((pos) => {
+        const update = latestTicks[pos.instrument];
+        if (!update || !update.lastPrice) return pos;
+        const currentPrice = update.lastPrice;
+        const unrealisedPnL = Math.round((currentPrice - pos.avgPrice) * pos.netQty);
+        return {
+          ...pos,
+          currentPrice,
+          unrealisedPnL,
+          totalPnL: pos.realisedPnL + unrealisedPnL,
+        };
+      })
+    );
+  }, [latestTicks]);
 
   const filteredPositions = positions.filter((p) => {
     const matchesSearch =

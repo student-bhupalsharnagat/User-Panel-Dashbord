@@ -48,6 +48,7 @@ interface AppContextType {
   triggerRefresh: () => void;
   isRealtimeConnected: boolean;
   lastTickTimestamp: string;
+  latestTicks: Record<string, Partial<MarketInstrument>>;
 
   // Global Search
   isSearchOpen: boolean;
@@ -125,6 +126,7 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
   const [refreshTrigger, setRefreshTrigger] = useState<number>(0);
   const [isRealtimeConnected, setIsRealtimeConnected] = useState<boolean>(false);
   const [lastTickTimestamp, setLastTickTimestamp] = useState<string>('Just now');
+  const [latestTicks, setLatestTicks] = useState<Record<string, Partial<MarketInstrument>>>({});
 
   const [isSearchOpen, setIsSearchOpen] = useState<boolean>(false);
   const [globalSearchQuery, setGlobalSearchQuery] = useState<string>('');
@@ -255,12 +257,52 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
         setIsLiveMode(true);
       });
 
-      eventSource.addEventListener('tick', () => {
+      eventSource.addEventListener('tick', (e: MessageEvent) => {
+        try {
+          const t = JSON.parse(e.data);
+          if (t && t.symbol) {
+            setLatestTicks((prev) => ({
+              ...prev,
+              [t.symbol]: {
+                lastPrice: Number(t.lastPrice ?? t.price ?? 0),
+                change: Number(t.change ?? 0),
+                changePercent: Number(t.changePercent ?? 0),
+                bid: Number(t.bid ?? 0),
+                ask: Number(t.ask ?? 0),
+                high: Number(t.highPrice ?? t.high ?? 0),
+                low: Number(t.lowPrice ?? t.low ?? 0),
+              },
+            }));
+          }
+        } catch {}
         setLastTickTimestamp('Live streaming');
         setIsLiveMode(true);
       });
 
-      eventSource.addEventListener('market_tick', () => {
+      eventSource.addEventListener('market_tick', (e: MessageEvent) => {
+        try {
+          const parsed = JSON.parse(e.data);
+          const rawTicks = Array.isArray(parsed.ticks) ? parsed.ticks : (Array.isArray(parsed) ? parsed : []);
+          if (rawTicks.length > 0) {
+            setLatestTicks((prev) => {
+              const next = { ...prev };
+              for (const t of rawTicks) {
+                if (t.symbol) {
+                  next[t.symbol] = {
+                    lastPrice: Number(t.lastPrice ?? t.price ?? 0),
+                    change: Number(t.change ?? 0),
+                    changePercent: Number(t.changePercent ?? 0),
+                    bid: Number(t.bid ?? 0),
+                    ask: Number(t.ask ?? 0),
+                    high: Number(t.highPrice ?? t.high ?? 0),
+                    low: Number(t.lowPrice ?? t.low ?? 0),
+                  };
+                }
+              }
+              return next;
+            });
+          }
+        } catch {}
         setLastTickTimestamp('Live streaming');
         setIsLiveMode(true);
       });
@@ -313,6 +355,28 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
         triggerRefresh();
       });
 
+      eventSource.addEventListener('emergency_alert', (e: MessageEvent) => {
+        try {
+          const alert = JSON.parse(e.data);
+          showToast(`Emergency Broadcast: ${alert.reason || 'Trading status update'}`, 'error');
+          triggerRefresh();
+        } catch {}
+      });
+
+      eventSource.addEventListener('branding_update', (e: MessageEvent) => {
+        try {
+          const branding = JSON.parse(e.data);
+          if (branding) setTenantBranding((prev) => ({ ...(prev || {}), ...branding }));
+        } catch {}
+      });
+
+      eventSource.addEventListener('branding_updated', (e: MessageEvent) => {
+        try {
+          const branding = JSON.parse(e.data);
+          if (branding) setTenantBranding((prev) => ({ ...(prev || {}), ...branding }));
+        } catch {}
+      });
+
       eventSource.onerror = () => {
         setIsRealtimeConnected(false);
       };
@@ -324,6 +388,15 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
       eventSource?.close();
     };
   }, [showToast, triggerRefresh, currentUser]);
+
+  // Authenticated polling fallback when SSE real-time stream is disconnected
+  useEffect(() => {
+    if (isRealtimeConnected) return;
+    const fallbackPoll = setInterval(() => {
+      triggerRefresh();
+    }, 20000);
+    return () => clearInterval(fallbackPoll);
+  }, [isRealtimeConnected, triggerRefresh]);
 
   // Modal actions
   const openOrderModal = (instrument?: MarketInstrument | null, side: 'BUY' | 'SELL' = 'BUY', existingOrder?: Order | null) => {
@@ -388,6 +461,7 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
         triggerRefresh,
         isRealtimeConnected,
         lastTickTimestamp,
+        latestTicks,
         isSearchOpen,
         setIsSearchOpen,
         globalSearchQuery,
