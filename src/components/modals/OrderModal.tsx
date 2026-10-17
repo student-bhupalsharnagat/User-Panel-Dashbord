@@ -29,6 +29,9 @@ export const OrderModal: React.FC = () => {
       Promise.all([api.getMarketWatch(), api.getClients()]).then(([insts, cls]) => {
         setInstruments(insts);
         setClients(cls);
+        if (cls && cls.length > 0) {
+          setSelectedClientId(cls[0].id);
+        }
         if (orderModalState.instrument) {
           setSelectedSymbol(orderModalState.instrument.symbol);
           setPrice(orderModalState.instrument.lastPrice);

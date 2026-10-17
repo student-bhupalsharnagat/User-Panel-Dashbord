@@ -220,6 +220,42 @@ export const TopBar: React.FC = () => {
                 <div className="space-y-1">
                   <button
                     onClick={() => {
+                      switchRole('super_admin');
+                      setIsProfileOpen(false);
+                    }}
+                    className={`w-full text-left px-2.5 py-1.5 rounded-md text-xs flex items-center justify-between cursor-pointer ${
+                      currentUser?.role === 'super_admin'
+                        ? 'bg-indigo-600/30 text-indigo-300 font-medium'
+                        : 'text-slate-300 hover:bg-slate-800'
+                    }`}
+                  >
+                    <div className="flex items-center gap-2">
+                      <Zap className="w-3.5 h-3.5 text-purple-400 shrink-0" />
+                      <span className="truncate">Super Admin (Central)</span>
+                    </div>
+                    {currentUser?.role === 'super_admin' && <span className="text-[10px] text-indigo-400 shrink-0">Active</span>}
+                  </button>
+
+                  <button
+                    onClick={() => {
+                      switchRole('master');
+                      setIsProfileOpen(false);
+                    }}
+                    className={`w-full text-left px-2.5 py-1.5 rounded-md text-xs flex items-center justify-between cursor-pointer ${
+                      currentUser?.role === 'master'
+                        ? 'bg-indigo-600/30 text-indigo-300 font-medium'
+                        : 'text-slate-300 hover:bg-slate-800'
+                    }`}
+                  >
+                    <div className="flex items-center gap-2">
+                      <Zap className="w-3.5 h-3.5 text-amber-400 shrink-0" />
+                      <span className="truncate">Master Broker (Vikramaditya)</span>
+                    </div>
+                    {currentUser?.role === 'master' && <span className="text-[10px] text-indigo-400 shrink-0">Active</span>}
+                  </button>
+
+                  <button
+                    onClick={() => {
                       switchRole('broker_admin');
                       setIsProfileOpen(false);
                     }}
@@ -238,20 +274,20 @@ export const TopBar: React.FC = () => {
 
                   <button
                     onClick={() => {
-                      switchRole('super_admin');
+                      switchRole('sub_broker');
                       setIsProfileOpen(false);
                     }}
                     className={`w-full text-left px-2.5 py-1.5 rounded-md text-xs flex items-center justify-between cursor-pointer ${
-                      currentUser?.role === 'super_admin'
+                      currentUser?.role === 'sub_broker'
                         ? 'bg-indigo-600/30 text-indigo-300 font-medium'
                         : 'text-slate-300 hover:bg-slate-800'
                     }`}
                   >
                     <div className="flex items-center gap-2">
-                      <Zap className="w-3.5 h-3.5 text-purple-400 shrink-0" />
-                      <span className="truncate">Super Admin (Central)</span>
+                      <Shield className="w-3.5 h-3.5 text-emerald-400 shrink-0" />
+                      <span className="truncate">Sub-Broker (Karan Mehra)</span>
                     </div>
-                    {currentUser?.role === 'super_admin' && <span className="text-[10px] text-indigo-400 shrink-0">Active</span>}
+                    {currentUser?.role === 'sub_broker' && <span className="text-[10px] text-indigo-400 shrink-0">Active</span>}
                   </button>
 
                   <button

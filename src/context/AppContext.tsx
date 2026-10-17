@@ -389,13 +389,14 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
     };
   }, [showToast, triggerRefresh, currentUser]);
 
-  // Authenticated polling fallback when SSE real-time stream is disconnected
+    // Continuous real-time authoritative polling: refreshes data every few seconds
+  // so any new user, deposit, position, or order on Trading Platform shows up immediately
   useEffect(() => {
-    if (isRealtimeConnected) return;
-    const fallbackPoll = setInterval(() => {
+    const pollIntervalMs = isRealtimeConnected ? 5000 : 3500;
+    const poll = setInterval(() => {
       triggerRefresh();
-    }, 20000);
-    return () => clearInterval(fallbackPoll);
+    }, pollIntervalMs);
+    return () => clearInterval(poll);
   }, [isRealtimeConnected, triggerRefresh]);
 
   // Modal actions

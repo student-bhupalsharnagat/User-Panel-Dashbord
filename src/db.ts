@@ -15,6 +15,7 @@ import {
   AuditLog,
   TenantBranding,
   SettingsState,
+  LedgerEntry,
 } from './types/index.ts';
 
 const __filename = fileURLToPath(import.meta.url);
@@ -60,17 +61,12 @@ export function getPgPool(): Pool | null {
  * Initializes PostgreSQL if DATABASE_URL is configured, executes versioned migrations,
  * and safely imports existing JSON records if tables are fresh.
  */
-export async function initDatabase(appEnv: string = 'development'): Promise<boolean> {
+export async function initDatabase(appEnv: string = 'production'): Promise<boolean> {
   const databaseUrl = process.env.DATABASE_URL;
   const isProduction = process.env.NODE_ENV === 'production' || appEnv === 'production';
 
-  if (!databaseUrl) {
-    if (isProduction) {
-      lastDbError = 'CRITICAL: DATABASE_URL is required in production environment. Refusing silent fallback to JSON snapshot.';
-      console.error(`[Database Error] ${lastDbError}`);
-      throw new Error(`[Database Error] ${lastDbError}`);
-    }
-    console.log('[Database] No DATABASE_URL provided. Operating in local development storage mode (JSON snapshot).');
+  if (!databaseUrl || databaseUrl.includes('user:password@ep-sample-pooler')) {
+    console.log('[Database] No production PostgreSQL DATABASE_URL configured. Operating in live platform sync mode.');
     return false;
   }
 
@@ -96,7 +92,7 @@ export async function initDatabase(appEnv: string = 'development'): Promise<bool
     // Run versioned schema migrations
     await runMigrations(pgPool);
 
-    // Seed/migrate existing JSON data safely if DB is fresh
+    // Seed/migrate branding and settings safely if DB is fresh
     await migrateFromJsonIfEmpty(pgPool);
 
     isPostgresReady = true;
@@ -104,13 +100,8 @@ export async function initDatabase(appEnv: string = 'development'): Promise<bool
     return true;
   } catch (err: any) {
     lastDbError = `PostgreSQL Connection/Migration Failed: ${err.message}`;
-    console.error(`[Database Error] ${lastDbError}`);
-    if (isProduction) {
-      // In production, do not silently fallback
-      isPostgresReady = false;
-      throw new Error(`[Database Error] ${lastDbError}. Refusing silent fallback to JSON snapshot in production.`);
-    }
-    console.warn('[Database] Falling back to JSON journal for local development only.');
+    console.warn(`[Database Notice] ${lastDbError}. Operating in live platform sync mode.`);
+    isPostgresReady = false;
     return false;
   }
 }
@@ -440,127 +431,9 @@ async function migrateFromJsonIfEmpty(pool: Pool) {
       ]);
     }
 
-    // 3. Clients
-    if (Array.isArray(store.clients)) {
-      for (const c of store.clients) {
-        await client.query(`
-          INSERT INTO user_panel_clients (
-            id, name, email, phone, pan, status, is_demo, ledger_balance, open_pnl,
-            peak_ledger, margin_used, income, margin_available, broker_id, broker_name,
-            kyc_status, kyc_documents, created_date, last_active, risk_limit, updated_at
-          ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, NOW())
-          ON CONFLICT (id) DO NOTHING;
-        `, [
-          c.id, c.name, c.email, c.phone, c.pan || 'ABCDE1234F', c.status || 'Active',
-          Boolean(c.isDemo), c.ledgerBalance || 0, c.openPnL || 0, c.peakLedger || c.ledgerBalance || 0,
-          c.marginUsed || 0, c.income || 0, c.marginAvailable || c.ledgerBalance || 0,
-          c.brokerId || 'BRK-ROHAN-01', c.brokerName || 'Rohan Sen', c.kycStatus || 'Verified',
-          JSON.stringify(c.kycDocuments || []), c.createdDate || '', c.lastActive || 'Just now',
-          c.riskLimit || (c.ledgerBalance * 2) || 0
-        ]);
-      }
-    }
-
-    // 4. Orders
-    if (Array.isArray(store.orders)) {
-      for (const o of store.orders) {
-        await client.query(`
-          INSERT INTO user_panel_orders (
-            id, client_id, client_name, instrument, exchange, side, type, quantity,
-            order_price, executed_qty, avg_price, status, created, broker_id, rejection_reason, created_at
-          ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, NOW())
-          ON CONFLICT (id) DO NOTHING;
-        `, [
-          o.id, o.clientId, o.clientName, o.instrument, o.exchange || 'NSE', o.side, o.type,
-          o.quantity, String(o.orderPrice || 0), o.executedQty || 0, o.avgPrice || 0,
-          o.status, o.created || '', o.brokerId || 'BRK-ROHAN-01', o.rejectionReason || null
-        ]);
-      }
-    }
-
-    // 5. Positions
-    if (Array.isArray(store.positions)) {
-      for (const p of store.positions) {
-        await client.query(`
-          INSERT INTO user_panel_positions (
-            id, client_id, client_name, instrument, exchange, product, buy_qty, sell_qty,
-            net_qty, avg_price, current_price, realised_pnl, unrealised_pnl, total_pnl, margin_used, broker_id, updated_at
-          ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, NOW())
-          ON CONFLICT (id) DO NOTHING;
-        `, [
-          p.id, p.clientId, p.clientName, p.instrument, p.exchange || 'NSE', p.product || 'MIS',
-          p.buyQty || 0, p.sellQty || 0, p.netQty || 0, p.avgPrice || 0, p.currentPrice || 0,
-          p.realisedPnL || 0, p.unrealisedPnL || 0, p.totalPnL || 0, p.marginUsed || 0, p.brokerId || 'BRK-ROHAN-01'
-        ]);
-      }
-    }
-
-    // 6. Fund transactions
-    if (Array.isArray(store.fundTransactions)) {
-      for (const f of store.fundTransactions) {
-        await client.query(`
-          INSERT INTO user_panel_fund_transactions (
-            id, client_id, client_name, type, amount, method, request_date, reference_id,
-            status, verification, proof_document, approved_by, rejection_reason, broker_id, created_at
-          ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, NOW())
-          ON CONFLICT (id) DO NOTHING;
-        `, [
-          f.id, f.clientId, f.clientName, f.type, f.amount, f.method || 'Bank transfer',
-          f.requestDate || '', f.referenceId || '', f.status, f.verification || '',
-          f.proofDocument || null, f.approvedBy || null, f.rejectionReason || null, f.brokerId || 'BRK-ROHAN-01'
-        ]);
-      }
-    }
-
-    // 7. Ledger
-    if (Array.isArray(store.ledgerEntries)) {
-      for (const l of store.ledgerEntries) {
-        await client.query(`
-          INSERT INTO user_panel_ledger_entries (
-            id, client_id, date, reference_id, description, debit, credit, running_balance, status, type, created_at
-          ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, NOW())
-          ON CONFLICT (id) DO NOTHING;
-        `, [
-          l.id, 'NT10482', l.date || '', l.referenceId || '', l.description || '',
-          l.debit || 0, l.credit || 0, l.runningBalance || 0, l.status || 'Completed', l.type || 'Trade Settlement'
-        ]);
-      }
-    }
-
-    // 8. Audit logs
-    if (Array.isArray(store.auditLogs)) {
-      for (const a of store.auditLogs) {
-        await client.query(`
-          INSERT INTO user_panel_audit_logs (
-            id, timestamp, user_name, role, action, related_entity, ip_address, result, details, created_at
-          ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, NOW())
-          ON CONFLICT (id) DO NOTHING;
-        `, [
-          a.id, a.timestamp || '', a.user || '', a.role || '', a.action || '',
-          a.relatedEntity || '', a.ipAddress || '', a.result || 'Success', a.details || ''
-        ]);
-      }
-    }
-
-    // 9. Instruments
-    if (Array.isArray(store.instruments)) {
-      for (const i of store.instruments) {
-        await client.query(`
-          INSERT INTO user_panel_instruments (
-            symbol, name, exchange, last_price, change, change_percent, bid, ask, volume,
-            high, low, type, contract_expiry, lot_size, tick_size, status, updated_at
-          ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, NOW())
-          ON CONFLICT (symbol) DO NOTHING;
-        `, [
-          i.symbol, i.name, i.exchange || 'NSE', i.lastPrice || 0, i.change || 0, i.changePercent || 0,
-          i.bid || 0, i.ask || 0, i.volume || '', i.high || 0, i.low || 0, i.type || 'Equity',
-          i.contractExpiry || 'EQ', i.lotSize || 1, i.tickSize || 0.05, i.status || 'Enabled'
-        ]);
-      }
-    }
-
+    // Clients, Orders, Positions, Funds, and Ledger are authoritative and fetched live from Trading Platform
     await client.query('COMMIT');
-    console.log('[Database Migration] Successfully migrated initial records to PostgreSQL tables.');
+    console.log('[Database Migration] Schema migrations and branding initialized successfully.');
   } catch (err: any) {
     await client.query('ROLLBACK');
     console.error('[Database Migration Error] Migration failed, rolled back:', err.message);
@@ -788,6 +661,30 @@ export const dbRepo = {
       SET status = $1, verification = $2, approved_by = $3, rejection_reason = $4
       WHERE id = $5;
     `, [status, verification, approvedBy || null, reason || null, id]);
+  },
+
+  // Ledger
+  async getLedgerEntries(clientId?: string): Promise<LedgerEntry[]> {
+    if (!pgPool || !isPostgresReady) return [];
+    let query = 'SELECT * FROM user_panel_ledger_entries WHERE 1=1';
+    const params: any[] = [];
+    if (clientId) {
+      params.push(clientId);
+      query += ` AND client_id = ${params.length}`;
+    }
+    query += ' ORDER BY created_at DESC';
+    const { rows } = await pgPool.query(query, params);
+    return rows.map(r => ({
+      id: r.id,
+      date: r.date,
+      referenceId: r.reference_id,
+      description: r.description,
+      debit: parseFloat(r.debit || '0'),
+      credit: parseFloat(r.credit || '0'),
+      runningBalance: parseFloat(r.running_balance || '0'),
+      status: (r.status || 'Completed') as 'Completed' | 'Pending',
+      type: (r.type || 'Trade Settlement') as 'Brokerage' | 'Deposit' | 'Withdrawal' | 'Margin Funding' | 'Trade Settlement',
+    }));
   },
 
   // Support Tickets

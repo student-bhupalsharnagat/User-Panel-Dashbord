@@ -43,12 +43,11 @@ export const API_BASE = (isProd && (
 export const API_BASE_URL = API_BASE;
 
 export function resolveApiUrl(path: string): string {
-  if (/^https?:\/\//i.test(path)) return path;
-  const cleanPath = path.startsWith('/') ? path : `/${path}`;
-  if (API_BASE.endsWith('/api') && cleanPath.startsWith('/api/')) {
-    return `${API_BASE}${cleanPath.substring(4)}`;
-  }
-  return `${API_BASE}${cleanPath}`;
+  if (/^https?:\/\//i.test(path)) return path.replace(/\/api\/api\//g, '/api/');
+  const cleanBase = API_BASE.replace(/\/+$/, '').replace(/\/api$/, '');
+  let cleanPath = path.startsWith('/') ? path : `/${path}`;
+  cleanPath = cleanPath.replace(/^\/api\/api\//, '/api/');
+  return `${cleanBase}${cleanPath}`.replace(/\/api\/api\//g, '/api/');
 }
 
 export const buildApiUrl = resolveApiUrl;
@@ -176,6 +175,46 @@ export const api = {
       setAuthToken(data.token);
     }
     return { user: data.user, token: data.token };
+  },
+
+  // Authoritative Unified Bootstrap Live Feed
+  async getBootstrap(tenantId?: string): Promise<{
+    user: AuthenticatedUser;
+    metrics: MetricSummary;
+    clients: Client[];
+    orders: Order[];
+    positions: Position[];
+    funds: FundTransaction[];
+    ledger: LedgerEntry[];
+    instruments: MarketInstrument[];
+    tenant: TenantBranding;
+    settings: SettingsState;
+    timestamp: string;
+  }> {
+    const q = tenantId ? `?tenantId=${encodeURIComponent(tenantId)}` : '';
+    const res = await authenticatedFetch(`/api/bootstrap${q}`);
+    const data = await res.json();
+    return {
+      user: data.user,
+      metrics: data.metrics,
+      clients: normalizeClients(data.clients || []),
+      orders: data.orders || [],
+      positions: data.positions || [],
+      funds: data.funds || [],
+      ledger: data.ledger || [],
+      instruments: data.instruments || [],
+      tenant: data.tenant,
+      settings: data.settings,
+      timestamp: data.timestamp,
+    };
+  },
+
+  async switchTenant(tenantId: string): Promise<{ success: boolean; tenantId: string }> {
+    const res = await authenticatedFetch('/api/tenant/switch', {
+      method: 'POST',
+      body: JSON.stringify({ tenantId }),
+    });
+    return res.json();
   },
 
   // Dashboard Summary

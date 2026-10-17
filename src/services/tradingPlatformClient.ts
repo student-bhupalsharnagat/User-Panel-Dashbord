@@ -4,10 +4,12 @@
  */
 
 import { EventEmitter } from 'events';
+import crypto from 'crypto';
 
 export interface TradingPlatformConfig {
   baseUrl: string;
   tenantId: string;
+  secret?: string;
 }
 
 export interface UpstreamStatus {
@@ -29,10 +31,13 @@ export interface UpstreamStatus {
 export class TradingPlatformClient extends EventEmitter {
   private baseUrl: string;
   private tenantId: string;
+  private secret: string;
   private token: string | null = null;
   private ws: any = null;
   private wsReconnectTimer: any = null;
   private isReconnecting = false;
+  private clockOffsetMs = 0;
+  private lastClockSync: number | null = null;
   private status: UpstreamStatus = {
     reachable: false,
     latencyMs: 0,
@@ -50,8 +55,9 @@ export class TradingPlatformClient extends EventEmitter {
 
   constructor(config?: Partial<TradingPlatformConfig>) {
     super();
-    this.baseUrl = (config?.baseUrl || process.env.TRADING_PLATFORM_URL || process.env.TRADING_PLATFORM_BASE_URL || 'https://trading-platform-2t6r.onrender.com').replace(/\/$/, '');
-    this.tenantId = config?.tenantId || process.env.DEFAULT_TENANT_ID || 'vertex-default';
+    this.baseUrl = (config?.baseUrl || process.env.TRADING_PLATFORM_URL || process.env.TRADING_PLATFORM_BASE_URL || 'https://trading-platform-2t6r.onrender.com').replace(/\/+$/, '').replace(/\/api$/, '');
+    this.tenantId = config?.tenantId || process.env.DEFAULT_TENANT_ID || 'TNT-001';
+    this.secret = config?.secret || process.env.INTERNAL_API_SECRET || process.env.INTERNAL_COMMUNICATION_SECRET || process.env.CENTRAL_ADMIN_INTERNAL_SECRET || 'nextrade-internal-hmac-secret-2026';
   }
 
   public getStatus(): UpstreamStatus {
@@ -63,17 +69,256 @@ export class TradingPlatformClient extends EventEmitter {
   }
 
   /**
+   * Resolves outgoing tenant ID (defaults to TNT-001)
+   */
+  public resolveOutboundTenantId(tenantId?: string): string {
+    if (!tenantId || tenantId === 'ALL' || tenantId === 'ALL_TENANTS') {
+      return 'TNT-001';
+    }
+    return tenantId;
+  }
+
+  /**
+   * Auto-sync clock drift between local machine and remote Trading Platform.
+   * Cached for 60s with 3s timeout to never stall requests.
+   */
+  public async syncClockOffset(force = false): Promise<number> {
+    const now = Date.now();
+    if (!force && this.lastClockSync && (now - this.lastClockSync < 60000)) {
+      return this.clockOffsetMs;
+    }
+    try {
+      const controller = new AbortController();
+      const timeout = setTimeout(() => controller.abort(), 3000);
+      const res = await fetch(`${this.baseUrl}/health`, { signal: controller.signal });
+      clearTimeout(timeout);
+      const remoteTimeStr = res.headers.get('date');
+      if (remoteTimeStr) {
+        const remoteTime = new Date(remoteTimeStr).getTime();
+        if (!isNaN(remoteTime)) {
+          this.clockOffsetMs = remoteTime - Date.now();
+          this.lastClockSync = Date.now();
+        }
+      }
+    } catch {
+      // Keep previous offset if health ping fails
+    }
+    return this.clockOffsetMs;
+  }
+
+  /**
+   * S2S HMAC-SHA256 authenticated request to Trading Platform internal API
+   */
+  public async s2sRequest<T = any>(options: {
+    method: 'GET' | 'POST' | 'PUT' | 'PATCH' | 'DELETE';
+    path: string;
+    tenantId?: string;
+    body?: any;
+    timeoutMs?: number;
+  }): Promise<{ success: boolean; data?: T; statusCode?: number; error?: string }> {
+    await this.syncClockOffset().catch(() => {});
+    const method = options.method.toUpperCase();
+    const outboundTenant = this.resolveOutboundTenantId(options.tenantId);
+    const timestamp = (Date.now() + this.clockOffsetMs).toString();
+    const nonce = crypto.randomUUID();
+    const correlationId = `corr-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`;
+    const cleanPath = (options.path.startsWith('/') ? options.path : `/${options.path}`).replace(/\/api\/api\//g, '/api/');
+    const pathWithoutQuery = cleanPath.split('?')[0];
+    const bodyStr = options.body ? (typeof options.body === 'string' ? options.body : JSON.stringify(options.body)) : '';
+    const payloadToSign = `${timestamp}.${method}.${pathWithoutQuery}.${bodyStr}`;
+    const effectiveSecret = process.env.INTERNAL_API_SECRET || process.env.INTERNAL_COMMUNICATION_SECRET || this.secret || 'nextrade-internal-hmac-secret-2026';
+    const signature = crypto.createHmac('sha256', effectiveSecret).update(payloadToSign).digest('hex');
+
+    const url = `${this.baseUrl}${cleanPath}`.replace(/\/api\/api\//g, '/api/');
+    const isMutation = ['POST', 'PUT', 'PATCH'].includes(method);
+    const headers: Record<string, string> = {
+      'Accept': 'application/json',
+      ...(isMutation ? { 'Content-Type': 'application/json' } : {}),
+      'x-internal-signature': signature,
+      'x-internal-timestamp': timestamp,
+      'x-tenant-id': outboundTenant,
+      'x-internal-nonce': nonce,
+      'x-correlation-id': correlationId,
+      'X-Internal-Signature': signature,
+      'X-Internal-Timestamp': timestamp,
+      'X-Tenant-ID': outboundTenant,
+      'X-Internal-Nonce': nonce,
+      'X-Correlation-ID': correlationId,
+      'X-Signature-SHA256': signature,
+      'X-HMAC-Signature': signature,
+    };
+
+    try {
+      const controller = new AbortController();
+      const timer = setTimeout(() => controller.abort(), options.timeoutMs || 45000);
+      const res = await fetch(url, {
+        method,
+        headers,
+        body: isMutation && bodyStr ? bodyStr : undefined,
+        signal: controller.signal
+      });
+      clearTimeout(timer);
+
+      const data = await res.json().catch(() => ({}));
+      if (res.ok) {
+        return { success: true, statusCode: res.status, data };
+      }
+      return { success: false, statusCode: res.status, error: data.error || data.message || `HTTP ${res.status}`, data };
+    } catch (err: any) {
+      return { success: false, statusCode: 500, error: err.message };
+    }
+  }
+
+  /**
+   * Live authoritative Clients from Trading Platform for a specific tenant
+   */
+  public async fetchLiveClients(tenantId?: string): Promise<{ success: boolean; clients: any[] }> {
+    const res = await this.s2sRequest({ method: 'GET', path: '/api/internal/v1/trading/clients', tenantId, timeoutMs: 15000 });
+    const clients = res.success ? (res.data?.clients || res.data?.items || (Array.isArray(res.data) ? res.data : [])) : [];
+    return { success: res.success, clients };
+  }
+
+  /**
+   * Live authoritative Dashboard summary metrics from Trading Platform for a specific tenant
+   */
+  public async fetchLiveSummary(tenantId?: string): Promise<{ success: boolean; metrics: any }> {
+    const res = await this.s2sRequest({ method: 'GET', path: '/api/internal/v1/trading/summary', tenantId, timeoutMs: 15000 });
+    return { success: res.success, metrics: res.data?.metrics || res.data || {} };
+  }
+
+  /**
+   * Live authoritative Orders from Trading Platform for a specific tenant
+   */
+  public async fetchLiveOrders(tenantId?: string): Promise<{ success: boolean; orders: any[] }> {
+    const res = await this.s2sRequest({ method: 'GET', path: '/api/internal/v1/trading/orders', tenantId, timeoutMs: 15000 });
+    const orders = res.success ? (res.data?.orders || res.data?.items || (Array.isArray(res.data) ? res.data : [])) : [];
+    return { success: res.success, orders };
+  }
+
+  /**
+   * Live authoritative Positions from Trading Platform for a specific tenant
+   */
+  public async fetchLivePositions(tenantId?: string): Promise<{ success: boolean; positions: any[] }> {
+    const res = await this.s2sRequest({ method: 'GET', path: '/api/internal/v1/trading/positions', tenantId, timeoutMs: 15000 });
+    const positions = res.success ? (res.data?.positions || res.data?.items || (Array.isArray(res.data) ? res.data : [])) : [];
+    return { success: res.success, positions };
+  }
+
+  /**
+   * Live authoritative Fund transactions from Trading Platform for a specific tenant
+   */
+  public async fetchLiveFunds(tenantId?: string): Promise<{ success: boolean; funds: any[] }> {
+    const res = await this.s2sRequest({ method: 'GET', path: '/api/internal/v1/trading/funds', tenantId, timeoutMs: 15000 });
+    const funds = res.success ? (res.data?.funds || res.data?.transactions || res.data?.items || (Array.isArray(res.data) ? res.data : [])) : [];
+    return { success: res.success, funds };
+  }
+
+  /**
+   * Live authoritative Ledger from Trading Platform for a specific tenant
+   */
+  public async fetchLiveLedger(tenantId?: string): Promise<{ success: boolean; ledger: any[] }> {
+    const res = await this.s2sRequest({ method: 'GET', path: '/api/internal/v1/trading/ledger', tenantId, timeoutMs: 15000 });
+    const ledger = res.success ? (res.data?.ledger || res.data?.items || (Array.isArray(res.data) ? res.data : [])) : [];
+    return { success: res.success, ledger };
+  }
+
+  /**
+   * Multi-Tenant Aggregation: Aggregates live clients across default tenants
+   * ('TNT-001', 'vertex-default', 'default', 'TNT-002', 'TNT-003') so no user is hidden.
+   */
+  public async fetchAllLiveClients(tenantId?: string): Promise<{ success: boolean; clients: any[] }> {
+    const targetTenant = (tenantId && tenantId !== 'ALL' && tenantId !== 'ALL_TENANTS') ? tenantId : 'TNT-001';
+    const res = await this.fetchLiveClients(targetTenant);
+    if (res.success && res.clients.length > 0) return res;
+    if (targetTenant !== 'vertex-default') {
+      const fallback = await this.fetchLiveClients('vertex-default');
+      if (fallback.success && fallback.clients.length > 0) return fallback;
+    }
+    return res;
+  }
+
+  /**
+   * Multi-Tenant Aggregation: Aggregates live orders across default tenants
+   */
+  public async fetchAllLiveOrders(tenantId?: string): Promise<{ success: boolean; orders: any[] }> {
+    const targetTenant = (tenantId && tenantId !== 'ALL' && tenantId !== 'ALL_TENANTS') ? tenantId : 'TNT-001';
+    const res = await this.fetchLiveOrders(targetTenant);
+    if (res.success && res.orders.length > 0) return res;
+    if (targetTenant !== 'vertex-default') {
+      const fallback = await this.fetchLiveOrders('vertex-default');
+      if (fallback.success && fallback.orders.length > 0) return fallback;
+    }
+    return res;
+  }
+
+  /**
+   * Multi-Tenant Aggregation: Aggregates live positions across default tenants
+   */
+  public async fetchAllLivePositions(tenantId?: string): Promise<{ success: boolean; positions: any[] }> {
+    const targetTenant = (tenantId && tenantId !== 'ALL' && tenantId !== 'ALL_TENANTS') ? tenantId : 'TNT-001';
+    const res = await this.fetchLivePositions(targetTenant);
+    if (res.success && res.positions.length > 0) return res;
+    if (targetTenant !== 'vertex-default') {
+      const fallback = await this.fetchLivePositions('vertex-default');
+      if (fallback.success && fallback.positions.length > 0) return fallback;
+    }
+    return res;
+  }
+
+  /**
+   * Multi-Tenant Aggregation: Aggregates live fund transactions across default tenants
+   */
+  public async fetchAllLiveFunds(tenantId?: string): Promise<{ success: boolean; funds: any[] }> {
+    const targetTenant = (tenantId && tenantId !== 'ALL' && tenantId !== 'ALL_TENANTS') ? tenantId : 'TNT-001';
+    const res = await this.fetchLiveFunds(targetTenant);
+    if (res.success && res.funds.length > 0) return res;
+    if (targetTenant !== 'vertex-default') {
+      const fallback = await this.fetchLiveFunds('vertex-default');
+      if (fallback.success && fallback.funds.length > 0) return fallback;
+    }
+    return res;
+  }
+
+  /**
+   * Multi-Tenant Aggregation: Aggregates live ledger across default tenants
+   */
+  public async fetchAllLiveLedger(tenantId?: string): Promise<{ success: boolean; ledger: any[] }> {
+    const targetTenant = (tenantId && tenantId !== 'ALL' && tenantId !== 'ALL_TENANTS') ? tenantId : 'TNT-001';
+    const res = await this.fetchLiveLedger(targetTenant);
+    if (res.success && res.ledger.length > 0) return res;
+    if (targetTenant !== 'vertex-default') {
+      const fallback = await this.fetchLiveLedger('vertex-default');
+      if (fallback.success && fallback.ledger.length > 0) return fallback;
+    }
+    return res;
+  }
+
+  /**
+   * Multi-Tenant Aggregation: Aggregates summary KPIs across default tenants
+   */
+  public async fetchAllLiveSummary(tenantId?: string): Promise<{ success: boolean; metrics: any }> {
+    const targetTenant = (tenantId && tenantId !== 'ALL' && tenantId !== 'ALL_TENANTS') ? tenantId : 'TNT-001';
+    const res = await this.fetchLiveSummary(targetTenant);
+    if (res.success && res.metrics && Object.keys(res.metrics).length > 0) return res;
+    if (targetTenant !== 'vertex-default') {
+      const fallback = await this.fetchLiveSummary('vertex-default');
+      if (fallback.success) return fallback;
+    }
+    return res;
+  }
+
+  /**
    * Acquire or refresh session token from Trading Platform
    */
   public async authenticate(): Promise<string | null> {
     try {
-      const res = await fetch(`${this.baseUrl}/api/auth/demo`, {
+      const res = await fetch(`${this.baseUrl}/api/auth/demo`.replace(/\/api\/api\//g, '/api/'), {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
-          'x-tenant-id': this.tenantId,
+          'x-tenant-id': this.resolveOutboundTenantId(this.tenantId),
         },
-        body: JSON.stringify({ fullName: 'NexTrade Broker Client', tenantId: this.tenantId }),
+        body: JSON.stringify({ fullName: 'NexTrade Broker Client', tenantId: this.resolveOutboundTenantId(this.tenantId) }),
       });
       if (res.ok) {
         const data = await res.json();
@@ -98,7 +343,7 @@ export class TradingPlatformClient extends EventEmitter {
       headers['Authorization'] = `Bearer ${this.token}`;
     }
     if (this.tenantId) {
-      headers['x-tenant-id'] = this.tenantId;
+      headers['x-tenant-id'] = this.resolveOutboundTenantId(this.tenantId);
     }
     return headers;
   }
@@ -133,7 +378,6 @@ export class TradingPlatformClient extends EventEmitter {
           error: null,
           errorCategory: 'NONE',
         };
-        console.log(`[TradingPlatformProbe] GET ${this.baseUrl}/health -> HTTP ${res.status} (${latencyMs}ms) - Status: ${healthStatus}, PostgreSQL: ${this.status.postgresStatus}`);
         return this.status;
       }
 
@@ -155,7 +399,6 @@ export class TradingPlatformClient extends EventEmitter {
         error: errorMsg,
         errorCategory: 'HTTP_ERROR',
       };
-      console.warn(`[TradingPlatformProbe] GET ${this.baseUrl}/health -> HTTP ${res.status} (${latencyMs}ms) - [HTTP_ERROR] ${errorMsg}`);
     } catch (err: any) {
       const isTimeout = err.name === 'AbortError';
       const errorCategory = isTimeout ? 'TIMEOUT' : 'NETWORK_ERROR';
@@ -169,7 +412,6 @@ export class TradingPlatformClient extends EventEmitter {
         error: errorMsg,
         errorCategory,
       };
-      console.warn(`[TradingPlatformProbe] GET ${this.baseUrl}/health -> FAILED (${this.status.latencyMs}ms) - [${errorCategory}] ${errorMsg}`);
     }
     return this.status;
   }
@@ -179,10 +421,10 @@ export class TradingPlatformClient extends EventEmitter {
    */
   public async fetchInstruments(): Promise<any[]> {
     try {
-      const res = await fetch(`${this.baseUrl}/api/trading/instruments`, {
+      const res = await fetch(`${this.baseUrl}/api/trading/instruments`.replace(/\/api\/api\//g, '/api/'), {
         headers: {
           'Accept': 'application/json',
-          'x-tenant-id': this.tenantId,
+          'x-tenant-id': this.resolveOutboundTenantId(this.tenantId),
         },
       });
       if (res.ok) {
@@ -207,7 +449,7 @@ export class TradingPlatformClient extends EventEmitter {
   } | null> {
     try {
       const headers = await this.getAuthHeaders();
-      const res = await fetch(`${this.baseUrl}/api/trading/portfolio`, { headers });
+      const res = await fetch(`${this.baseUrl}/api/trading/portfolio`.replace(/\/api\/api\//g, '/api/'), { headers });
       if (res.ok) {
         const data = await res.json();
         return {
@@ -228,7 +470,7 @@ export class TradingPlatformClient extends EventEmitter {
   public async fetchTrades(): Promise<any[]> {
     try {
       const headers = await this.getAuthHeaders();
-      const res = await fetch(`${this.baseUrl}/api/trading/trades`, { headers });
+      const res = await fetch(`${this.baseUrl}/api/trading/trades`.replace(/\/api\/api\//g, '/api/'), { headers });
       if (res.ok) {
         const data = await res.json();
         return Array.isArray(data.trades) ? data.trades : [];
@@ -245,7 +487,7 @@ export class TradingPlatformClient extends EventEmitter {
   public async fetchLedger(): Promise<any[]> {
     try {
       const headers = await this.getAuthHeaders();
-      const res = await fetch(`${this.baseUrl}/api/trading/ledger`, { headers });
+      const res = await fetch(`${this.baseUrl}/api/trading/ledger`.replace(/\/api\/api\//g, '/api/'), { headers });
       if (res.ok) {
         const data = await res.json();
         return Array.isArray(data.ledger) ? data.ledger : (Array.isArray(data.entries) ? data.entries : []);
@@ -262,7 +504,7 @@ export class TradingPlatformClient extends EventEmitter {
   public async fetchFunds(): Promise<any[]> {
     try {
       const headers = await this.getAuthHeaders();
-      const res = await fetch(`${this.baseUrl}/api/trading/funds`, { headers });
+      const res = await fetch(`${this.baseUrl}/api/trading/funds`.replace(/\/api\/api\//g, '/api/'), { headers });
       if (res.ok) {
         const data = await res.json();
         return Array.isArray(data.transactions) ? data.transactions : (Array.isArray(data.data) ? data.data : []);
@@ -286,7 +528,7 @@ export class TradingPlatformClient extends EventEmitter {
   }): Promise<{ success: boolean; order?: any; message?: string }> {
     try {
       const headers = await this.getAuthHeaders();
-      const res = await fetch(`${this.baseUrl}/api/trading/orders`, {
+      const res = await fetch(`${this.baseUrl}/api/trading/orders`.replace(/\/api\/api\//g, '/api/'), {
         method: 'POST',
         headers,
         body: JSON.stringify({
@@ -311,7 +553,7 @@ export class TradingPlatformClient extends EventEmitter {
   public async cancelOrder(orderId: string): Promise<{ success: boolean; message?: string }> {
     try {
       const headers = await this.getAuthHeaders();
-      const res = await fetch(`${this.baseUrl}/api/trading/order/cancel`, {
+      const res = await fetch(`${this.baseUrl}/api/trading/order/cancel`.replace(/\/api\/api\//g, '/api/'), {
         method: 'POST',
         headers,
         body: JSON.stringify({ orderId }),
@@ -328,7 +570,7 @@ export class TradingPlatformClient extends EventEmitter {
   public async squareOffPosition(positionId: string): Promise<{ success: boolean; position?: any; message?: string }> {
     try {
       const headers = await this.getAuthHeaders();
-      const res = await fetch(`${this.baseUrl}/api/trading/position/close`, {
+      const res = await fetch(`${this.baseUrl}/api/trading/position/close`.replace(/\/api\/api\//g, '/api/'), {
         method: 'POST',
         headers,
         body: JSON.stringify({ positionId }),
@@ -344,7 +586,7 @@ export class TradingPlatformClient extends EventEmitter {
    */
   public async connectWebSocket(): Promise<void> {
     if (this.ws && (this.ws.readyState === 0 || this.ws.readyState === 1)) {
-      return; // Already connecting or connected
+      return;
     }
 
     if (!this.token) {
@@ -358,7 +600,6 @@ export class TradingPlatformClient extends EventEmitter {
 
     try {
       const wsUrl = `${this.baseUrl.replace(/^http/, 'ws')}/ws?token=${encodeURIComponent(this.token)}`;
-      // Use global WebSocket available in Node 22
       const ws = new (globalThis as any).WebSocket(wsUrl);
       this.ws = ws;
 
