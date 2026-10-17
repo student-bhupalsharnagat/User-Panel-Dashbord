@@ -45,10 +45,10 @@ app.use(express.json());
 // ==========================================
 const APP_ENV = process.env.APP_ENV || 'development';
 const JWT_SECRET = process.env.JWT_SECRET || 'nextrade-session-jwt-token-secret-2026';
-const INTERNAL_API_SECRET = process.env.INTERNAL_API_SECRET || 'nextrade-internal-hmac-secret-2026';
+const INTERNAL_API_SECRET = process.env.INTERNAL_API_SECRET || process.env.INTERNAL_COMMUNICATION_SECRET || process.env.CENTRAL_ADMIN_INTERNAL_SECRET || 'nextrade-internal-hmac-secret-2026';
 // Authoritative Deployed Production Endpoints
-const TRADING_PLATFORM_URL = process.env.TRADING_PLATFORM_URL || 'https://trading-platform-2t6r.onrender.com';
-const CENTRAL_ADMIN_URL = process.env.CENTRAL_ADMIN_URL || 'https://admin-dashbord-wxcq.onrender.com';
+const TRADING_PLATFORM_URL = process.env.TRADING_PLATFORM_URL || process.env.TRADING_PLATFORM_BASE_URL || 'https://trading-platform-2t6r.onrender.com';
+const CENTRAL_ADMIN_URL = process.env.CENTRAL_ADMIN_URL || process.env.CENTRAL_ADMIN_BASE_URL || 'https://admin-dashbord-wxcq.onrender.com';
 const DEFAULT_TENANT_ID = process.env.DEFAULT_TENANT_ID || 'vertex-default';
 
 // Exact CORS Origins Configuration
@@ -1812,7 +1812,11 @@ app.post('/api/clients', authMiddleware, requireRole(['broker_admin', 'super_adm
   };
 
   clients.unshift(newClient);
-  savePersistence();
+  if (isUsingPostgres()) {
+    dbRepo.insertClient(newClient).catch(e => console.error('[DB] Failed to insert client in PostgreSQL:', e.message));
+  } else {
+    savePersistence();
+  }
 
   auditLogs.unshift({
     id: `LOG-${Date.now().toString().slice(-4)}`,
@@ -2653,7 +2657,7 @@ app.get('/api/ecosystem/status', async (_req: Request, res: Response) => {
         name: 'NexTrade Broker OS (User & Broker Panel)',
         role: 'Broker Admin Dashboard, Client Directory, Order Management & Ledger',
         localUrl: `http://localhost:${PORT}`,
-        deployedUrl: process.env.APP_URL || process.env.RENDER_EXTERNAL_URL || 'https://user-panel-dashbord.onrender.com',
+        deployedUrl: process.env.APP_URL || process.env.RENDER_EXTERNAL_URL || 'https://user-panel-dashbord-ofrt.onrender.com',
         status: 'ONLINE',
         persistenceEngine: isUsingPostgres() ? 'PostgreSQL (Neon / Render cloud)' : 'Transactional State Journal & Snapshot (Local JSON)',
         persistenceFile: isUsingPostgres() ? 'PostgreSQL Database' : PERSISTENCE_FILE,
@@ -2711,7 +2715,7 @@ app.get(['/api/health', '/health'], async (_req: Request, res: Response) => {
     service: 'NexTrade Broker OS & Execution Gateway',
     timestamp: new Date().toISOString(),
     environment: APP_ENV,
-    deployedAppUrl: process.env.APP_URL || process.env.RENDER_EXTERNAL_URL || 'https://user-panel-dashbord.onrender.com',
+    deployedAppUrl: process.env.APP_URL || process.env.RENDER_EXTERNAL_URL || 'https://user-panel-dashbord-ofrt.onrender.com',
     persistence: {
       adapter: isUsingPostgres() ? 'PostgreSQL (Render cloud / Neon)' : 'Transactional Disk Snapshot & State Journal',
       storePath: isUsingPostgres() ? 'PostgreSQL Database' : PERSISTENCE_FILE,
@@ -2759,6 +2763,25 @@ app.get(['/api/health', '/health'], async (_req: Request, res: Response) => {
 async function startServer() {
   // Initialize durable PostgreSQL database persistence
   await initDatabase(APP_ENV);
+
+  // Synchronize in-memory cache with PostgreSQL database records
+  if (isUsingPostgres()) {
+    try {
+      const pgClients = await dbRepo.getClients();
+      if (pgClients && pgClients.length > 0) clients = pgClients;
+      const pgOrders = await dbRepo.getOrders();
+      if (pgOrders && pgOrders.length > 0) orders = pgOrders;
+      const pgPositions = await dbRepo.getPositions();
+      if (pgPositions && pgPositions.length > 0) positions = pgPositions;
+      const pgTxns = await dbRepo.getFundTransactions();
+      if (pgTxns && pgTxns.length > 0) fundTransactions = pgTxns;
+      const pgLedger = await dbRepo.getLedgerEntries();
+      if (pgLedger && pgLedger.length > 0) ledgerEntries = pgLedger;
+      console.log(`[Database] Loaded authoritative records from PostgreSQL: ${clients.length} clients, ${orders.length} orders, ${positions.length} positions.`);
+    } catch (e: any) {
+      console.error('[Database] Error loading initial records from PostgreSQL:', e.message);
+    }
+  }
 
   // Probe upstream Trading Platform & Central Admin
   try {

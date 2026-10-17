@@ -28,9 +28,15 @@ const RAW_API_BASE = (
     : ''
 ).replace(/\/+$/, '');
 
-// Safeguard: Never target localhost in production bundle
+// Safeguard: Never target localhost or obsolete onrender domains in production bundle
 const isProd = typeof import.meta !== 'undefined' && Boolean((import.meta as any).env?.PROD);
-export const API_BASE = (isProd && (RAW_API_BASE.includes('localhost') || RAW_API_BASE.includes('127.0.0.1')))
+export const API_BASE = (isProd && (
+  RAW_API_BASE.includes('localhost') ||
+  RAW_API_BASE.includes('127.0.0.1') ||
+  RAW_API_BASE.includes('user-panel-dashbord.onrender.com') ||
+  RAW_API_BASE.includes('trading-platform-3-1v13') ||
+  RAW_API_BASE.includes('admin-dashbord-2')
+))
   ? ''
   : RAW_API_BASE;
 
