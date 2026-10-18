@@ -196,15 +196,36 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
     setRefreshTrigger((prev) => prev + 1);
   }, []);
 
-  // Fetch Current User & Tenant Branding on mount
+  // Fetch Authoritative Bootstrap Feed (User, Tenant, Instruments) on mount
   useEffect(() => {
-    api.getMe()
-      .then(({ user, tenant }) => {
-        setCurrentUser(user);
-        setTenantBranding(tenant);
+    api.getBootstrap()
+      .then((data) => {
+        if (data.user) setCurrentUser(data.user);
+        if (data.tenant) setTenantBranding(data.tenant);
+        if (Array.isArray(data.instruments) && data.instruments.length > 0) {
+          const ticksMap: Record<string, Partial<MarketInstrument>> = {};
+          for (const inst of data.instruments) {
+            ticksMap[inst.symbol] = {
+              lastPrice: inst.lastPrice,
+              change: inst.change,
+              changePercent: inst.changePercent,
+              bid: inst.bid,
+              ask: inst.ask,
+              high: inst.high,
+              low: inst.low,
+            };
+          }
+          setLatestTicks((prev) => ({ ...prev, ...ticksMap }));
+        }
       })
       .catch((err) => {
-        console.error('Failed to fetch user:', err);
+        console.warn('Initial bootstrap notice, falling back to getMe:', err.message);
+        api.getMe()
+          .then(({ user, tenant }) => {
+            setCurrentUser(user);
+            setTenantBranding(tenant);
+          })
+          .catch((e) => console.error('Failed to fetch user:', e));
       });
   }, []);
 

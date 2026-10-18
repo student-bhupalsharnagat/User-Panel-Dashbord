@@ -256,7 +256,7 @@ let settingsState: SettingsState = {
   marginCallAlerts: true,
 };
 
-let instruments: MarketInstrument[] = [
+export const defaultMarketInstruments: MarketInstrument[] = [
   {
     symbol: 'NIFTY',
     name: 'NIFTY 50',
@@ -421,6 +421,7 @@ let instruments: MarketInstrument[] = [
   },
 ];
 
+let instruments: MarketInstrument[] = [...defaultMarketInstruments];
 let clients: Client[] = [];
 let orders: Order[] = [];
 let positions: Position[] = [];
@@ -515,7 +516,11 @@ export function initPersistenceStore() {
       if (Array.isArray(store.fundTransactions)) fundTransactions = store.fundTransactions;
       if (Array.isArray(store.ledgerEntries)) ledgerEntries = store.ledgerEntries;
       if (Array.isArray(store.auditLogs)) auditLogs = store.auditLogs;
-      if (Array.isArray(store.instruments)) instruments = store.instruments;
+      if (Array.isArray(store.instruments) && store.instruments.length > 0) {
+        instruments = store.instruments;
+      } else {
+        instruments = [...defaultMarketInstruments];
+      }
       if (store.tenantBranding) tenantBranding = { ...tenantBranding, ...store.tenantBranding };
       if (store.settingsState) settingsState = { ...settingsState, ...store.settingsState };
       console.log(`[Persistence] Loaded persisted snapshot: ${clients.length} clients, ${orders.length} orders, ${positions.length} positions, ${fundTransactions.length} txns, ${ledgerEntries.length} ledger entries.`);
@@ -642,10 +647,8 @@ export async function syncUpstreamMarketInstruments() {
   try {
     const upstreamInstruments = await tradingPlatformClient.fetchInstruments();
     if (Array.isArray(upstreamInstruments) && upstreamInstruments.length > 0) {
-      upstreamInstruments.forEach((remoteInst: any) => {
+      const mappedList: MarketInstrument[] = upstreamInstruments.map((remoteInst: any) => {
         const symbol = String(remoteInst.symbol || '').trim();
-        if (!symbol) return;
-        const match = instruments.find(i => i.symbol === symbol);
         const lastPrice = Number(remoteInst.lastPrice ?? remoteInst.price ?? 0);
         const change = Number(remoteInst.change ?? 0);
         const changePercent = Number(remoteInst.changePercent ?? 0);
@@ -655,74 +658,123 @@ export async function syncUpstreamMarketInstruments() {
         const ask = Number(remoteInst.ask ?? (lastPrice > 0 ? +(lastPrice + 0.5).toFixed(2) : 0));
         const lotSize = Number(remoteInst.lotSize ?? 1);
 
-        if (match) {
-          match.lastPrice = lastPrice;
-          match.change = change;
-          match.changePercent = changePercent;
-          match.high = high;
-          match.low = low;
-          match.bid = bid;
-          match.ask = ask;
-          match.lotSize = lotSize;
-          match.status = 'Enabled';
-          match.lastUpdated = new Date().toISOString();
-        } else {
-          let exchange: 'NSE' | 'BSE' | 'NFO' | 'MCX' = 'NSE';
-          let type: 'Equity' | 'Futures' | 'Index' | 'Options' = 'Equity';
+        let exchange: 'NSE' | 'BSE' | 'NFO' | 'MCX' = 'NSE';
+        let type: 'Equity' | 'Futures' | 'Index' | 'Options' = 'Equity';
 
-          if (symbol.includes('/') || remoteInst.category === 'CRYPTO') {
-            exchange = 'MCX';
-            type = 'Futures';
-          } else if (symbol.includes('FUT') || remoteInst.category === 'FUTURES') {
-            exchange = 'NFO';
-            type = 'Futures';
-          } else if (remoteInst.category === 'INDEX' || symbol === 'NIFTY' || symbol === 'BANKNIFTY') {
-            exchange = 'NSE';
-            type = 'Index';
-          } else if (remoteInst.category === 'OPTIONS') {
-            exchange = 'NFO';
-            type = 'Options';
-          } else if (remoteInst.sectionName?.includes('BSE')) {
-            exchange = 'BSE';
-          }
-
-          instruments.push({
-            symbol,
-            name: String(remoteInst.name || symbol),
-            exchange,
-            lastPrice,
-            change,
-            changePercent,
-            bid,
-            ask,
-            volume: remoteInst.volume || '1.2M',
-            high,
-            low,
-            type,
-            contractExpiry: remoteInst.expiry || 'Spot',
-            lotSize,
-            tickSize: 0.05,
-            status: 'Enabled',
-            lastUpdated: new Date().toISOString(),
-          });
+        if (symbol.includes('/') || remoteInst.category === 'CRYPTO') {
+          exchange = 'MCX';
+          type = 'Futures';
+        } else if (symbol.includes('FUT') || remoteInst.category === 'FUTURES') {
+          exchange = 'NFO';
+          type = 'Futures';
+        } else if (remoteInst.category === 'INDEX' || symbol === 'NIFTY' || symbol === 'BANKNIFTY') {
+          exchange = 'NSE';
+          type = 'Index';
+        } else if (remoteInst.category === 'OPTIONS') {
+          exchange = 'NFO';
+          type = 'Options';
+        } else if (remoteInst.sectionName?.includes('BSE')) {
+          exchange = 'BSE';
         }
+
+        return {
+          symbol,
+          name: String(remoteInst.name || symbol),
+          exchange,
+          lastPrice,
+          change,
+          changePercent,
+          bid,
+          ask,
+          volume: remoteInst.volume || '1.2M',
+          high,
+          low,
+          type,
+          contractExpiry: remoteInst.expiry || 'Spot',
+          lotSize,
+          tickSize: 0.05,
+          status: 'Enabled',
+          lastUpdated: new Date().toISOString(),
+        };
       });
-      savePersistence();
-      console.log(`[Upstream Sync] Synced ${upstreamInstruments.length} market instruments from Trading Platform.`);
+
+      if (mappedList.length > 0) {
+        instruments = mappedList;
+        console.log(`[Upstream Sync] Synced ${instruments.length} market instruments from Trading Platform.`);
+        savePersistence();
+      }
+    } else if (instruments.length === 0) {
+      instruments = [...defaultMarketInstruments];
     }
   } catch (err: any) {
     console.warn('[Upstream Sync] Notice syncing market instruments from upstream:', err.message);
+    if (instruments.length === 0) {
+      instruments = [...defaultMarketInstruments];
+    }
   }
 }
 
 let isSyncingAuthoritative = false;
 let lastInstrumentSyncTime = 0;
 
+export function mergeClients(existing: Client[], incomingRaw: any[]): Client[] {
+  if (!Array.isArray(incomingRaw) || incomingRaw.length === 0) return existing;
+  const clientMap = new Map<string, Client>();
+
+  for (const c of existing) {
+    if (c.id) clientMap.set(c.id.toLowerCase().trim(), c);
+    if (c.email) clientMap.set(c.email.toLowerCase().trim(), c);
+  }
+
+  for (const rc of incomingRaw) {
+    const cId = String(rc.id || rc.userId || rc.clientCode || `CLT-${Date.now()}`).trim();
+    const email = String(rc.email || '').toLowerCase().trim();
+    const bal = parseFloat(rc.ledgerBalance ?? rc.balance ?? rc.wallet_balance ?? rc.wallet?.balance ?? '100000');
+    const equity = parseFloat(rc.marginAvailable ?? rc.availableMargin ?? rc.equity ?? rc.available_margin ?? bal);
+    const mappedClient: Client = {
+      id: cId,
+      name: rc.fullName || rc.name || rc.username || 'Trader',
+      email: rc.email || `${cId.toLowerCase()}@tradingplatform.com`,
+      phone: rc.phone || rc.mobile || '+91 98000 00000',
+      pan: rc.pan || 'ABCDE1234F',
+      status: (rc.status || rc.accountStatus || 'Active').toUpperCase() === 'ACTIVE' ? 'Active' : 'Inactive',
+      isDemo: Boolean(rc.isDemo ?? (rc.accountType === 'demo')),
+      ledgerBalance: isNaN(bal) ? 100000 : bal,
+      openPnL: parseFloat(rc.openPnL ?? rc.openPnl ?? rc.pnl ?? '0'),
+      peakLedger: isNaN(bal) ? 100000 : bal,
+      marginUsed: parseFloat(rc.marginUsed ?? rc.margin ?? '0'),
+      income: parseFloat(rc.income ?? '0'),
+      marginAvailable: isNaN(equity) ? 100000 : equity,
+      brokerId: rc.brokerId || 'BRK-ROHAN-01',
+      brokerName: rc.brokerName || 'Rohan Sen',
+      subBrokerId: rc.subBrokerId || 'SUB-BRK-001',
+      masterId: rc.masterId || 'MST-ALPHA-01',
+      tenantId: rc.tenantId || 'TNT-001',
+      kycStatus: rc.kycStatus || 'Verified',
+      kycDocuments: rc.kycDocuments || [],
+      createdDate: rc.createdDate || (rc.createdAt ? new Date(rc.createdAt).toISOString().split('T')[0] : '2026-03-29'),
+      lastActive: rc.lastActive || 'Just now',
+      riskLimit: parseFloat(rc.riskLimit ?? '500000'),
+      isLive: true,
+    };
+
+    const existingMatch = clientMap.get(cId.toLowerCase()) || (email ? clientMap.get(email) : undefined);
+    if (existingMatch) {
+      Object.assign(existingMatch, mappedClient);
+    } else {
+      clientMap.set(cId.toLowerCase(), mappedClient);
+      if (email) clientMap.set(email, mappedClient);
+    }
+  }
+
+  return Array.from(new Set(clientMap.values()));
+}
+
 export async function syncAuthoritativeData(requestedTenantId?: string) {
   if (isSyncingAuthoritative) return;
   isSyncingAuthoritative = true;
   try {
-    const [liveClients, liveOrders, livePositions, liveFunds, liveLedger] = await Promise.all([
+    const [liveClientsRes, liveOrdersRes, livePositionsRes, liveFundsRes, liveLedgerRes] = await Promise.allSettled([
       tradingPlatformClient.fetchAllLiveClients(requestedTenantId),
       tradingPlatformClient.fetchAllLiveOrders(requestedTenantId),
       tradingPlatformClient.fetchAllLivePositions(requestedTenantId),
@@ -730,43 +782,15 @@ export async function syncAuthoritativeData(requestedTenantId?: string) {
       tradingPlatformClient.fetchAllLiveLedger(requestedTenantId),
     ]);
 
-    const clientsList = Array.isArray(liveClients) ? liveClients : ((liveClients as any)?.clients || []);
-    const ordersList = Array.isArray(liveOrders) ? liveOrders : ((liveOrders as any)?.orders || []);
-    const positionsList = Array.isArray(livePositions) ? livePositions : ((livePositions as any)?.positions || []);
-    const fundsList = Array.isArray(liveFunds) ? liveFunds : ((liveFunds as any)?.funds || []);
-    const ledgerList = Array.isArray(liveLedger) ? liveLedger : ((liveLedger as any)?.ledger || []);
+    const clientsList = liveClientsRes.status === 'fulfilled' ? (Array.isArray(liveClientsRes.value) ? liveClientsRes.value : (liveClientsRes.value?.clients || [])) : [];
+    const ordersList = liveOrdersRes.status === 'fulfilled' ? (Array.isArray(liveOrdersRes.value) ? liveOrdersRes.value : (liveOrdersRes.value?.orders || [])) : [];
+    const positionsList = livePositionsRes.status === 'fulfilled' ? (Array.isArray(livePositionsRes.value) ? livePositionsRes.value : (livePositionsRes.value?.positions || [])) : [];
+    const fundsList = liveFundsRes.status === 'fulfilled' ? (Array.isArray(liveFundsRes.value) ? liveFundsRes.value : (liveFundsRes.value?.funds || [])) : [];
+    const ledgerList = liveLedgerRes.status === 'fulfilled' ? (Array.isArray(liveLedgerRes.value) ? liveLedgerRes.value : (liveLedgerRes.value?.ledger || [])) : [];
 
     if (clientsList.length > 0) {
-      clients = clientsList.map((rc: any) => {
-        const cId = String(rc.id || rc.userId || `CLT-${rc.clientCode || '001'}`).trim();
-        const bal = parseFloat(rc.ledgerBalance ?? rc.balance ?? rc.wallet_balance ?? rc.wallet?.balance ?? '100000');
-        const equity = parseFloat(rc.marginAvailable ?? rc.equity ?? rc.available_margin ?? bal);
-        return {
-          id: cId,
-          name: rc.fullName || rc.name || rc.username || 'Trader',
-          email: rc.email || `${cId.toLowerCase()}@tradingplatform.com`,
-          phone: rc.phone || rc.mobile || '+91 98000 00000',
-          pan: rc.pan || 'ABCDE1234F',
-          status: (rc.status || rc.accountStatus || 'Active').toUpperCase() === 'ACTIVE' ? 'Active' : 'Inactive',
-          isDemo: Boolean(rc.isDemo ?? (rc.accountType === 'demo')),
-          ledgerBalance: isNaN(bal) ? 100000 : bal,
-          openPnL: parseFloat(rc.openPnL ?? rc.pnl ?? '0'),
-          peakLedger: isNaN(bal) ? 100000 : bal,
-          marginUsed: parseFloat(rc.marginUsed ?? rc.margin ?? '0'),
-          income: parseFloat(rc.income ?? '0'),
-          marginAvailable: isNaN(equity) ? 100000 : equity,
-          brokerId: rc.brokerId || 'BRK-ROHAN-01',
-          brokerName: rc.brokerName || 'NexTrade Broker',
-          subBrokerId: rc.subBrokerId || 'SUB-BRK-001',
-          masterId: rc.masterId || 'MST-ALPHA-01',
-          tenantId: rc.tenantId || 'TNT-001',
-          kycStatus: rc.kycStatus || 'Verified',
-          kycDocuments: rc.kycDocuments || [],
-          createdDate: rc.createdDate || (rc.createdAt ? new Date(rc.createdAt).toISOString().split('T')[0] : '2026-03-29'),
-          lastActive: rc.lastActive || 'Just now',
-          riskLimit: parseFloat(rc.riskLimit ?? '500000'),
-        };
-      });
+      clients = mergeClients(clients, clientsList);
+      console.log(`[Authoritative Sync] Merged ${clients.length} total clients (${clientsList.length} live from Trading Platform).`);
     }
 
     if (ordersList.length > 0) {
@@ -1256,8 +1280,15 @@ app.get('/api/bootstrap', authMiddleware, async (req: AuthenticatedRequest, res:
   const user = req.user!;
   const tenantId = (req.query.tenantId as string) || user.tenantId || DEFAULT_TENANT_ID;
 
-  // Trigger non-blocking live refresh
-  syncAuthoritativeData(tenantId).catch(() => {});
+  // Ensure initial authoritative sync if clients or instruments are sparse
+  if (clients.length <= 10 || instruments.length <= 10) {
+    await Promise.allSettled([
+      syncUpstreamMarketInstruments(),
+      syncAuthoritativeData(tenantId),
+    ]);
+  } else {
+    syncAuthoritativeData(tenantId).catch(() => {});
+  }
 
   const metrics = calculateAuthoritativeMetrics(user.role, user.brokerId, user.role === 'trader_client' ? user.sub : undefined, user);
 
@@ -1266,6 +1297,7 @@ app.get('/api/bootstrap', authMiddleware, async (req: AuthenticatedRequest, res:
   let scopedPositions = filterByHierarchy(positions, user);
   let scopedFunds = filterByHierarchy(fundTransactions, user);
   let scopedLedger = filterByHierarchy(ledgerEntries, user);
+  const returnedInstruments = instruments && instruments.length > 0 ? instruments : defaultMarketInstruments;
 
   res.json({
     success: true,
@@ -1288,8 +1320,10 @@ app.get('/api/bootstrap', authMiddleware, async (req: AuthenticatedRequest, res:
     orders: scopedOrders,
     positions: scopedPositions,
     funds: scopedFunds,
+    fundTransactions: scopedFunds,
     ledger: scopedLedger,
-    instruments,
+    ledgerEntries: scopedLedger,
+    instruments: returnedInstruments,
     tenant: tenantBranding,
     settings: settingsState,
     timestamp: new Date().toISOString(),
@@ -1413,9 +1447,10 @@ app.get('/api/dashboard/summary', authMiddleware, async (req: AuthenticatedReque
 
 // Market Watch
 app.get('/api/market-watch', authMiddleware, (_req: Request, res: Response) => {
+  const list = instruments && instruments.length > 0 ? instruments : defaultMarketInstruments;
   res.json({
     success: true,
-    instruments,
+    instruments: list,
     timestamp: new Date().toISOString(),
   });
 });
@@ -1425,51 +1460,16 @@ app.get(['/api/clients', '/api/admin/clients'], authMiddleware, async (req: Auth
   const user = req.user!;
   const { q, status, hideDemo } = req.query;
 
-  // Actively fetch live authoritative clients from Trading Platform
-  try {
-    const liveClientsRes = await tradingPlatformClient.fetchAllLiveClients(user.tenantId);
-    if (liveClientsRes.success && Array.isArray(liveClientsRes.clients) && liveClientsRes.clients.length > 0) {
-      const existingIds = new Set(clients.map(c => c.id));
-      for (const rc of liveClientsRes.clients) {
-        const cId = String(rc.id || rc.userId || `CLT-${rc.clientCode || '001'}`).trim();
-        const bal = parseFloat(rc.ledgerBalance ?? rc.balance ?? rc.wallet_balance ?? rc.wallet?.balance ?? '100000');
-        const equity = parseFloat(rc.marginAvailable ?? rc.equity ?? rc.available_margin ?? bal);
-        const mappedClient: Client = {
-          id: cId,
-          name: rc.fullName || rc.name || rc.username || 'Trader',
-          email: rc.email || `${cId.toLowerCase()}@tradingplatform.com`,
-          phone: rc.phone || rc.mobile || '+91 98000 00000',
-          pan: rc.pan || 'ABCDE1234F',
-          status: (rc.status || rc.accountStatus || 'Active').toUpperCase() === 'ACTIVE' ? 'Active' : 'Inactive',
-          isDemo: Boolean(rc.isDemo ?? (rc.accountType === 'demo')),
-          ledgerBalance: isNaN(bal) ? 100000 : bal,
-          openPnL: parseFloat(rc.openPnL ?? rc.pnl ?? '0'),
-          peakLedger: isNaN(bal) ? 100000 : bal,
-          marginUsed: parseFloat(rc.marginUsed ?? rc.margin ?? '0'),
-          income: parseFloat(rc.income ?? '0'),
-          marginAvailable: isNaN(equity) ? 100000 : equity,
-          brokerId: rc.brokerId || 'BRK-ROHAN-01',
-          brokerName: rc.brokerName || 'NexTrade Broker',
-          subBrokerId: rc.subBrokerId || 'SUB-BRK-001',
-          masterId: rc.masterId || 'MST-ALPHA-01',
-          tenantId: rc.tenantId || 'TNT-001',
-          kycStatus: rc.kycStatus || 'Verified',
-          kycDocuments: rc.kycDocuments || [],
-          createdDate: rc.createdDate || (rc.createdAt ? new Date(rc.createdAt).toISOString().split('T')[0] : '2026-03-29'),
-          lastActive: rc.lastActive || 'Just now',
-          riskLimit: parseFloat(rc.riskLimit ?? '500000')
-        };
-        if (!existingIds.has(cId)) {
-          existingIds.add(cId);
-          clients.push(mappedClient);
-        } else {
-          const idx = clients.findIndex(c => c.id === cId);
-          if (idx !== -1) clients[idx] = { ...clients[idx], ...mappedClient };
-        }
+  // Actively fetch live authoritative clients from Trading Platform if not yet populated
+  if (clients.length <= 10) {
+    try {
+      const liveClientsRes = await tradingPlatformClient.fetchAllLiveClients(user.tenantId);
+      if (liveClientsRes.success && Array.isArray(liveClientsRes.clients) && liveClientsRes.clients.length > 0) {
+        clients = mergeClients(clients, liveClientsRes.clients);
       }
+    } catch (err: any) {
+      console.warn('[Clients API] Remote fetch notice:', err.message);
     }
-  } catch (err: any) {
-    console.warn('[Clients API] Remote fetch notice:', err.message);
   }
 
   // Display records according to hierarchy role
@@ -2464,7 +2464,8 @@ app.get('/api/reports/preview/:id', authMiddleware, (req: Request, res: Response
 
 // Instruments
 app.get('/api/instruments', authMiddleware, (_req: Request, res: Response) => {
-  res.json({ success: true, instruments });
+  const list = instruments && instruments.length > 0 ? instruments : defaultMarketInstruments;
+  res.json({ success: true, instruments: list });
 });
 
 app.patch('/api/instruments/:symbol/toggle', authMiddleware, requireRole(['broker_admin', 'super_admin']), (req: AuthenticatedRequest, res: Response) => {
@@ -2734,10 +2735,10 @@ async function startServer() {
     console.warn('[TradingPlatformClient] Probe notice:', err.message);
   }
 
-  // Unconditionally connect WebSocket and sync instruments/authoritative data in background
+  // Connect WebSocket and unconditionally await instrument sync & authoritative data sync at boot
   tradingPlatformClient.connectWebSocket().catch(() => {});
-  syncUpstreamMarketInstruments().catch(() => {});
-  syncAuthoritativeData().catch(() => {});
+  await syncUpstreamMarketInstruments().catch(() => {});
+  await syncAuthoritativeData().catch(() => {});
 
   // Hook Trading Platform real-time events into User Panel SSE broadcast stream
   tradingPlatformClient.on('realtime_event', (event: any) => {

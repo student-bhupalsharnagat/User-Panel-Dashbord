@@ -123,7 +123,7 @@ function normalizeClients(data: any): Client[] {
   }
 
   return list.map((item: any) => ({
-    id: String(item.id || item._id || item.clientId || `CLI-${Math.random().toString(36).slice(2, 7).toUpperCase()}`),
+    id: String(item.id || item._id || item.clientId || item.userId || item.clientCode || `CLI-${Math.random().toString(36).slice(2, 7).toUpperCase()}`),
     name: String(item.name || item.fullName || item.username || 'Unnamed Client'),
     email: String(item.email || ''),
     phone: String(item.phone || item.mobile || ''),
@@ -133,13 +133,18 @@ function normalizeClients(data: any): Client[] {
       : (item.isActive === false ? 'Inactive' : 'Active'),
     isDemo: item.isDemo !== undefined ? Boolean(item.isDemo) : Boolean(item.accountType === 'demo' || item.type === 'demo'),
     ledgerBalance: Number(item.ledgerBalance ?? item.balance ?? 0),
-    openPnL: Number(item.openPnL ?? item.pnl ?? 0),
-    peakLedger: Number(item.peakLedger ?? item.ledgerBalance ?? 0),
-    marginUsed: Number(item.marginUsed ?? 0),
+    openPnL: Number(item.openPnL ?? item.openPnl ?? item.pnl ?? 0),
+    openPnl: Number(item.openPnL ?? item.openPnl ?? item.pnl ?? 0),
+    peakLedger: Number(item.peakLedger ?? item.ledgerBalance ?? item.balance ?? 0),
+    marginUsed: Number(item.marginUsed ?? item.margin ?? 0),
     income: Number(item.income ?? 0),
-    marginAvailable: Number(item.marginAvailable ?? item.availableMargin ?? (item.ledgerBalance ?? 0)),
+    marginAvailable: Number(item.marginAvailable ?? item.availableMargin ?? (item.ledgerBalance ?? item.balance ?? 0)),
+    availableMargin: Number(item.marginAvailable ?? item.availableMargin ?? (item.ledgerBalance ?? item.balance ?? 0)),
     brokerId: String(item.brokerId || 'BRK-ROHAN-01'),
-    brokerName: String(item.brokerName || 'Apex Capital Partners'),
+    brokerName: String(item.brokerName || 'Rohan Sen'),
+    subBrokerId: String(item.subBrokerId || 'SUB-BRK-001'),
+    masterId: String(item.masterId || 'MST-ALPHA-01'),
+    tenantId: String(item.tenantId || 'TNT-001'),
     kycStatus: (item.kycStatus === 'Verified' || item.kycStatus === 'Pending' || item.kycStatus === 'Rejected')
       ? item.kycStatus
       : 'Verified',
@@ -147,6 +152,7 @@ function normalizeClients(data: any): Client[] {
     createdDate: String(item.createdDate || item.createdAt || new Date().toISOString().slice(0, 10)),
     lastActive: String(item.lastActive || item.updatedAt || 'Just now'),
     riskLimit: Number(item.riskLimit ?? 500000),
+    isLive: item.isLive !== undefined ? Boolean(item.isLive) : true,
   }));
 }
 
@@ -185,7 +191,9 @@ export const api = {
     orders: Order[];
     positions: Position[];
     funds: FundTransaction[];
+    fundTransactions?: FundTransaction[];
     ledger: LedgerEntry[];
+    ledgerEntries?: LedgerEntry[];
     instruments: MarketInstrument[];
     tenant: TenantBranding;
     settings: SettingsState;
@@ -194,14 +202,18 @@ export const api = {
     const q = tenantId ? `?tenantId=${encodeURIComponent(tenantId)}` : '';
     const res = await authenticatedFetch(`/api/bootstrap${q}`);
     const data = await res.json();
+    const rawFunds = data.funds || data.fundTransactions || [];
+    const rawLedger = data.ledger || data.ledgerEntries || [];
     return {
       user: data.user,
       metrics: data.metrics,
       clients: normalizeClients(data.clients || []),
       orders: data.orders || [],
       positions: data.positions || [],
-      funds: data.funds || [],
-      ledger: data.ledger || [],
+      funds: rawFunds,
+      fundTransactions: rawFunds,
+      ledger: rawLedger,
+      ledgerEntries: rawLedger,
       instruments: data.instruments || [],
       tenant: data.tenant,
       settings: data.settings,

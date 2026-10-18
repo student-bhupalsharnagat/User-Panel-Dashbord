@@ -195,19 +195,19 @@ export class TradingPlatformClient extends EventEmitter {
   public async fetchLiveClients(tenantId?: string): Promise<{ success: boolean; clients: any[] }> {
     const cleanTenant = this.resolveOutboundTenantId(tenantId);
     const cacheKey = `clients:${cleanTenant}`;
-    const cached = this.getCached<any[]>(cacheKey, 3000);
+    const cached = this.getCached<any[]>(cacheKey, 15000);
     if (cached) {
       return { success: true, clients: cached };
     }
 
     const res = await this.s2sRequest({
       method: 'GET',
-      path: '/api/internal/v1/trading/clients?limit=100',
+      path: '/api/internal/v1/trading/clients?limit=80',
       tenantId: cleanTenant,
-      timeoutMs: 45000
+      timeoutMs: 60000
     });
     if (res.success) {
-      const clients = res.data?.clients || res.data?.items || (Array.isArray(res.data) ? res.data : []);
+      const clients = res.data?.clients || res.data?.items || (Array.isArray(res.data) ? res.data : ((res as any).clients || []));
       if (Array.isArray(clients) && clients.length > 0) {
         this.setCache(cacheKey, clients);
         return { success: true, clients };
@@ -412,21 +412,27 @@ export class TradingPlatformClient extends EventEmitter {
    * Multi-Tenant Aggregation: Aggregates live clients across TNT-001, vertex-default, and Central Admin
    */
   public async fetchAllLiveClients(tenantId?: string): Promise<{ success: boolean; clients: any[] }> {
-    const targetTenant = (tenantId && tenantId !== 'ALL' && tenantId !== 'ALL_TENANTS') ? this.resolveOutboundTenantId(tenantId) : 'TNT-001';
+    const cached = this.getCached<any[]>('clients:all', 30000);
+    if (cached && cached.length > 0) {
+      return { success: true, clients: cached };
+    }
+
+    const clean = (tenantId && tenantId !== 'ALL' && tenantId !== 'ALL_TENANTS') ? this.resolveOutboundTenantId(tenantId) : 'vertex-default';
+    const primaryTenant = clean === 'TNT-001' ? 'vertex-default' : clean;
     
-    // 1. Authoritative primary query on target tenant
-    const primary = await this.fetchLiveClients(targetTenant);
+    // 1. Authoritative primary query (vertex-default has the authoritative live client records)
+    const primary = await this.fetchLiveClients(primaryTenant);
     if (primary.success && Array.isArray(primary.clients) && primary.clients.length > 0) {
       this.setCache('clients:all', primary.clients);
       return { success: true, clients: primary.clients };
     }
 
-    // 2. Fallback to vertex-default if primary tenant returned empty or failed
-    if (targetTenant !== 'vertex-default') {
-      const vtx = await this.fetchLiveClients('vertex-default');
-      if (vtx.success && Array.isArray(vtx.clients) && vtx.clients.length > 0) {
-        this.setCache('clients:all', vtx.clients);
-        return { success: true, clients: vtx.clients };
+    // 2. Fallback to TNT-001 if primary tenant was vertex-default
+    if (primaryTenant !== 'TNT-001') {
+      const fallbackTnt = await this.fetchLiveClients('TNT-001');
+      if (fallbackTnt.success && Array.isArray(fallbackTnt.clients) && fallbackTnt.clients.length > 0) {
+        this.setCache('clients:all', fallbackTnt.clients);
+        return { success: true, clients: fallbackTnt.clients };
       }
     }
 
@@ -448,19 +454,25 @@ export class TradingPlatformClient extends EventEmitter {
    * Multi-Tenant Aggregation: Aggregates live orders across default tenants
    */
   public async fetchAllLiveOrders(tenantId?: string): Promise<{ success: boolean; orders: any[] }> {
-    const targetTenant = (tenantId && tenantId !== 'ALL' && tenantId !== 'ALL_TENANTS') ? this.resolveOutboundTenantId(tenantId) : 'TNT-001';
+    const cached = this.getCached<any[]>('orders:all', 30000);
+    if (cached && cached.length > 0) {
+      return { success: true, orders: cached };
+    }
+
+    const clean = (tenantId && tenantId !== 'ALL' && tenantId !== 'ALL_TENANTS') ? this.resolveOutboundTenantId(tenantId) : 'vertex-default';
+    const primaryTenant = clean === 'TNT-001' ? 'vertex-default' : clean;
     
-    const primary = await this.fetchLiveOrders(targetTenant);
+    const primary = await this.fetchLiveOrders(primaryTenant);
     if (primary.success && Array.isArray(primary.orders) && primary.orders.length > 0) {
       this.setCache('orders:all', primary.orders);
       return { success: true, orders: primary.orders };
     }
 
-    if (targetTenant !== 'vertex-default') {
-      const vtx = await this.fetchLiveOrders('vertex-default');
-      if (vtx.success && Array.isArray(vtx.orders) && vtx.orders.length > 0) {
-        this.setCache('orders:all', vtx.orders);
-        return { success: true, orders: vtx.orders };
+    if (primaryTenant !== 'TNT-001') {
+      const fallbackTnt = await this.fetchLiveOrders('TNT-001');
+      if (fallbackTnt.success && Array.isArray(fallbackTnt.orders) && fallbackTnt.orders.length > 0) {
+        this.setCache('orders:all', fallbackTnt.orders);
+        return { success: true, orders: fallbackTnt.orders };
       }
     }
 
@@ -475,19 +487,25 @@ export class TradingPlatformClient extends EventEmitter {
    * Multi-Tenant Aggregation: Aggregates live positions across default tenants
    */
   public async fetchAllLivePositions(tenantId?: string): Promise<{ success: boolean; positions: any[] }> {
-    const targetTenant = (tenantId && tenantId !== 'ALL' && tenantId !== 'ALL_TENANTS') ? this.resolveOutboundTenantId(tenantId) : 'TNT-001';
+    const cached = this.getCached<any[]>('positions:all', 30000);
+    if (cached && cached.length > 0) {
+      return { success: true, positions: cached };
+    }
+
+    const clean = (tenantId && tenantId !== 'ALL' && tenantId !== 'ALL_TENANTS') ? this.resolveOutboundTenantId(tenantId) : 'vertex-default';
+    const primaryTenant = clean === 'TNT-001' ? 'vertex-default' : clean;
     
-    const primary = await this.fetchLivePositions(targetTenant);
+    const primary = await this.fetchLivePositions(primaryTenant);
     if (primary.success && Array.isArray(primary.positions) && primary.positions.length > 0) {
       this.setCache('positions:all', primary.positions);
       return { success: true, positions: primary.positions };
     }
 
-    if (targetTenant !== 'vertex-default') {
-      const vtx = await this.fetchLivePositions('vertex-default');
-      if (vtx.success && Array.isArray(vtx.positions) && vtx.positions.length > 0) {
-        this.setCache('positions:all', vtx.positions);
-        return { success: true, positions: vtx.positions };
+    if (primaryTenant !== 'TNT-001') {
+      const fallbackTnt = await this.fetchLivePositions('TNT-001');
+      if (fallbackTnt.success && Array.isArray(fallbackTnt.positions) && fallbackTnt.positions.length > 0) {
+        this.setCache('positions:all', fallbackTnt.positions);
+        return { success: true, positions: fallbackTnt.positions };
       }
     }
 
@@ -502,19 +520,25 @@ export class TradingPlatformClient extends EventEmitter {
    * Multi-Tenant Aggregation: Aggregates live fund transactions across default tenants
    */
   public async fetchAllLiveFunds(tenantId?: string): Promise<{ success: boolean; funds: any[] }> {
-    const targetTenant = (tenantId && tenantId !== 'ALL' && tenantId !== 'ALL_TENANTS') ? this.resolveOutboundTenantId(tenantId) : 'TNT-001';
+    const cached = this.getCached<any[]>('funds:all', 30000);
+    if (cached && cached.length > 0) {
+      return { success: true, funds: cached };
+    }
+
+    const clean = (tenantId && tenantId !== 'ALL' && tenantId !== 'ALL_TENANTS') ? this.resolveOutboundTenantId(tenantId) : 'vertex-default';
+    const primaryTenant = clean === 'TNT-001' ? 'vertex-default' : clean;
     
-    const primary = await this.fetchLiveFunds(targetTenant);
+    const primary = await this.fetchLiveFunds(primaryTenant);
     if (primary.success && Array.isArray(primary.funds) && primary.funds.length > 0) {
       this.setCache('funds:all', primary.funds);
       return { success: true, funds: primary.funds };
     }
 
-    if (targetTenant !== 'vertex-default') {
-      const vtx = await this.fetchLiveFunds('vertex-default');
-      if (vtx.success && Array.isArray(vtx.funds) && vtx.funds.length > 0) {
-        this.setCache('funds:all', vtx.funds);
-        return { success: true, funds: vtx.funds };
+    if (primaryTenant !== 'TNT-001') {
+      const fallbackTnt = await this.fetchLiveFunds('TNT-001');
+      if (fallbackTnt.success && Array.isArray(fallbackTnt.funds) && fallbackTnt.funds.length > 0) {
+        this.setCache('funds:all', fallbackTnt.funds);
+        return { success: true, funds: fallbackTnt.funds };
       }
     }
 
@@ -529,19 +553,25 @@ export class TradingPlatformClient extends EventEmitter {
    * Multi-Tenant Aggregation: Aggregates live ledger across default tenants
    */
   public async fetchAllLiveLedger(tenantId?: string): Promise<{ success: boolean; ledger: any[] }> {
-    const targetTenant = (tenantId && tenantId !== 'ALL' && tenantId !== 'ALL_TENANTS') ? this.resolveOutboundTenantId(tenantId) : 'TNT-001';
+    const cached = this.getCached<any[]>('ledger:all', 30000);
+    if (cached && cached.length > 0) {
+      return { success: true, ledger: cached };
+    }
+
+    const clean = (tenantId && tenantId !== 'ALL' && tenantId !== 'ALL_TENANTS') ? this.resolveOutboundTenantId(tenantId) : 'vertex-default';
+    const primaryTenant = clean === 'TNT-001' ? 'vertex-default' : clean;
     
-    const primary = await this.fetchLiveLedger(targetTenant);
+    const primary = await this.fetchLiveLedger(primaryTenant);
     if (primary.success && Array.isArray(primary.ledger) && primary.ledger.length > 0) {
       this.setCache('ledger:all', primary.ledger);
       return { success: true, ledger: primary.ledger };
     }
 
-    if (targetTenant !== 'vertex-default') {
-      const vtx = await this.fetchLiveLedger('vertex-default');
-      if (vtx.success && Array.isArray(vtx.ledger) && vtx.ledger.length > 0) {
-        this.setCache('ledger:all', vtx.ledger);
-        return { success: true, ledger: vtx.ledger };
+    if (primaryTenant !== 'TNT-001') {
+      const fallbackTnt = await this.fetchLiveLedger('TNT-001');
+      if (fallbackTnt.success && Array.isArray(fallbackTnt.ledger) && fallbackTnt.ledger.length > 0) {
+        this.setCache('ledger:all', fallbackTnt.ledger);
+        return { success: true, ledger: fallbackTnt.ledger };
       }
     }
 
