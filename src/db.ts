@@ -57,9 +57,91 @@ export function getPgPool(): Pool | null {
   return pgPool;
 }
 
+export const DUMMY_CLIENT_IDS = [
+  'NT10482', 'NT10387', 'DM20791', 'NT10315', 'NT10078',
+  'NT10198', 'NT10154', 'DM20945', 'NT59729', 'NT61825',
+];
+
+export const DUMMY_CLIENT_NAMES = [
+  'Aarav Mehta', 'Ananya Iyer', 'Arjun Verma', 'Diya Kapoor',
+  'Ishita Singh', 'Kabir Rao', 'Meera Nair', 'Vivaan Shah', 'Rohan Gupta'
+];
+
+export function isDummyIdOrName(val?: string | null): boolean {
+  if (!val) return false;
+  const str = String(val).trim();
+  if (DUMMY_CLIENT_IDS.includes(str)) return true;
+  if (DUMMY_CLIENT_NAMES.includes(str)) return true;
+  if (/^ORD-984/i.test(str)) return true;
+  if (/^POS-77/i.test(str)) return true;
+  if (/^TXN-804/i.test(str)) return true;
+  if (/^LED-39/i.test(str)) return true;
+  return false;
+}
+
+export function isDummyRecord(record: any): boolean {
+  if (!record) return false;
+  const id = record.id || '';
+  const clientId = record.clientId || record.client_id || '';
+  const name = record.name || record.clientName || record.client_name || '';
+  if (isDummyIdOrName(id)) return true;
+  if (isDummyIdOrName(clientId)) return true;
+  if (isDummyIdOrName(name)) return true;
+  return false;
+}
+
+export async function purgeDummyData(pool: Pool): Promise<void> {
+  const client = await pool.connect();
+  try {
+    await client.query('BEGIN');
+    const dummyClientsSql = DUMMY_CLIENT_IDS.map(id => `'${id}'`).join(',');
+    const dummyNamesSql = DUMMY_CLIENT_NAMES.map(name => `'${name.replace(/'/g, "''")}'`).join(',');
+
+    // Explicitly purge dummy records from all user_panel tables
+    const tableCleanups = [
+      `DELETE FROM user_panel_orders WHERE id LIKE 'ORD-984%' OR client_id IN (${dummyClientsSql}) OR client_name IN (${dummyNamesSql})`,
+      `DELETE FROM user_panel_positions WHERE id IN ('POS-77102', 'POS-77103') OR id LIKE 'POS-77%' OR client_id IN (${dummyClientsSql}) OR client_name IN (${dummyNamesSql})`,
+      `DELETE FROM user_panel_fund_transactions WHERE id LIKE 'TXN-804%' OR client_id IN (${dummyClientsSql}) OR client_name IN (${dummyNamesSql})`,
+      `DELETE FROM user_panel_ledger_entries WHERE id LIKE 'LED-39%' OR client_id IN (${dummyClientsSql})`,
+      `DELETE FROM user_panel_clients WHERE id IN (${dummyClientsSql}) OR name IN (${dummyNamesSql})`,
+    ];
+
+    for (const sql of tableCleanups) {
+      try {
+        await client.query(sql);
+      } catch (err: any) {
+        console.warn('[Database] Purge statement notice:', err.message);
+      }
+    }
+
+    // Also attempt cleanup on legacy un-prefixed tables if present
+    const legacyTableCleanups = [
+      `DELETE FROM orders WHERE id LIKE 'ORD-984%' OR client_id IN (${dummyClientsSql})`,
+      `DELETE FROM positions WHERE id IN ('POS-77102', 'POS-77103') OR id LIKE 'POS-77%' OR client_id IN (${dummyClientsSql})`,
+      `DELETE FROM fund_transactions WHERE id LIKE 'TXN-804%' OR client_id IN (${dummyClientsSql})`,
+      `DELETE FROM ledger_entries WHERE id LIKE 'LED-39%' OR client_id IN (${dummyClientsSql})`,
+      `DELETE FROM clients WHERE id IN (${dummyClientsSql}) OR name IN (${dummyNamesSql})`,
+    ];
+
+    for (const sql of legacyTableCleanups) {
+      try {
+        await client.query(sql);
+      } catch {}
+    }
+
+    await client.query('COMMIT');
+    console.log('[Database] Purged all legacy seeded dummy records from PostgreSQL.');
+  } catch (err: any) {
+    await client.query('ROLLBACK').catch(() => {});
+    console.warn('[Database] Notice during dummy data purge:', err.message);
+  } finally {
+    client.release();
+  }
+}
+
 /**
  * Initializes PostgreSQL if DATABASE_URL is configured, executes versioned migrations,
- * and safely imports existing JSON records if tables are fresh.
+ * purges any legacy dummy records, and safely imports branding/settings.
  */
 export async function initDatabase(appEnv: string = 'production'): Promise<boolean> {
   const databaseUrl = process.env.DATABASE_URL;
@@ -92,7 +174,10 @@ export async function initDatabase(appEnv: string = 'production'): Promise<boole
     // Run versioned schema migrations
     await runMigrations(pgPool);
 
-    // Seed/migrate branding and settings safely if DB is fresh
+    // Purge legacy seeded dummy records from PostgreSQL permanently
+    await purgeDummyData(pgPool);
+
+    // Seed/migrate branding and settings safely
     await migrateFromJsonIfEmpty(pgPool);
 
     isPostgresReady = true;
@@ -411,13 +496,8 @@ async function migrateFromJsonIfEmpty(pool: Pool) {
   try {
     const { rows } = await client.query('SELECT COUNT(*) as count FROM user_panel_clients');
     const clientCount = parseInt(rows[0].count, 10);
+    console.log(`[Database Migration] PostgreSQL client count check: ${clientCount} clients.`);
 
-    if (clientCount > 0) {
-      console.log(`[Database Migration] PostgreSQL already contains ${clientCount} clients. Preserving existing database records.`);
-      return;
-    }
-
-    console.log('[Database Migration] PostgreSQL tables are empty. Safely importing initial data from data/persistence-store.json...');
     const raw = fs.readFileSync(PERSISTENCE_FILE, 'utf8');
     const store = JSON.parse(raw);
 
@@ -482,7 +562,8 @@ export const dbRepo = {
   // Clients
   async getClients(brokerId?: string, clientId?: string): Promise<Client[]> {
     if (!pgPool || !isPostgresReady) return [];
-    let query = 'SELECT * FROM user_panel_clients WHERE 1=1';
+    const dummyList = DUMMY_CLIENT_IDS.map(id => `'${id}'`).join(',');
+    let query = `SELECT * FROM user_panel_clients WHERE id NOT IN (${dummyList})`;
     const params: any[] = [];
     if (clientId) {
       params.push(clientId);
@@ -494,7 +575,7 @@ export const dbRepo = {
     let rows: any[] = [];
     try {
       const res = await pgPool.query(query, params);
-      rows = res.rows;
+      rows = res.rows.filter(r => !isDummyRecord(r));
       rows.sort((a, b) => {
         const tA = new Date(a.created_at || a.created_date || a.created || 0).getTime();
         const tB = new Date(b.created_at || b.created_date || b.created || 0).getTime();
@@ -529,7 +610,7 @@ export const dbRepo = {
   },
 
   async insertClient(client: Client): Promise<void> {
-    if (!pgPool || !isPostgresReady) return;
+    if (!pgPool || !isPostgresReady || isDummyRecord(client)) return;
     try {
       await pgPool.query(`
         INSERT INTO user_panel_clients (
@@ -560,7 +641,8 @@ export const dbRepo = {
   // Orders
   async getOrders(brokerId?: string, clientId?: string): Promise<Order[]> {
     if (!pgPool || !isPostgresReady) return [];
-    let query = 'SELECT * FROM user_panel_orders WHERE 1=1';
+    const dummyList = DUMMY_CLIENT_IDS.map(id => `'${id}'`).join(',');
+    let query = `SELECT * FROM user_panel_orders WHERE id NOT LIKE 'ORD-984%' AND (client_id IS NULL OR client_id NOT IN (${dummyList}))`;
     const params: any[] = [];
     if (clientId) {
       params.push(clientId);
@@ -572,7 +654,7 @@ export const dbRepo = {
     let rows: any[] = [];
     try {
       const res = await pgPool.query(query, params);
-      rows = res.rows;
+      rows = res.rows.filter(r => !isDummyRecord(r));
       rows.sort((a, b) => {
         const tA = new Date(a.created_at || a.created || 0).getTime();
         const tB = new Date(b.created_at || b.created || 0).getTime();
@@ -602,7 +684,7 @@ export const dbRepo = {
   },
 
   async insertOrder(order: Order): Promise<void> {
-    if (!pgPool || !isPostgresReady) return;
+    if (!pgPool || !isPostgresReady || isDummyRecord(order)) return;
     try {
       await pgPool.query(`
         INSERT INTO user_panel_orders (
@@ -636,7 +718,8 @@ export const dbRepo = {
   // Positions
   async getPositions(brokerId?: string, clientId?: string): Promise<Position[]> {
     if (!pgPool || !isPostgresReady) return [];
-    let query = 'SELECT * FROM user_panel_positions WHERE 1=1';
+    const dummyList = DUMMY_CLIENT_IDS.map(id => `'${id}'`).join(',');
+    let query = `SELECT * FROM user_panel_positions WHERE id NOT LIKE 'POS-77%' AND id NOT IN ('POS-77102', 'POS-77103') AND (client_id IS NULL OR client_id NOT IN (${dummyList}))`;
     const params: any[] = [];
     if (clientId) {
       params.push(clientId);
@@ -648,7 +731,7 @@ export const dbRepo = {
     let rows: any[] = [];
     try {
       const res = await pgPool.query(query, params);
-      rows = res.rows;
+      rows = res.rows.filter(r => !isDummyRecord(r));
     } catch (err: any) {
       console.warn('[Database dbRepo.getPositions] query notice:', err.message);
       return [];
@@ -674,7 +757,7 @@ export const dbRepo = {
   },
 
   async upsertPosition(position: Position): Promise<void> {
-    if (!pgPool || !isPostgresReady) return;
+    if (!pgPool || !isPostgresReady || isDummyRecord(position)) return;
     try {
       await pgPool.query(`
         INSERT INTO user_panel_positions (
@@ -716,7 +799,8 @@ export const dbRepo = {
   // Fund transactions
   async getFundTransactions(brokerId?: string, clientId?: string): Promise<FundTransaction[]> {
     if (!pgPool || !isPostgresReady) return [];
-    let query = 'SELECT * FROM user_panel_fund_transactions WHERE 1=1';
+    const dummyList = DUMMY_CLIENT_IDS.map(id => `'${id}'`).join(',');
+    let query = `SELECT * FROM user_panel_fund_transactions WHERE id NOT LIKE 'TXN-804%' AND (client_id IS NULL OR client_id NOT IN (${dummyList}))`;
     const params: any[] = [];
     if (clientId) {
       params.push(clientId);
@@ -728,7 +812,7 @@ export const dbRepo = {
     let rows: any[] = [];
     try {
       const res = await pgPool.query(query, params);
-      rows = res.rows;
+      rows = res.rows.filter(r => !isDummyRecord(r));
       rows.sort((a, b) => {
         const tA = new Date(a.created_at || a.request_date || 0).getTime();
         const tB = new Date(b.created_at || b.request_date || 0).getTime();
@@ -772,7 +856,8 @@ export const dbRepo = {
   // Ledger
   async getLedgerEntries(clientId?: string): Promise<LedgerEntry[]> {
     if (!pgPool || !isPostgresReady) return [];
-    let query = 'SELECT * FROM user_panel_ledger_entries WHERE 1=1';
+    const dummyList = DUMMY_CLIENT_IDS.map(id => `'${id}'`).join(',');
+    let query = `SELECT * FROM user_panel_ledger_entries WHERE id NOT LIKE 'LED-39%' AND (client_id IS NULL OR client_id NOT IN (${dummyList}))`;
     const params: any[] = [];
     if (clientId) {
       params.push(clientId);
@@ -781,7 +866,7 @@ export const dbRepo = {
     let rows: any[] = [];
     try {
       const res = await pgPool.query(query, params);
-      rows = res.rows;
+      rows = res.rows.filter(r => !isDummyRecord(r));
       rows.sort((a, b) => {
         const tA = new Date(a.created_at || a.date || 0).getTime();
         const tB = new Date(b.created_at || b.date || 0).getTime();

@@ -28,6 +28,10 @@ import {
   getDatabaseStatus,
   isUsingPostgres,
   dbRepo,
+  isDummyRecord,
+  isDummyIdOrName,
+  DUMMY_CLIENT_IDS,
+  DUMMY_CLIENT_NAMES,
 } from './src/db.ts';
 import { tradingPlatformClient } from './src/services/tradingPlatformClient.ts';
 
@@ -196,9 +200,9 @@ const systemUsers: Record<string, AuthenticatedUser> = {
     avatar: 'RS',
   },
   'trader_client': {
-    id: 'NT10482',
-    name: 'Aarav Mehta',
-    email: 'aarav.mehta@example.com',
+    id: 'USR-TRADER-01',
+    name: 'Active Trader',
+    email: 'trader@nextrade.example',
     role: 'trader_client',
     roleTitle: 'Trader Client',
     brokerId: 'BRK-ROHAN-01',
@@ -207,7 +211,7 @@ const systemUsers: Record<string, AuthenticatedUser> = {
     phone: '+91 98201 54820',
     timezone: 'IST (UTC +05:30)',
     currency: 'INR - Indian Rupee',
-    avatar: 'AM',
+    avatar: 'AT',
   },
   'operations': {
     id: 'USR-OPERATIONS-01',
@@ -510,11 +514,11 @@ export function initPersistenceStore() {
     if (fs.existsSync(PERSISTENCE_FILE)) {
       const raw = fs.readFileSync(PERSISTENCE_FILE, 'utf8');
       const store = JSON.parse(raw);
-      if (Array.isArray(store.clients)) clients = store.clients;
-      if (Array.isArray(store.orders)) orders = store.orders;
-      if (Array.isArray(store.positions)) positions = store.positions;
-      if (Array.isArray(store.fundTransactions)) fundTransactions = store.fundTransactions;
-      if (Array.isArray(store.ledgerEntries)) ledgerEntries = store.ledgerEntries;
+      if (Array.isArray(store.clients)) clients = store.clients.filter((c: any) => !isDummyRecord(c));
+      if (Array.isArray(store.orders)) orders = store.orders.filter((o: any) => !isDummyRecord(o));
+      if (Array.isArray(store.positions)) positions = store.positions.filter((p: any) => !isDummyRecord(p));
+      if (Array.isArray(store.fundTransactions)) fundTransactions = store.fundTransactions.filter((f: any) => !isDummyRecord(f));
+      if (Array.isArray(store.ledgerEntries)) ledgerEntries = store.ledgerEntries.filter((l: any) => !isDummyRecord(l));
       if (Array.isArray(store.auditLogs)) auditLogs = store.auditLogs;
       if (Array.isArray(store.instruments) && store.instruments.length > 0) {
         instruments = store.instruments;
@@ -543,11 +547,11 @@ export function savePersistence() {
       tenantBranding,
       settingsState,
       instruments,
-      clients,
-      orders,
-      positions,
-      fundTransactions,
-      ledgerEntries,
+      clients: clients.filter(c => !isDummyRecord(c)),
+      orders: orders.filter(o => !isDummyRecord(o)),
+      positions: positions.filter(p => !isDummyRecord(p)),
+      fundTransactions: fundTransactions.filter(f => !isDummyRecord(f)),
+      ledgerEntries: ledgerEntries.filter(l => !isDummyRecord(l)),
       auditLogs,
     };
     const tmpFile = `${PERSISTENCE_FILE}.tmp.${Date.now()}`;
@@ -718,15 +722,19 @@ let isSyncingAuthoritative = false;
 let lastInstrumentSyncTime = 0;
 
 export function mergeClients(existing: Client[], incomingRaw: any[]): Client[] {
-  if (!Array.isArray(incomingRaw) || incomingRaw.length === 0) return existing;
+  if (!Array.isArray(incomingRaw) || incomingRaw.length === 0) return existing.filter(c => !isDummyRecord(c));
   const clientMap = new Map<string, Client>();
 
+  // Only consider non-dummy existing clients
   for (const c of existing) {
-    if (c.id) clientMap.set(c.id.toLowerCase().trim(), c);
-    if (c.email) clientMap.set(c.email.toLowerCase().trim(), c);
+    if (!isDummyRecord(c)) {
+      if (c.id) clientMap.set(c.id.toLowerCase().trim(), c);
+      if (c.email) clientMap.set(c.email.toLowerCase().trim(), c);
+    }
   }
 
   for (const rc of incomingRaw) {
+    if (isDummyRecord(rc)) continue;
     const cId = String(rc.id || rc.userId || rc.clientCode || `CLT-${Date.now()}`).trim();
     const email = String(rc.email || '').toLowerCase().trim();
     const bal = parseFloat(rc.ledgerBalance ?? rc.balance ?? rc.wallet_balance ?? rc.wallet?.balance ?? '100000');
@@ -767,7 +775,7 @@ export function mergeClients(existing: Client[], incomingRaw: any[]): Client[] {
     }
   }
 
-  return Array.from(new Set(clientMap.values()));
+  return Array.from(new Set(clientMap.values())).filter(c => !isDummyRecord(c));
 }
 
 export async function syncAuthoritativeData(requestedTenantId?: string) {
@@ -789,12 +797,18 @@ export async function syncAuthoritativeData(requestedTenantId?: string) {
     const ledgerList = liveLedgerRes.status === 'fulfilled' ? (Array.isArray(liveLedgerRes.value) ? liveLedgerRes.value : (liveLedgerRes.value?.ledger || [])) : [];
 
     if (clientsList.length > 0) {
-      clients = mergeClients(clients, clientsList);
-      console.log(`[Authoritative Sync] Merged ${clients.length} total clients (${clientsList.length} live from Trading Platform).`);
+      clients = mergeClients(clients, clientsList).filter(c => !isDummyRecord(c));
+      if (isUsingPostgres()) {
+        for (const c of clients) {
+          dbRepo.insertClient(c).catch(() => {});
+        }
+      }
+    } else {
+      clients = clients.filter(c => !isDummyRecord(c));
     }
 
     if (ordersList.length > 0) {
-      orders = ordersList.map((ro: any) => {
+      const incomingOrders: Order[] = ordersList.map((ro: any): Order => {
         const orderId = String(ro.id || ro.order_id || `ORD-${Date.now()}`).trim();
         const qty = Number(ro.quantity || ro.qty || ro.lots || 1);
         const price = Number(ro.price || ro.orderPrice || 0);
@@ -811,7 +825,7 @@ export async function syncAuthoritativeData(requestedTenantId?: string) {
 
         return {
           id: orderId,
-          clientId: ro.clientId || ro.client_id || ro.user_id || clients[0]?.id || 'NT10482',
+          clientId: ro.clientId || ro.client_id || ro.user_id || clients[0]?.id || 'CLT-001',
           clientName: ro.clientName || ro.client_name || clients[0]?.name || 'Trader',
           instrument: ro.symbol || ro.instrument || 'RELIANCE',
           exchange: ro.symbol?.includes('FUT') ? 'NFO' : (ro.symbol?.includes('/') ? 'MCX' : 'NSE'),
@@ -828,11 +842,23 @@ export async function syncAuthoritativeData(requestedTenantId?: string) {
           masterId: ro.masterId || 'MST-ALPHA-01',
           tenantId: ro.tenantId || 'TNT-001',
         };
-      });
+      }).filter((o: Order) => !isDummyRecord(o));
+
+      const liveIds = new Set(incomingOrders.map(o => o.id));
+      const locallyCreated = orders.filter(o => !isDummyRecord(o) && !liveIds.has(o.id));
+      orders = [...incomingOrders, ...locallyCreated];
+
+      if (isUsingPostgres()) {
+        for (const o of orders) {
+          dbRepo.insertOrder(o).catch(() => {});
+        }
+      }
+    } else {
+      orders = orders.filter(o => !isDummyRecord(o));
     }
 
     if (positionsList.length > 0) {
-      positions = positionsList.map((rp: any) => {
+      const incomingPositions: Position[] = positionsList.map((rp: any): Position => {
         const posId = String(rp.id || rp.positionId || `POS-${rp.symbol}`).trim();
         const buyQty = Number(rp.buyQty || (rp.side === 'BUY' ? rp.quantity : 0));
         const sellQty = Number(rp.sellQty || (rp.side === 'SELL' ? rp.quantity : 0));
@@ -844,7 +870,7 @@ export async function syncAuthoritativeData(requestedTenantId?: string) {
 
         return {
           id: posId,
-          clientId: rp.clientId || rp.userId || rp.client_id || clients[0]?.id || 'NT10482',
+          clientId: rp.clientId || rp.userId || rp.client_id || clients[0]?.id || 'CLT-001',
           clientName: rp.clientName || rp.client_name || clients[0]?.name || 'Trader',
           instrument: rp.symbol || 'RELIANCE',
           exchange: rp.symbol?.includes('FUT') ? 'NFO' : (rp.symbol?.includes('/') ? 'MCX' : 'NSE'),
@@ -863,16 +889,28 @@ export async function syncAuthoritativeData(requestedTenantId?: string) {
           masterId: rp.masterId || 'MST-ALPHA-01',
           tenantId: rp.tenantId || 'TNT-001',
         };
-      });
+      }).filter((p: Position) => !isDummyRecord(p));
+
+      const liveIds = new Set(incomingPositions.map(p => p.id));
+      const locallyCreated = positions.filter(p => !isDummyRecord(p) && !liveIds.has(p.id));
+      positions = [...incomingPositions, ...locallyCreated];
+
+      if (isUsingPostgres()) {
+        for (const p of positions) {
+          dbRepo.upsertPosition(p).catch(() => {});
+        }
+      }
+    } else {
+      positions = positions.filter(p => !isDummyRecord(p));
     }
 
     if (fundsList.length > 0) {
-      fundTransactions = fundsList.map((rf: any) => {
+      const incomingFunds: FundTransaction[] = fundsList.map((rf: any): FundTransaction => {
         const id = String(rf.id || rf.transactionId || `TXN-${Date.now()}`);
         const tType = (rf.type || rf.transaction_type || '').toUpperCase().includes('WITHDRAW') ? 'Withdrawal' : 'Deposit';
         return {
           id,
-          clientId: rf.clientId || rf.client_id || rf.user_id || clients[0]?.id || 'NT10482',
+          clientId: rf.clientId || rf.client_id || rf.user_id || clients[0]?.id || 'CLT-001',
           clientName: rf.clientName || rf.client_name || clients[0]?.name || 'Trader',
           type: tType as 'Deposit' | 'Withdrawal',
           amount: parseFloat(rf.amount || '0'),
@@ -889,11 +927,17 @@ export async function syncAuthoritativeData(requestedTenantId?: string) {
           masterId: rf.masterId || 'MST-ALPHA-01',
           tenantId: rf.tenantId || 'TNT-001',
         };
-      });
+      }).filter((f: FundTransaction) => !isDummyRecord(f));
+
+      const liveIds = new Set(incomingFunds.map(f => f.id));
+      const locallyCreated = fundTransactions.filter(f => !isDummyRecord(f) && !liveIds.has(f.id));
+      fundTransactions = [...incomingFunds, ...locallyCreated];
+    } else {
+      fundTransactions = fundTransactions.filter(f => !isDummyRecord(f));
     }
 
     if (ledgerList.length > 0) {
-      ledgerEntries = ledgerList.map((rl: any) => {
+      const incomingLedger: LedgerEntry[] = ledgerList.map((rl: any): LedgerEntry => {
         const id = String(rl.id || rl.entryId || `LDG-${Date.now()}`);
         const isDebit = (rl.type || rl.entryType || '').toLowerCase().includes('debit');
         const amt = parseFloat(rl.amount || (isDebit ? rl.debit : rl.credit) || '0');
@@ -911,7 +955,17 @@ export async function syncAuthoritativeData(requestedTenantId?: string) {
           brokerId: rl.brokerId || 'BRK-ROHAN-01',
           tenantId: rl.tenantId || 'TNT-001',
         };
-      });
+      }).filter((l: LedgerEntry) => !isDummyRecord(l));
+
+      const liveIds = new Set(incomingLedger.map(l => l.id));
+      const locallyCreated = ledgerEntries.filter(l => !isDummyRecord(l) && !liveIds.has(l.id));
+      ledgerEntries = [...incomingLedger, ...locallyCreated];
+    } else {
+      ledgerEntries = ledgerEntries.filter(l => !isDummyRecord(l));
+    }
+
+    if (clientsList.length > 0 || ordersList.length > 0 || positionsList.length > 0 || fundsList.length > 0) {
+      console.log(`[Live Sync] Synced ${clients.length} live clients, ${orders.length} live orders, ${positions.length} live positions, ${fundTransactions.length} live funds from Trading Platform`);
     }
 
     savePersistence();
@@ -934,15 +988,11 @@ setTimeout(async () => {
   await syncAuthoritativeData().catch(() => {});
 }, 500);
 
-// Continuous background sync with authoritative Trading Platform (4s interval for data, 60s for instruments)
+// Continuous background sync every 10 seconds (unconditionally, even if initial probe was OFFLINE)
 setInterval(async () => {
-  const now = Date.now();
-  if (now - lastInstrumentSyncTime >= 60000) {
-    lastInstrumentSyncTime = now;
-    await syncUpstreamMarketInstruments().catch(() => {});
-  }
+  await syncUpstreamMarketInstruments().catch(() => {});
   await syncAuthoritativeData().catch(() => {});
-}, 4000);
+}, 10000);
 
 // ==========================================
 // IDEMPOTENCY CACHE & OUTBOX
@@ -1149,7 +1199,7 @@ export function filterByHierarchy<T extends { clientId?: string; id?: string; us
   if (user.role === 'trader_client') {
     return items.filter(item => {
       const cId = item.clientId || item.id || item.userId;
-      return cId === user.sub || cId === 'NT10482';
+      return cId === user.sub || (clients[0] && cId === clients[0].id);
     });
   }
   return items;
@@ -1281,7 +1331,7 @@ app.get('/api/bootstrap', authMiddleware, async (req: AuthenticatedRequest, res:
   const tenantId = (req.query.tenantId as string) || user.tenantId || DEFAULT_TENANT_ID;
 
   // Ensure initial authoritative sync if clients or instruments are sparse
-  if (clients.length <= 10 || instruments.length <= 10) {
+  if (clients.filter(c => !isDummyRecord(c)).length === 0 || instruments.length === 0) {
     await Promise.allSettled([
       syncUpstreamMarketInstruments(),
       syncAuthoritativeData(tenantId),
@@ -1290,13 +1340,19 @@ app.get('/api/bootstrap', authMiddleware, async (req: AuthenticatedRequest, res:
     syncAuthoritativeData(tenantId).catch(() => {});
   }
 
+  const cleanClients = clients.filter(c => !isDummyRecord(c));
+  const cleanOrders = orders.filter(o => !isDummyRecord(o));
+  const cleanPositions = positions.filter(p => !isDummyRecord(p));
+  const cleanFunds = fundTransactions.filter(f => !isDummyRecord(f));
+  const cleanLedger = ledgerEntries.filter(l => !isDummyRecord(l));
+
   const metrics = calculateAuthoritativeMetrics(user.role, user.brokerId, user.role === 'trader_client' ? user.sub : undefined, user);
 
-  let scopedClients = filterByHierarchy(clients, user);
-  let scopedOrders = filterByHierarchy(orders, user);
-  let scopedPositions = filterByHierarchy(positions, user);
-  let scopedFunds = filterByHierarchy(fundTransactions, user);
-  let scopedLedger = filterByHierarchy(ledgerEntries, user);
+  let scopedClients = filterByHierarchy(cleanClients, user);
+  let scopedOrders = filterByHierarchy(cleanOrders, user);
+  let scopedPositions = filterByHierarchy(cleanPositions, user);
+  let scopedFunds = filterByHierarchy(cleanFunds, user);
+  let scopedLedger = filterByHierarchy(cleanLedger, user);
   const returnedInstruments = instruments && instruments.length > 0 ? instruments : defaultMarketInstruments;
 
   res.json({
@@ -1461,11 +1517,11 @@ app.get(['/api/clients', '/api/admin/clients'], authMiddleware, async (req: Auth
   const { q, status, hideDemo } = req.query;
 
   // Actively fetch live authoritative clients from Trading Platform if not yet populated
-  if (clients.length <= 10) {
+  if (clients.filter(c => !isDummyRecord(c)).length === 0) {
     try {
       const liveClientsRes = await tradingPlatformClient.fetchAllLiveClients(user.tenantId);
       if (liveClientsRes.success && Array.isArray(liveClientsRes.clients) && liveClientsRes.clients.length > 0) {
-        clients = mergeClients(clients, liveClientsRes.clients);
+        clients = mergeClients(clients, liveClientsRes.clients).filter(c => !isDummyRecord(c));
       }
     } catch (err: any) {
       console.warn('[Clients API] Remote fetch notice:', err.message);
@@ -1473,7 +1529,7 @@ app.get(['/api/clients', '/api/admin/clients'], authMiddleware, async (req: Auth
   }
 
   // Display records according to hierarchy role
-  let result = filterByHierarchy(clients, user);
+  let result = filterByHierarchy(clients.filter(c => !isDummyRecord(c)), user);
 
   if (hideDemo === 'true') {
     result = result.filter(c => !c.isDemo);
@@ -1496,7 +1552,7 @@ app.get(['/api/clients', '/api/admin/clients'], authMiddleware, async (req: Auth
 
 app.get('/api/clients/:id', authMiddleware, (req: AuthenticatedRequest, res: Response) => {
   const user = req.user!;
-  const client = clients.find(c => c.id === req.params.id);
+  const client = clients.filter(c => !isDummyRecord(c)).find(c => c.id === req.params.id);
 
   if (!client) {
     return res.status(404).json({ success: false, message: 'Client not found' });
@@ -1625,7 +1681,7 @@ app.get('/api/orders', authMiddleware, async (req: AuthenticatedRequest, res: Re
 
         const orderObj: Order = {
           id: orderId,
-          clientId: remoteOrder.client_id || remoteOrder.clientId || remoteOrder.user_id || clients[0]?.id || 'NT10482',
+          clientId: remoteOrder.client_id || remoteOrder.clientId || remoteOrder.user_id || clients[0]?.id || 'CLT-001',
           clientName: remoteOrder.client_name || remoteOrder.clientName || clients[0]?.name || 'Trader',
           instrument: remoteOrder.symbol || remoteOrder.instrument || 'RELIANCE',
           exchange: remoteOrder.symbol?.includes('FUT') ? 'NFO' : (remoteOrder.symbol?.includes('/') ? 'MCX' : 'NSE'),
@@ -1643,6 +1699,8 @@ app.get('/api/orders', authMiddleware, async (req: AuthenticatedRequest, res: Re
           tenantId: remoteOrder.tenantId || 'TNT-001',
         };
 
+        if (isDummyRecord(orderObj)) return;
+
         if (match) {
           Object.assign(match, orderObj);
         } else {
@@ -1654,7 +1712,7 @@ app.get('/api/orders', authMiddleware, async (req: AuthenticatedRequest, res: Re
     console.warn('[Orders API] Remote fetch notice:', err.message);
   }
 
-  let result = filterByHierarchy(orders, user);
+  let result = filterByHierarchy(orders.filter(o => !isDummyRecord(o)), user);
 
   if (status && status !== 'All') {
     result = result.filter(o => o.status.toLowerCase() === String(status).toLowerCase());
@@ -1948,7 +2006,7 @@ app.get('/api/positions', authMiddleware, async (req: AuthenticatedRequest, res:
 
         const posObj: Position = {
           id: posId,
-          clientId: remotePos.clientId || remotePos.userId || remotePos.client_id || clients[0]?.id || 'NT10482',
+          clientId: remotePos.clientId || remotePos.userId || remotePos.client_id || clients[0]?.id || 'CLT-001',
           clientName: remotePos.clientName || remotePos.client_name || clients[0]?.name || 'Trader',
           instrument: remotePos.symbol || 'RELIANCE',
           exchange: remotePos.symbol?.includes('FUT') ? 'NFO' : (remotePos.symbol?.includes('/') ? 'MCX' : 'NSE'),
@@ -1968,6 +2026,8 @@ app.get('/api/positions', authMiddleware, async (req: AuthenticatedRequest, res:
           tenantId: remotePos.tenantId || 'TNT-001',
         };
 
+        if (isDummyRecord(posObj)) return;
+
         if (match) {
           Object.assign(match, posObj);
         } else {
@@ -1979,7 +2039,7 @@ app.get('/api/positions', authMiddleware, async (req: AuthenticatedRequest, res:
     console.warn('[Positions API] Remote fetch notice:', err.message);
   }
 
-  let result = filterByHierarchy(positions, user);
+  let result = filterByHierarchy(positions.filter(p => !isDummyRecord(p)), user);
 
   const totalRealised = result.reduce((acc, p) => acc + p.realisedPnL, 0);
   const totalUnrealised = result.reduce((acc, p) => acc + p.unrealisedPnL, 0);
@@ -2138,9 +2198,9 @@ app.get('/api/funds', authMiddleware, async (req: AuthenticatedRequest, res: Res
         if (!existingIds.has(id)) {
           existingIds.add(id);
           const tType = (rf.type || rf.transaction_type || '').toUpperCase().includes('WITHDRAW') ? 'Withdrawal' : 'Deposit';
-          fundTransactions.unshift({
+          const fundObj: FundTransaction = {
             id,
-            clientId: rf.clientId || rf.client_id || rf.user_id || clients[0]?.id || 'NT10482',
+            clientId: rf.clientId || rf.client_id || rf.user_id || clients[0]?.id || 'CLT-001',
             clientName: rf.clientName || rf.client_name || clients[0]?.name || 'Trader',
             type: tType as 'Deposit' | 'Withdrawal',
             amount: parseFloat(rf.amount || '0'),
@@ -2156,7 +2216,10 @@ app.get('/api/funds', authMiddleware, async (req: AuthenticatedRequest, res: Res
             subBrokerId: rf.subBrokerId || 'SUB-BRK-001',
             masterId: rf.masterId || 'MST-ALPHA-01',
             tenantId: rf.tenantId || 'TNT-001',
-          });
+          };
+          if (!isDummyRecord(fundObj)) {
+            fundTransactions.unshift(fundObj);
+          }
         }
       }
     }
@@ -2164,7 +2227,7 @@ app.get('/api/funds', authMiddleware, async (req: AuthenticatedRequest, res: Res
     console.warn('[Funds API] Remote fetch notice:', err.message);
   }
 
-  let result = filterByHierarchy(fundTransactions, user);
+  let result = filterByHierarchy(fundTransactions.filter(f => !isDummyRecord(f)), user);
 
   if (type && type !== 'All') {
     result = result.filter(f => f.type.toLowerCase() === String(type).toLowerCase());
@@ -2316,7 +2379,7 @@ app.get('/api/ledger', authMiddleware, async (req: AuthenticatedRequest, res: Re
           existingIds.add(id);
           const isDebit = (rl.type || rl.entryType || '').toLowerCase().includes('debit');
           const amt = parseFloat(rl.amount || (isDebit ? rl.debit : rl.credit) || '0');
-          ledgerEntries.unshift({
+          const ledgerObj: LedgerEntry = {
             id,
             date: rl.created_at ? new Date(rl.created_at).toISOString().split('T')[0] : '2026-03-29',
             referenceId: rl.referenceId || rl.reference_id || id,
@@ -2329,7 +2392,10 @@ app.get('/api/ledger', authMiddleware, async (req: AuthenticatedRequest, res: Re
             clientId: rl.clientId || rl.client_id || rl.user_id,
             brokerId: rl.brokerId || 'BRK-ROHAN-01',
             tenantId: rl.tenantId || 'TNT-001',
-          });
+          };
+          if (!isDummyRecord(ledgerObj)) {
+            ledgerEntries.unshift(ledgerObj);
+          }
         }
       }
     }
@@ -2337,7 +2403,7 @@ app.get('/api/ledger', authMiddleware, async (req: AuthenticatedRequest, res: Re
     console.warn('[Ledger API] Remote fetch notice:', err.message);
   }
 
-  let resultEntries = filterByHierarchy(ledgerEntries, user);
+  let resultEntries = filterByHierarchy(ledgerEntries.filter(l => !isDummyRecord(l)), user);
 
   res.json({
     success: true,
@@ -2695,32 +2761,32 @@ async function startServer() {
   // Synchronize in-memory cache with PostgreSQL database records
   if (isUsingPostgres()) {
     try {
-      const pgClients = await dbRepo.getClients();
-      if (pgClients && pgClients.length > 0) clients = pgClients;
+      const pgClients = (await dbRepo.getClients()).filter(c => !isDummyRecord(c));
+      clients = pgClients;
     } catch (e: any) {
       console.warn('[Database] Notice loading clients from PostgreSQL:', e.message);
     }
     try {
-      const pgOrders = await dbRepo.getOrders();
-      if (pgOrders && pgOrders.length > 0) orders = pgOrders;
+      const pgOrders = (await dbRepo.getOrders()).filter(o => !isDummyRecord(o));
+      orders = pgOrders;
     } catch (e: any) {
       console.warn('[Database] Notice loading orders from PostgreSQL:', e.message);
     }
     try {
-      const pgPositions = await dbRepo.getPositions();
-      if (pgPositions && pgPositions.length > 0) positions = pgPositions;
+      const pgPositions = (await dbRepo.getPositions()).filter(p => !isDummyRecord(p));
+      positions = pgPositions;
     } catch (e: any) {
       console.warn('[Database] Notice loading positions from PostgreSQL:', e.message);
     }
     try {
-      const pgTxns = await dbRepo.getFundTransactions();
-      if (pgTxns && pgTxns.length > 0) fundTransactions = pgTxns;
+      const pgTxns = (await dbRepo.getFundTransactions()).filter(f => !isDummyRecord(f));
+      fundTransactions = pgTxns;
     } catch (e: any) {
       console.warn('[Database] Notice loading funds from PostgreSQL:', e.message);
     }
     try {
-      const pgLedger = await dbRepo.getLedgerEntries();
-      if (pgLedger && pgLedger.length > 0) ledgerEntries = pgLedger;
+      const pgLedger = (await dbRepo.getLedgerEntries()).filter(l => !isDummyRecord(l));
+      ledgerEntries = pgLedger;
     } catch (e: any) {
       console.warn('[Database] Notice loading ledger from PostgreSQL:', e.message);
     }
