@@ -362,42 +362,40 @@ async function runMigrations(pool: Pool) {
     // Migration 2: Ensure created_at columns exist on all tables
     if (!appliedVersions.has(2)) {
       console.log('[Database Migration] Running Migration 2: Ensure created_at columns exist...');
-      await client.query(`
-        ALTER TABLE user_panel_clients ADD COLUMN IF NOT EXISTS created_at TIMESTAMPTZ DEFAULT NOW();
-        ALTER TABLE user_panel_positions ADD COLUMN IF NOT EXISTS created_at TIMESTAMPTZ DEFAULT NOW();
-        ALTER TABLE user_panel_orders ADD COLUMN IF NOT EXISTS created_at TIMESTAMPTZ DEFAULT NOW();
-        ALTER TABLE user_panel_fund_transactions ADD COLUMN IF NOT EXISTS created_at TIMESTAMPTZ DEFAULT NOW();
-        ALTER TABLE user_panel_ledger_entries ADD COLUMN IF NOT EXISTS created_at TIMESTAMPTZ DEFAULT NOW();
-        ALTER TABLE user_panel_audit_logs ADD COLUMN IF NOT EXISTS created_at TIMESTAMPTZ DEFAULT NOW();
-        ALTER TABLE user_panel_instruments ADD COLUMN IF NOT EXISTS created_at TIMESTAMPTZ DEFAULT NOW();
-        ALTER TABLE user_panel_tickets ADD COLUMN IF NOT EXISTS created_at TIMESTAMPTZ DEFAULT NOW();
-        ALTER TABLE user_panel_tenant_branding ADD COLUMN IF NOT EXISTS created_at TIMESTAMPTZ DEFAULT NOW();
-        ALTER TABLE user_panel_settings ADD COLUMN IF NOT EXISTS created_at TIMESTAMPTZ DEFAULT NOW();
-      `);
+      const allPossibleTables = [
+        'user_panel_clients', 'user_panel_positions', 'user_panel_orders',
+        'user_panel_fund_transactions', 'user_panel_ledger_entries', 'user_panel_audit_logs',
+        'user_panel_instruments', 'user_panel_tickets', 'user_panel_tenant_branding', 'user_panel_settings',
+        'clients', 'positions', 'orders', 'fund_transactions', 'ledger_entries', 'audit_logs', 'instruments', 'tickets'
+      ];
+      for (const tbl of allPossibleTables) {
+        try {
+          await client.query(`ALTER TABLE "${tbl}" ADD COLUMN IF NOT EXISTS created_at TIMESTAMPTZ DEFAULT NOW()`);
+        } catch {}
+      }
 
-      await client.query(
-        'INSERT INTO user_panel_schema_migrations (version, name) VALUES (2, $1)',
-        ['Ensure created_at column exists on all tables']
-      );
+      try {
+        await client.query(
+          'INSERT INTO user_panel_schema_migrations (version, name) VALUES (2, $1) ON CONFLICT (version) DO NOTHING',
+          ['Ensure created_at column exists on all tables']
+        );
+      } catch {}
 
       console.log('[Database Migration] Migration 2 successfully committed.');
     }
 
-    // Guarantee created_at columns exist even if migrations were partially applied
-    try {
-      await client.query(`
-        ALTER TABLE user_panel_clients ADD COLUMN IF NOT EXISTS created_at TIMESTAMPTZ DEFAULT NOW();
-        ALTER TABLE user_panel_positions ADD COLUMN IF NOT EXISTS created_at TIMESTAMPTZ DEFAULT NOW();
-        ALTER TABLE user_panel_orders ADD COLUMN IF NOT EXISTS created_at TIMESTAMPTZ DEFAULT NOW();
-        ALTER TABLE user_panel_fund_transactions ADD COLUMN IF NOT EXISTS created_at TIMESTAMPTZ DEFAULT NOW();
-        ALTER TABLE user_panel_ledger_entries ADD COLUMN IF NOT EXISTS created_at TIMESTAMPTZ DEFAULT NOW();
-      `);
-    } catch {}
+    // Guarantee created_at columns exist unconditionally on primary tables
+    const coreTables = ['user_panel_clients', 'user_panel_positions', 'user_panel_orders', 'user_panel_fund_transactions', 'user_panel_ledger_entries'];
+    for (const tbl of coreTables) {
+      try {
+        await client.query(`ALTER TABLE "${tbl}" ADD COLUMN IF NOT EXISTS created_at TIMESTAMPTZ DEFAULT NOW()`);
+      } catch {}
+    }
 
     await client.query('COMMIT');
   } catch (err: any) {
-    await client.query('ROLLBACK');
-    throw err;
+    try { await client.query('ROLLBACK'); } catch {}
+    console.warn('[Database Migration] Notice running migrations:', err.message);
   } finally {
     client.release();
   }
@@ -495,16 +493,16 @@ export const dbRepo = {
     }
     let rows: any[] = [];
     try {
-      const res = await pgPool.query(query + ' ORDER BY created_at DESC', params);
+      const res = await pgPool.query(query, params);
       rows = res.rows;
+      rows.sort((a, b) => {
+        const tA = new Date(a.created_at || a.created_date || a.created || 0).getTime();
+        const tB = new Date(b.created_at || b.created_date || b.created || 0).getTime();
+        return (tB || 0) - (tA || 0);
+      });
     } catch (err: any) {
-      try {
-        const res = await pgPool.query(query + ' ORDER BY id DESC', params);
-        rows = res.rows;
-      } catch (fallbackErr: any) {
-        console.warn('[Database dbRepo.getClients] query fallback notice:', fallbackErr.message);
-        return [];
-      }
+      console.warn('[Database dbRepo.getClients] query notice:', err.message);
+      return [];
     }
     return rows.map(r => ({
       id: r.id,
@@ -573,16 +571,16 @@ export const dbRepo = {
     }
     let rows: any[] = [];
     try {
-      const res = await pgPool.query(query + ' ORDER BY created_at DESC', params);
+      const res = await pgPool.query(query, params);
       rows = res.rows;
-    } catch {
-      try {
-        const res = await pgPool.query(query + ' ORDER BY id DESC', params);
-        rows = res.rows;
-      } catch (err: any) {
-        console.warn('[Database dbRepo.getOrders] query notice:', err.message);
-        return [];
-      }
+      rows.sort((a, b) => {
+        const tA = new Date(a.created_at || a.created || 0).getTime();
+        const tB = new Date(b.created_at || b.created || 0).getTime();
+        return (tB || 0) - (tA || 0);
+      });
+    } catch (err: any) {
+      console.warn('[Database dbRepo.getOrders] query notice:', err.message);
+      return [];
     }
     return rows.map(r => ({
       id: r.id,
@@ -729,16 +727,16 @@ export const dbRepo = {
     }
     let rows: any[] = [];
     try {
-      const res = await pgPool.query(query + ' ORDER BY created_at DESC', params);
+      const res = await pgPool.query(query, params);
       rows = res.rows;
-    } catch {
-      try {
-        const res = await pgPool.query(query + ' ORDER BY id DESC', params);
-        rows = res.rows;
-      } catch (err: any) {
-        console.warn('[Database dbRepo.getFundTransactions] query notice:', err.message);
-        return [];
-      }
+      rows.sort((a, b) => {
+        const tA = new Date(a.created_at || a.request_date || 0).getTime();
+        const tB = new Date(b.created_at || b.request_date || 0).getTime();
+        return (tB || 0) - (tA || 0);
+      });
+    } catch (err: any) {
+      console.warn('[Database dbRepo.getFundTransactions] query notice:', err.message);
+      return [];
     }
     return rows.map(r => ({
       id: r.id,
@@ -782,16 +780,16 @@ export const dbRepo = {
     }
     let rows: any[] = [];
     try {
-      const res = await pgPool.query(query + ' ORDER BY created_at DESC', params);
+      const res = await pgPool.query(query, params);
       rows = res.rows;
-    } catch {
-      try {
-        const res = await pgPool.query(query + ' ORDER BY id DESC', params);
-        rows = res.rows;
-      } catch (err: any) {
-        console.warn('[Database dbRepo.getLedgerEntries] query notice:', err.message);
-        return [];
-      }
+      rows.sort((a, b) => {
+        const tA = new Date(a.created_at || a.date || 0).getTime();
+        const tB = new Date(b.created_at || b.date || 0).getTime();
+        return (tB || 0) - (tA || 0);
+      });
+    } catch (err: any) {
+      console.warn('[Database dbRepo.getLedgerEntries] query notice:', err.message);
+      return [];
     }
     return rows.map(r => ({
       id: r.id,

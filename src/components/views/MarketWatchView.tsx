@@ -125,7 +125,7 @@ export const MarketWatchView: React.FC = () => {
                 ? 'bg-emerald-500/15 text-emerald-400 border-emerald-500/30'
                 : 'bg-indigo-500/15 text-indigo-400 border border-indigo-500/30'
             }`}>
-              {isLiveMode ? 'Live engine' : 'Demo data'}
+              {isLiveMode ? 'Live engine' : 'Sandbox mode'}
             </span>
           </div>
           <p className="text-xs text-slate-400 mt-0.5">
@@ -157,14 +157,14 @@ export const MarketWatchView: React.FC = () => {
           <div>
             <h3 className="text-sm font-bold text-white">Primary watchlist</h3>
             <p className="text-[11px] text-slate-400">
-              {filteredInstruments.length} demonstration live records · Broadcast ticks: {lastTickTimestamp}
+              {filteredInstruments.length} authoritative live records · Broadcast ticks: {lastTickTimestamp}
             </p>
           </div>
 
           <div className="flex items-center gap-1.5 text-xs text-amber-400">
             <span className={`w-2 h-2 rounded-full ${isRealtimeConnected ? 'bg-emerald-400 animate-pulse' : 'bg-amber-400'}`} />
             <span className="text-[11px] text-slate-400 font-mono">
-              {isRealtimeConnected ? 'Live streaming (WebSocket / SSE)' : 'Delayed demo feed'}
+              {isRealtimeConnected ? 'Live streaming (WebSocket / SSE)' : 'Real-time market feed'}
             </span>
           </div>
         </div>

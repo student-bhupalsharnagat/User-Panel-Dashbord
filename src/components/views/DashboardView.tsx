@@ -94,7 +94,7 @@ export const DashboardView: React.FC = () => {
           <div className="flex items-center gap-2.5">
             <h2 className="text-xl font-bold tracking-tight text-white">Business overview</h2>
             <span className="px-2 py-0.5 rounded text-[11px] font-semibold bg-indigo-500/15 text-indigo-400 border border-indigo-500/30">
-              {isLiveMode ? 'Live engine' : 'Demo data'}
+              {isLiveMode ? 'Live engine' : 'Sandbox mode'}
             </span>
           </div>
           <p className="text-xs text-slate-400 mt-0.5">

@@ -89,7 +89,7 @@ export const LedgerView: React.FC = () => {
                 ? 'bg-emerald-500/15 text-emerald-400 border-emerald-500/30'
                 : 'bg-indigo-500/15 text-indigo-400 border border-indigo-500/30'
             }`}>
-              {isLiveMode ? 'Live engine' : 'Demo data'}
+              {isLiveMode ? 'Live engine' : 'Sandbox mode'}
             </span>
           </div>
           <p className="text-xs text-slate-400 mt-0.5">

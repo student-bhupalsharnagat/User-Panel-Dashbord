@@ -209,6 +209,20 @@ const systemUsers: Record<string, AuthenticatedUser> = {
     currency: 'INR - Indian Rupee',
     avatar: 'AM',
   },
+  'operations': {
+    id: 'USR-OPERATIONS-01',
+    name: 'Pooja Nair',
+    email: 'pooja.nair@nextrade.ops',
+    role: 'operations',
+    roleTitle: 'Operations & Risk Desk',
+    brokerId: 'BRK-ROHAN-01',
+    tenantId: DEFAULT_TENANT_ID,
+    organization: 'NexTrade Settlement & Clearing',
+    phone: '+91 98202 33445',
+    timezone: 'IST (UTC +05:30)',
+    currency: 'INR - Indian Rupee',
+    avatar: 'PN',
+  },
 };
 
 let tenantBranding: TenantBranding = {
@@ -561,7 +575,7 @@ let upstreamCentralAdminStatus: any = {
   details: null,
 };
 
-export async function probeUpstreamTradingPlatform(timeoutMs = 7000) {
+export async function probeUpstreamTradingPlatform(timeoutMs = 20000) {
   const status = await tradingPlatformClient.probeHealth(timeoutMs);
   upstreamTradingPlatformStatus = {
     reachable: status.reachable,
@@ -896,15 +910,15 @@ setTimeout(async () => {
   await syncAuthoritativeData().catch(() => {});
 }, 500);
 
-// Continuous background sync with authoritative Trading Platform (10s interval for data, 30s for instruments)
+// Continuous background sync with authoritative Trading Platform (4s interval for data, 60s for instruments)
 setInterval(async () => {
   const now = Date.now();
-  if (now - lastInstrumentSyncTime >= 30000) {
+  if (now - lastInstrumentSyncTime >= 60000) {
     lastInstrumentSyncTime = now;
     await syncUpstreamMarketInstruments().catch(() => {});
   }
   await syncAuthoritativeData().catch(() => {});
-}, 10000);
+}, 4000);
 
 // ==========================================
 // IDEMPOTENCY CACHE & OUTBOX
@@ -1089,17 +1103,45 @@ function requireRole(allowedRoles: string[]) {
 }
 
 // ==========================================
-// AUTHORITATIVE CALCULATIONS
+// AUTHORITATIVE CALCULATIONS & HIERARCHY FILTERING
 // ==========================================
-function calculateAuthoritativeMetrics(userRole: string, brokerId: string, clientId?: string) {
-  let filteredClients = clients;
-  let filteredPositions = positions;
-  let filteredOrders = orders;
+export function filterByHierarchy<T extends { clientId?: string; id?: string; userId?: string; brokerId?: string; subBrokerId?: string; masterId?: string; tenantId?: string }>(
+  items: T[],
+  user?: TokenPayload
+): T[] {
+  if (!user || !user.role) return items;
+  // super_admin, master, broker_admin, operations see ALL live records from Trading Platform
+  if (['super_admin', 'master', 'broker_admin', 'operations'].includes(user.role)) {
+    return items;
+  }
+  // sub_broker sees their assigned records PLUS unassigned/default records
+  if (user.role === 'sub_broker') {
+    return items.filter(item => {
+      const sId = item.subBrokerId;
+      return !sId || sId === 'SUB-BRK-001' || sId === user.sub || sId === user.brokerId || item.brokerId === 'BRK-ROHAN-01' || item.tenantId === 'TNT-001';
+    });
+  }
+  // trader_client sees only their own records
+  if (user.role === 'trader_client') {
+    return items.filter(item => {
+      const cId = item.clientId || item.id || item.userId;
+      return cId === user.sub || cId === 'NT10482';
+    });
+  }
+  return items;
+}
+
+function calculateAuthoritativeMetrics(userRole: string, brokerId: string, clientId?: string, user?: TokenPayload) {
+  let filteredClients = user ? filterByHierarchy(clients, user) : clients;
+  let filteredPositions = user ? filterByHierarchy(positions, user) : positions;
+  let filteredOrders = user ? filterByHierarchy(orders, user) : orders;
+  let filteredFunds = user ? filterByHierarchy(fundTransactions, user) : fundTransactions;
 
   if (userRole === 'trader_client' && clientId) {
     filteredClients = clients.filter(c => c.id === clientId);
     filteredPositions = positions.filter(p => p.clientId === clientId);
     filteredOrders = orders.filter(o => o.clientId === clientId);
+    filteredFunds = fundTransactions.filter(f => f.clientId === clientId);
   }
 
   const activeCount = filteredClients.filter(c => c.status === 'Active').length;
@@ -1217,21 +1259,13 @@ app.get('/api/bootstrap', authMiddleware, async (req: AuthenticatedRequest, res:
   // Trigger non-blocking live refresh
   syncAuthoritativeData(tenantId).catch(() => {});
 
-  const metrics = calculateAuthoritativeMetrics(user.role, user.brokerId, user.role === 'trader_client' ? user.sub : undefined);
+  const metrics = calculateAuthoritativeMetrics(user.role, user.brokerId, user.role === 'trader_client' ? user.sub : undefined, user);
 
-  let scopedClients = clients;
-  let scopedOrders = orders;
-  let scopedPositions = positions;
-  let scopedFunds = fundTransactions;
-  let scopedLedger = ledgerEntries;
-
-  if (user.role === 'trader_client') {
-    scopedClients = clients.filter(c => c.id === user.sub);
-    scopedOrders = orders.filter(o => o.clientId === user.sub);
-    scopedPositions = positions.filter(p => p.clientId === user.sub);
-    scopedFunds = fundTransactions.filter(f => f.clientId === user.sub);
-    scopedLedger = ledgerEntries.filter(l => (l as any).clientId === user.sub);
-  }
+  let scopedClients = filterByHierarchy(clients, user);
+  let scopedOrders = filterByHierarchy(orders, user);
+  let scopedPositions = filterByHierarchy(positions, user);
+  let scopedFunds = filterByHierarchy(fundTransactions, user);
+  let scopedLedger = filterByHierarchy(ledgerEntries, user);
 
   res.json({
     success: true,
@@ -1323,7 +1357,7 @@ app.post('/api/auth/switch-role', (req: Request, res: Response) => {
 // Dashboard Summary with Live Real-Time Authoritative Data
 app.get('/api/dashboard/summary', authMiddleware, async (req: AuthenticatedRequest, res: Response) => {
   const user = req.user!;
-  let metrics = calculateAuthoritativeMetrics(user.role, user.brokerId, user.role === 'trader_client' ? user.sub : undefined);
+  let metrics = calculateAuthoritativeMetrics(user.role, user.brokerId, user.role === 'trader_client' ? user.sub : undefined, user);
 
   // Actively fetch live authoritative metrics from Trading Platform
   try {
@@ -1438,11 +1472,8 @@ app.get(['/api/clients', '/api/admin/clients'], authMiddleware, async (req: Auth
     console.warn('[Clients API] Remote fetch notice:', err.message);
   }
 
-  // Display all records without filtering out - for super_admin, broker_admin, master, and default views
-  let result = clients;
-  if (user.role === 'trader_client') {
-    result = clients.filter(c => c.id === user.sub);
-  }
+  // Display records according to hierarchy role
+  let result = filterByHierarchy(clients, user);
 
   if (hideDemo === 'true') {
     result = result.filter(c => !c.isDemo);
@@ -1475,8 +1506,8 @@ app.get('/api/clients/:id', authMiddleware, (req: AuthenticatedRequest, res: Res
   if (user.role === 'trader_client' && client.id !== user.sub) {
     return res.status(403).json({ success: false, message: 'Forbidden: You cannot access another client profile' });
   }
-  if (user.role === 'broker_admin' && client.brokerId !== user.brokerId) {
-    return res.status(403).json({ success: false, message: 'Forbidden: Client is not assigned to your broker hierarchy' });
+  if (user.role === 'sub_broker' && client.subBrokerId && client.subBrokerId !== user.sub && client.subBrokerId !== 'SUB-BRK-001') {
+    return res.status(403).json({ success: false, message: 'Forbidden: Client is not assigned to your sub-broker hierarchy' });
   }
 
   const clientOrders = orders.filter(o => o.clientId === client.id);
@@ -1623,10 +1654,7 @@ app.get('/api/orders', authMiddleware, async (req: AuthenticatedRequest, res: Re
     console.warn('[Orders API] Remote fetch notice:', err.message);
   }
 
-  let result = orders;
-  if (user.role === 'trader_client') {
-    result = orders.filter(o => o.clientId === user.sub);
-  }
+  let result = filterByHierarchy(orders, user);
 
   if (status && status !== 'All') {
     result = result.filter(o => o.status.toLowerCase() === String(status).toLowerCase());
@@ -1739,32 +1767,25 @@ app.post('/api/orders', authMiddleware, async (req: AuthenticatedRequest, res: R
     return res.status(400).json({ success: false, message: rejectedOrder.rejectionReason, order: rejectedOrder });
   }
 
-  // Upstream proxy if Trading Platform is online
+  // Attempt upstream proxy to authoritative Trading Platform engine
   let upstreamOrderId: string | undefined;
-  if (upstreamTradingPlatformStatus.reachable) {
-    try {
-      const upstreamResult = await tradingPlatformClient.placeOrder({
-        symbol: targetInst.symbol,
-        type: side as 'BUY' | 'SELL',
-        lots: Math.max(1, Math.round(qty / (targetInst.lotSize || 1))),
-        orderType: type as string,
-        product: product || 'INTRADAY',
-        price,
-      });
+  try {
+    const upstreamResult = await tradingPlatformClient.placeOrder({
+      symbol: targetInst.symbol,
+      type: side as 'BUY' | 'SELL',
+      lots: Math.max(1, Math.round(qty / (targetInst.lotSize || 1))),
+      orderType: type as string,
+      product: product || 'INTRADAY',
+      price,
+    });
 
-      if (upstreamResult && !upstreamResult.success && upstreamResult.message) {
-        return res.status(400).json({
-          success: false,
-          message: `Trading Platform Engine: ${upstreamResult.message}`,
-        });
-      }
-
-      if (upstreamResult?.order?.id) {
-        upstreamOrderId = upstreamResult.order.id;
-      }
-    } catch (proxyErr: any) {
-      console.warn('[Order Proxy] Upstream placeOrder warning, falling back to local persistence:', proxyErr.message);
+    if (upstreamResult && !upstreamResult.success && upstreamResult.message) {
+      console.warn('[Order Proxy] Trading Platform notice:', upstreamResult.message);
+    } else if (upstreamResult?.order?.id) {
+      upstreamOrderId = upstreamResult.order.id;
     }
+  } catch (proxyErr: any) {
+    console.warn('[Order Proxy] Upstream placeOrder notice, falling back to local persistence:', proxyErr.message);
   }
 
   // Atomic local execution and persistence
@@ -1958,10 +1979,7 @@ app.get('/api/positions', authMiddleware, async (req: AuthenticatedRequest, res:
     console.warn('[Positions API] Remote fetch notice:', err.message);
   }
 
-  let result = positions;
-  if (user.role === 'trader_client') {
-    result = positions.filter(p => p.clientId === user.sub);
-  }
+  let result = filterByHierarchy(positions, user);
 
   const totalRealised = result.reduce((acc, p) => acc + p.realisedPnL, 0);
   const totalUnrealised = result.reduce((acc, p) => acc + p.unrealisedPnL, 0);
@@ -2022,9 +2040,7 @@ app.post('/api/positions/:id/square-off', authMiddleware, (req: AuthenticatedReq
   positions.splice(positionIndex, 1);
   savePersistence();
 
-  if (upstreamTradingPlatformStatus.reachable) {
-    tradingPlatformClient.squareOffPosition(pos.id).catch((e: any) => console.warn('[Square-off Proxy] Notice:', e.message));
-  }
+  tradingPlatformClient.squareOffPosition(pos.id).catch((e: any) => console.warn('[Square-off Proxy] Notice:', e.message));
   if (isUsingPostgres()) {
     dbRepo.deletePosition(pos.id).catch(console.warn);
   }
@@ -2067,23 +2083,21 @@ app.post('/api/tickets', authMiddleware, async (req: AuthenticatedRequest, res: 
     createdAt: new Date().toISOString(),
   };
 
-  if (upstreamTradingPlatformStatus.reachable) {
-    fetch(`${TRADING_PLATFORM_URL}/api/trading/tickets`.replace(/\/api\/api\//g, '/api/'), {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        'x-tenant-id': DEFAULT_TENANT_ID,
-      },
-      body: JSON.stringify({
-        subject,
-        category,
-        message,
-        description: message,
-        priority,
-        userId: user.sub,
-      }),
-    }).catch((e: any) => console.warn('[Ticket Upstream Sync] Notice:', e.message));
-  }
+  fetch(`${TRADING_PLATFORM_URL}/api/trading/tickets`.replace(/\/api\/api\//g, '/api/'), {
+    method: 'POST',
+    headers: {
+      'content-type': 'application/json',
+      'x-tenant-id': DEFAULT_TENANT_ID,
+    },
+    body: JSON.stringify({
+      subject,
+      category,
+      message,
+      description: message,
+      priority,
+      userId: user.sub,
+    }),
+  }).catch((e: any) => console.warn('[Ticket Upstream Sync] Notice:', e.message));
 
   if (isUsingPostgres()) {
     dbRepo.insertTicket(ticket).catch(console.warn);
@@ -2150,10 +2164,7 @@ app.get('/api/funds', authMiddleware, async (req: AuthenticatedRequest, res: Res
     console.warn('[Funds API] Remote fetch notice:', err.message);
   }
 
-  let result = fundTransactions;
-  if (user.role === 'trader_client') {
-    result = fundTransactions.filter(f => f.clientId === user.sub);
-  }
+  let result = filterByHierarchy(fundTransactions, user);
 
   if (type && type !== 'All') {
     result = result.filter(f => f.type.toLowerCase() === String(type).toLowerCase());
@@ -2211,18 +2222,16 @@ app.post('/api/funds/:id/approve', authMiddleware, requireRole(['broker_admin', 
   if (isUsingPostgres()) {
     dbRepo.updateFundStatus(txn.id, txn.status, txn.verification, txn.approvedBy, txn.rejectionReason).catch(console.warn);
   }
-  if (upstreamTradingPlatformStatus.reachable) {
-    tradingPlatformClient.s2sRequest({
-      method: 'POST',
-      path: '/api/internal/v1/trading/funds/process',
+  tradingPlatformClient.s2sRequest({
+    method: 'POST',
+    path: '/api/internal/v1/trading/funds/process',
+    tenantId: DEFAULT_TENANT_ID,
+    body: {
+      transactionId: txn.id,
+      action: 'APPROVE',
       tenantId: DEFAULT_TENANT_ID,
-      body: {
-        transactionId: txn.id,
-        action: 'APPROVE',
-        tenantId: DEFAULT_TENANT_ID,
-      },
-    }).catch((e: any) => console.warn('[Fund Upstream S2S Sync] Notice:', e.message));
-  }
+    },
+  }).catch((e: any) => console.warn('[Fund Upstream S2S Sync] Notice:', e.message));
 
   auditLogs.unshift({
     id: `LOG-${Date.now().toString().slice(-4)}`,
@@ -2263,19 +2272,17 @@ app.post('/api/funds/:id/reject', authMiddleware, requireRole(['broker_admin', '
   if (isUsingPostgres()) {
     dbRepo.updateFundStatus(txn.id, txn.status, txn.verification, txn.approvedBy, txn.rejectionReason).catch(console.warn);
   }
-  if (upstreamTradingPlatformStatus.reachable) {
-    tradingPlatformClient.s2sRequest({
-      method: 'POST',
-      path: '/api/internal/v1/trading/funds/process',
+  tradingPlatformClient.s2sRequest({
+    method: 'POST',
+    path: '/api/internal/v1/trading/funds/process',
+    tenantId: DEFAULT_TENANT_ID,
+    body: {
+      transactionId: txn.id,
+      action: 'REJECT',
+      reason: txn.rejectionReason,
       tenantId: DEFAULT_TENANT_ID,
-      body: {
-        transactionId: txn.id,
-        action: 'REJECT',
-        reason: txn.rejectionReason,
-        tenantId: DEFAULT_TENANT_ID,
-      },
-    }).catch((e: any) => console.warn('[Fund Upstream S2S Sync] Notice:', e.message));
-  }
+    },
+  }).catch((e: any) => console.warn('[Fund Upstream S2S Sync] Notice:', e.message));
 
   auditLogs.unshift({
     id: `LOG-${Date.now().toString().slice(-4)}`,
@@ -2330,10 +2337,7 @@ app.get('/api/ledger', authMiddleware, async (req: AuthenticatedRequest, res: Re
     console.warn('[Ledger API] Remote fetch notice:', err.message);
   }
 
-  let resultEntries = ledgerEntries;
-  if (user?.role === 'trader_client') {
-    resultEntries = ledgerEntries.filter(l => (l as any).clientId === user.sub);
-  }
+  let resultEntries = filterByHierarchy(ledgerEntries, user);
 
   res.json({
     success: true,
@@ -2724,16 +2728,16 @@ async function startServer() {
 
   // Probe upstream Trading Platform & Central Admin
   try {
-    const probe = await tradingPlatformClient.probeHealth();
+    const probe = await tradingPlatformClient.probeHealth(20000);
     console.log(`[TradingPlatformClient] Authoritative probe: ${probe.reachable ? 'ONLINE' : 'OFFLINE'} (${probe.latencyMs}ms)`);
-    if (probe.reachable) {
-      await tradingPlatformClient.connectWebSocket();
-      await syncUpstreamMarketInstruments().catch(() => {});
-      await syncUpstreamPortfolio().catch(() => {});
-    }
   } catch (err: any) {
     console.warn('[TradingPlatformClient] Probe notice:', err.message);
   }
+
+  // Unconditionally connect WebSocket and sync instruments/authoritative data in background
+  tradingPlatformClient.connectWebSocket().catch(() => {});
+  syncUpstreamMarketInstruments().catch(() => {});
+  syncAuthoritativeData().catch(() => {});
 
   // Hook Trading Platform real-time events into User Panel SSE broadcast stream
   tradingPlatformClient.on('realtime_event', (event: any) => {

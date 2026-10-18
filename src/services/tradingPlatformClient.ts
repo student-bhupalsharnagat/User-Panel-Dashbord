@@ -57,11 +57,14 @@ export class TradingPlatformClient extends EventEmitter {
   private cache = new Map<string, { data: any; cachedAt: number }>();
   private lastSuccessful = new Map<string, any>();
 
+  private centralAdminUrl: string;
+
   constructor(config?: Partial<TradingPlatformConfig>) {
     super();
     this.baseUrl = (config?.baseUrl || process.env.TRADING_PLATFORM_URL || process.env.TRADING_PLATFORM_BASE_URL || 'https://trading-platform-2t6r.onrender.com').replace(/\/+$/, '').replace(/\/api$/, '');
     this.tenantId = config?.tenantId || process.env.DEFAULT_TENANT_ID || 'TNT-001';
     this.secret = config?.secret || process.env.INTERNAL_API_SECRET || process.env.INTERNAL_COMMUNICATION_SECRET || process.env.CENTRAL_ADMIN_INTERNAL_SECRET || 'nextrade-internal-hmac-secret-2026';
+    this.centralAdminUrl = (process.env.CENTRAL_ADMIN_URL || 'https://admin-dashbord-wxcq.onrender.com').replace(/\/+$/, '');
   }
 
   private getCached<T>(key: string, ttlMs = 10000): T | null {
@@ -156,8 +159,8 @@ export class TradingPlatformClient extends EventEmitter {
     const isMutation = ['POST', 'PUT', 'PATCH'].includes(method);
     // Send single lowercase headers only - never mix lowercase and uppercase to prevent undici header duplication!
     const headers: Record<string, string> = {
-      'Accept': 'application/json',
-      ...(isMutation ? { 'Content-Type': 'application/json' } : {}),
+      'accept': 'application/json',
+      ...(isMutation ? { 'content-type': 'application/json' } : {}),
       'x-internal-signature': signature,
       'x-internal-timestamp': timestamp,
       'x-tenant-id': outboundTenant,
@@ -167,7 +170,7 @@ export class TradingPlatformClient extends EventEmitter {
 
     try {
       const controller = new AbortController();
-      const timer = setTimeout(() => controller.abort(), options.timeoutMs || 20000);
+      const timer = setTimeout(() => controller.abort(), options.timeoutMs || 45000);
       const res = await fetch(url, {
         method,
         headers,
@@ -187,19 +190,19 @@ export class TradingPlatformClient extends EventEmitter {
   }
 
   /**
-   * Live authoritative Clients from Trading Platform for a specific tenant with 10s cache and fallback
+   * Live authoritative Clients from Trading Platform for a specific tenant with 3s cache and fallback
    */
   public async fetchLiveClients(tenantId?: string): Promise<{ success: boolean; clients: any[] }> {
     const cleanTenant = this.resolveOutboundTenantId(tenantId);
     const cacheKey = `clients:${cleanTenant}`;
-    const cached = this.getCached<any[]>(cacheKey, 10000);
+    const cached = this.getCached<any[]>(cacheKey, 3000);
     if (cached) {
       return { success: true, clients: cached };
     }
 
     const res = await this.s2sRequest({
       method: 'GET',
-      path: '/api/internal/v1/trading/clients?limit=250',
+      path: '/api/internal/v1/trading/clients?limit=100',
       tenantId: cleanTenant,
       timeoutMs: 45000
     });
@@ -215,6 +218,39 @@ export class TradingPlatformClient extends EventEmitter {
       return { success: true, clients: fallback };
     }
     return { success: res.success, clients: [] };
+  }
+
+  /**
+   * Fetch registered clients from Central Admin Panel
+   */
+  public async fetchCentralAdminClients(): Promise<{ success: boolean; clients: any[] }> {
+    const cacheKey = 'clients:central_admin';
+    const cached = this.getCached<any[]>(cacheKey, 4000);
+    if (cached) return { success: true, clients: cached };
+
+    try {
+      const controller = new AbortController();
+      const timer = setTimeout(() => controller.abort(), 8000);
+      const res = await fetch(`${this.centralAdminUrl}/api/clients`, {
+        headers: {
+          'accept': 'application/json',
+          'x-tenant-id': 'TNT-001',
+        },
+        signal: controller.signal,
+      });
+      clearTimeout(timer);
+      if (res.ok) {
+        const data = await res.json();
+        const clients = Array.isArray(data.clients) ? data.clients : (Array.isArray(data) ? data : []);
+        if (clients.length > 0) {
+          this.setCache(cacheKey, clients);
+          return { success: true, clients };
+        }
+      }
+    } catch {
+      // Central admin optional
+    }
+    return { success: false, clients: [] };
   }
 
   /**
@@ -254,16 +290,16 @@ export class TradingPlatformClient extends EventEmitter {
   public async fetchLiveOrders(tenantId?: string): Promise<{ success: boolean; orders: any[] }> {
     const cleanTenant = this.resolveOutboundTenantId(tenantId);
     const cacheKey = `orders:${cleanTenant}`;
-    const cached = this.getCached<any[]>(cacheKey, 10000);
+    const cached = this.getCached<any[]>(cacheKey, 3000);
     if (cached) {
       return { success: true, orders: cached };
     }
 
     const res = await this.s2sRequest({
       method: 'GET',
-      path: '/api/internal/v1/trading/orders?limit=250',
+      path: '/api/internal/v1/trading/orders?limit=100',
       tenantId: cleanTenant,
-      timeoutMs: 20000
+      timeoutMs: 45000
     });
     if (res.success) {
       const orders = res.data?.orders || res.data?.items || (Array.isArray(res.data) ? res.data : []);
@@ -285,16 +321,16 @@ export class TradingPlatformClient extends EventEmitter {
   public async fetchLivePositions(tenantId?: string): Promise<{ success: boolean; positions: any[] }> {
     const cleanTenant = this.resolveOutboundTenantId(tenantId);
     const cacheKey = `positions:${cleanTenant}`;
-    const cached = this.getCached<any[]>(cacheKey, 10000);
+    const cached = this.getCached<any[]>(cacheKey, 3000);
     if (cached) {
       return { success: true, positions: cached };
     }
 
     const res = await this.s2sRequest({
       method: 'GET',
-      path: '/api/internal/v1/trading/positions?limit=250',
+      path: '/api/internal/v1/trading/positions?limit=100',
       tenantId: cleanTenant,
-      timeoutMs: 20000
+      timeoutMs: 45000
     });
     if (res.success) {
       const positions = res.data?.positions || res.data?.items || (Array.isArray(res.data) ? res.data : []);
@@ -316,16 +352,16 @@ export class TradingPlatformClient extends EventEmitter {
   public async fetchLiveFunds(tenantId?: string): Promise<{ success: boolean; funds: any[] }> {
     const cleanTenant = this.resolveOutboundTenantId(tenantId);
     const cacheKey = `funds:${cleanTenant}`;
-    const cached = this.getCached<any[]>(cacheKey, 10000);
+    const cached = this.getCached<any[]>(cacheKey, 3000);
     if (cached) {
       return { success: true, funds: cached };
     }
 
     const res = await this.s2sRequest({
       method: 'GET',
-      path: '/api/internal/v1/trading/funds?limit=250',
+      path: '/api/internal/v1/trading/funds?limit=100',
       tenantId: cleanTenant,
-      timeoutMs: 20000
+      timeoutMs: 45000
     });
     if (res.success) {
       const funds = res.data?.funds || res.data?.transactions || res.data?.items || (Array.isArray(res.data) ? res.data : []);
@@ -347,16 +383,16 @@ export class TradingPlatformClient extends EventEmitter {
   public async fetchLiveLedger(tenantId?: string): Promise<{ success: boolean; ledger: any[] }> {
     const cleanTenant = this.resolveOutboundTenantId(tenantId);
     const cacheKey = `ledger:${cleanTenant}`;
-    const cached = this.getCached<any[]>(cacheKey, 10000);
+    const cached = this.getCached<any[]>(cacheKey, 3000);
     if (cached) {
       return { success: true, ledger: cached };
     }
 
     const res = await this.s2sRequest({
       method: 'GET',
-      path: '/api/internal/v1/trading/ledger?limit=250',
+      path: '/api/internal/v1/trading/ledger?limit=100',
       tenantId: cleanTenant,
-      timeoutMs: 20000
+      timeoutMs: 45000
     });
     if (res.success) {
       const ledger = res.data?.ledger || res.data?.items || (Array.isArray(res.data) ? res.data : []);
@@ -373,18 +409,39 @@ export class TradingPlatformClient extends EventEmitter {
   }
 
   /**
-   * Multi-Tenant Aggregation: Aggregates live clients across default tenants
-   * ('TNT-001', 'vertex-default', 'default', 'TNT-002', 'TNT-003') so no user is hidden.
+   * Multi-Tenant Aggregation: Aggregates live clients across TNT-001, vertex-default, and Central Admin
    */
   public async fetchAllLiveClients(tenantId?: string): Promise<{ success: boolean; clients: any[] }> {
     const targetTenant = (tenantId && tenantId !== 'ALL' && tenantId !== 'ALL_TENANTS') ? this.resolveOutboundTenantId(tenantId) : 'TNT-001';
-    const res = await this.fetchLiveClients(targetTenant);
-    if (res.success && res.clients.length > 0) return res;
-    if (targetTenant !== 'vertex-default') {
-      const fallback = await this.fetchLiveClients('vertex-default');
-      if (fallback.success && fallback.clients.length > 0) return fallback;
+    
+    // 1. Authoritative primary query on target tenant
+    const primary = await this.fetchLiveClients(targetTenant);
+    if (primary.success && Array.isArray(primary.clients) && primary.clients.length > 0) {
+      this.setCache('clients:all', primary.clients);
+      return { success: true, clients: primary.clients };
     }
-    return res;
+
+    // 2. Fallback to vertex-default if primary tenant returned empty or failed
+    if (targetTenant !== 'vertex-default') {
+      const vtx = await this.fetchLiveClients('vertex-default');
+      if (vtx.success && Array.isArray(vtx.clients) && vtx.clients.length > 0) {
+        this.setCache('clients:all', vtx.clients);
+        return { success: true, clients: vtx.clients };
+      }
+    }
+
+    // 3. Fallback to Central Admin
+    const central = await this.fetchCentralAdminClients();
+    if (central.success && Array.isArray(central.clients) && central.clients.length > 0) {
+      this.setCache('clients:all', central.clients);
+      return { success: true, clients: central.clients };
+    }
+
+    const fallback = this.getLastSuccessful<any[]>('clients:all');
+    if (fallback && fallback.length > 0) {
+      return { success: true, clients: fallback };
+    }
+    return { success: false, clients: [] };
   }
 
   /**
@@ -392,13 +449,26 @@ export class TradingPlatformClient extends EventEmitter {
    */
   public async fetchAllLiveOrders(tenantId?: string): Promise<{ success: boolean; orders: any[] }> {
     const targetTenant = (tenantId && tenantId !== 'ALL' && tenantId !== 'ALL_TENANTS') ? this.resolveOutboundTenantId(tenantId) : 'TNT-001';
-    const res = await this.fetchLiveOrders(targetTenant);
-    if (res.success && res.orders.length > 0) return res;
-    if (targetTenant !== 'vertex-default') {
-      const fallback = await this.fetchLiveOrders('vertex-default');
-      if (fallback.success && fallback.orders.length > 0) return fallback;
+    
+    const primary = await this.fetchLiveOrders(targetTenant);
+    if (primary.success && Array.isArray(primary.orders) && primary.orders.length > 0) {
+      this.setCache('orders:all', primary.orders);
+      return { success: true, orders: primary.orders };
     }
-    return res;
+
+    if (targetTenant !== 'vertex-default') {
+      const vtx = await this.fetchLiveOrders('vertex-default');
+      if (vtx.success && Array.isArray(vtx.orders) && vtx.orders.length > 0) {
+        this.setCache('orders:all', vtx.orders);
+        return { success: true, orders: vtx.orders };
+      }
+    }
+
+    const fallback = this.getLastSuccessful<any[]>('orders:all');
+    if (fallback && fallback.length > 0) {
+      return { success: true, orders: fallback };
+    }
+    return { success: false, orders: [] };
   }
 
   /**
@@ -406,13 +476,26 @@ export class TradingPlatformClient extends EventEmitter {
    */
   public async fetchAllLivePositions(tenantId?: string): Promise<{ success: boolean; positions: any[] }> {
     const targetTenant = (tenantId && tenantId !== 'ALL' && tenantId !== 'ALL_TENANTS') ? this.resolveOutboundTenantId(tenantId) : 'TNT-001';
-    const res = await this.fetchLivePositions(targetTenant);
-    if (res.success && res.positions.length > 0) return res;
-    if (targetTenant !== 'vertex-default') {
-      const fallback = await this.fetchLivePositions('vertex-default');
-      if (fallback.success && fallback.positions.length > 0) return fallback;
+    
+    const primary = await this.fetchLivePositions(targetTenant);
+    if (primary.success && Array.isArray(primary.positions) && primary.positions.length > 0) {
+      this.setCache('positions:all', primary.positions);
+      return { success: true, positions: primary.positions };
     }
-    return res;
+
+    if (targetTenant !== 'vertex-default') {
+      const vtx = await this.fetchLivePositions('vertex-default');
+      if (vtx.success && Array.isArray(vtx.positions) && vtx.positions.length > 0) {
+        this.setCache('positions:all', vtx.positions);
+        return { success: true, positions: vtx.positions };
+      }
+    }
+
+    const fallback = this.getLastSuccessful<any[]>('positions:all');
+    if (fallback && fallback.length > 0) {
+      return { success: true, positions: fallback };
+    }
+    return { success: false, positions: [] };
   }
 
   /**
@@ -420,13 +503,26 @@ export class TradingPlatformClient extends EventEmitter {
    */
   public async fetchAllLiveFunds(tenantId?: string): Promise<{ success: boolean; funds: any[] }> {
     const targetTenant = (tenantId && tenantId !== 'ALL' && tenantId !== 'ALL_TENANTS') ? this.resolveOutboundTenantId(tenantId) : 'TNT-001';
-    const res = await this.fetchLiveFunds(targetTenant);
-    if (res.success && res.funds.length > 0) return res;
-    if (targetTenant !== 'vertex-default') {
-      const fallback = await this.fetchLiveFunds('vertex-default');
-      if (fallback.success && fallback.funds.length > 0) return fallback;
+    
+    const primary = await this.fetchLiveFunds(targetTenant);
+    if (primary.success && Array.isArray(primary.funds) && primary.funds.length > 0) {
+      this.setCache('funds:all', primary.funds);
+      return { success: true, funds: primary.funds };
     }
-    return res;
+
+    if (targetTenant !== 'vertex-default') {
+      const vtx = await this.fetchLiveFunds('vertex-default');
+      if (vtx.success && Array.isArray(vtx.funds) && vtx.funds.length > 0) {
+        this.setCache('funds:all', vtx.funds);
+        return { success: true, funds: vtx.funds };
+      }
+    }
+
+    const fallback = this.getLastSuccessful<any[]>('funds:all');
+    if (fallback && fallback.length > 0) {
+      return { success: true, funds: fallback };
+    }
+    return { success: false, funds: [] };
   }
 
   /**
@@ -434,13 +530,26 @@ export class TradingPlatformClient extends EventEmitter {
    */
   public async fetchAllLiveLedger(tenantId?: string): Promise<{ success: boolean; ledger: any[] }> {
     const targetTenant = (tenantId && tenantId !== 'ALL' && tenantId !== 'ALL_TENANTS') ? this.resolveOutboundTenantId(tenantId) : 'TNT-001';
-    const res = await this.fetchLiveLedger(targetTenant);
-    if (res.success && res.ledger.length > 0) return res;
-    if (targetTenant !== 'vertex-default') {
-      const fallback = await this.fetchLiveLedger('vertex-default');
-      if (fallback.success && fallback.ledger.length > 0) return fallback;
+    
+    const primary = await this.fetchLiveLedger(targetTenant);
+    if (primary.success && Array.isArray(primary.ledger) && primary.ledger.length > 0) {
+      this.setCache('ledger:all', primary.ledger);
+      return { success: true, ledger: primary.ledger };
     }
-    return res;
+
+    if (targetTenant !== 'vertex-default') {
+      const vtx = await this.fetchLiveLedger('vertex-default');
+      if (vtx.success && Array.isArray(vtx.ledger) && vtx.ledger.length > 0) {
+        this.setCache('ledger:all', vtx.ledger);
+        return { success: true, ledger: vtx.ledger };
+      }
+    }
+
+    const fallback = this.getLastSuccessful<any[]>('ledger:all');
+    if (fallback && fallback.length > 0) {
+      return { success: true, ledger: fallback };
+    }
+    return { success: false, ledger: [] };
   }
 
   /**
@@ -567,11 +676,11 @@ export class TradingPlatformClient extends EventEmitter {
   }
 
   /**
-   * Fetch live market instruments quote catalog with 30s cache and fallback
+   * Fetch live market instruments quote catalog with 60s cache and fallback
    */
   public async fetchInstruments(): Promise<any[]> {
     const cacheKey = 'instruments';
-    const cached = this.getCached<any[]>(cacheKey, 30000);
+    const cached = this.getCached<any[]>(cacheKey, 60000);
     if (cached && cached.length > 0) return cached;
 
     try {
@@ -579,7 +688,7 @@ export class TradingPlatformClient extends EventEmitter {
       const timer = setTimeout(() => controller.abort(), 20000);
       const res = await fetch(`${this.baseUrl}/api/trading/instruments`.replace(/\/api\/api\//g, '/api/'), {
         headers: {
-          'Accept': 'application/json',
+          'accept': 'application/json',
           'x-tenant-id': this.resolveOutboundTenantId(this.tenantId),
         },
         signal: controller.signal,
@@ -594,7 +703,7 @@ export class TradingPlatformClient extends EventEmitter {
         }
       }
     } catch (err: any) {
-      console.warn('[TradingPlatformClient] Error fetching instruments:', err.message);
+      console.warn('[TradingPlatformClient] Notice fetching instruments:', err.message);
     }
     return this.getLastSuccessful<any[]>(cacheKey) || [];
   }

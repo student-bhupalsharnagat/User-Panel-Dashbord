@@ -104,6 +104,10 @@ export interface Client {
   createdDate: string;
   lastActive: string;
   riskLimit: number;
+  subBrokerId?: string;
+  masterId?: string;
+  tenantId?: string;
+  isLive?: boolean;
 }
 
 export interface Order {
@@ -122,6 +126,10 @@ export interface Order {
   created: string;
   brokerId: string;
   rejectionReason?: string;
+  subBrokerId?: string;
+  masterId?: string;
+  tenantId?: string;
+  product?: string;
 }
 
 export interface Position {
@@ -141,6 +149,9 @@ export interface Position {
   totalPnL: number;
   marginUsed: number;
   brokerId: string;
+  subBrokerId?: string;
+  masterId?: string;
+  tenantId?: string;
 }
 
 export interface FundTransaction {
@@ -158,6 +169,9 @@ export interface FundTransaction {
   approvedBy?: string;
   rejectionReason?: string;
   brokerId: string;
+  subBrokerId?: string;
+  masterId?: string;
+  tenantId?: string;
 }
 
 export interface LedgerEntry {
@@ -170,6 +184,9 @@ export interface LedgerEntry {
   runningBalance: number;
   status: 'Completed' | 'Pending';
   type: 'Brokerage' | 'Deposit' | 'Withdrawal' | 'Margin Funding' | 'Trade Settlement';
+  clientId?: string;
+  brokerId?: string;
+  tenantId?: string;
 }
 
 export interface AuditLog {

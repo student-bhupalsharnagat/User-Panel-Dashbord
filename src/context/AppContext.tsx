@@ -120,7 +120,7 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
   const [currentUser, setCurrentUser] = useState<AuthenticatedUser | null>(null);
   const [tenantBranding, setTenantBranding] = useState<TenantBranding | null>(null);
   
-  const [isLiveMode, setIsLiveMode] = useState<boolean>(false);
+  const [isLiveMode, setIsLiveMode] = useState<boolean>(true);
   const [isCompactMode, setIsCompactMode] = useState<boolean>(false);
   
   const [refreshTrigger, setRefreshTrigger] = useState<number>(0);
@@ -307,6 +307,30 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
         setIsLiveMode(true);
       });
 
+      eventSource.addEventListener('client_created', () => {
+        triggerRefresh();
+      });
+
+      eventSource.addEventListener('clients_updated', () => {
+        triggerRefresh();
+      });
+
+      eventSource.addEventListener('client_updated', () => {
+        triggerRefresh();
+      });
+
+      eventSource.addEventListener('trade_executed', () => {
+        triggerRefresh();
+      });
+
+      eventSource.addEventListener('fund_created', () => {
+        triggerRefresh();
+      });
+
+      eventSource.addEventListener('fund_updated', () => {
+        triggerRefresh();
+      });
+
       eventSource.addEventListener('order_placed', (e) => {
         try {
           const order = JSON.parse(e.data);
@@ -389,16 +413,14 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
     };
   }, [showToast, triggerRefresh, currentUser]);
 
-  // Continuous real-time authoritative polling: refreshes data periodically
+  // Continuous real-time authoritative polling: refreshes data every 4s
   // so any new user, deposit, position, or order on Trading Platform shows up immediately
-  // throttled to 8s/12s so Render container is never spammed with concurrent requests
   useEffect(() => {
-    const pollIntervalMs = isRealtimeConnected ? 12000 : 8000;
     const poll = setInterval(() => {
       triggerRefresh();
-    }, pollIntervalMs);
+    }, 4000);
     return () => clearInterval(poll);
-  }, [isRealtimeConnected, triggerRefresh]);
+  }, [triggerRefresh]);
 
   // Modal actions
   const openOrderModal = (instrument?: MarketInstrument | null, side: 'BUY' | 'SELL' = 'BUY', existingOrder?: Order | null) => {

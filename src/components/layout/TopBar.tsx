@@ -128,18 +128,18 @@ export const TopBar: React.FC = () => {
           onClick={() => {
             const nextMode = !isLiveMode;
             setIsLiveMode(nextMode);
-            showToast(nextMode ? 'Switched to Live Engine mode' : 'Switched to Demonstration Workspace', 'info');
+            showToast(nextMode ? 'Switched to Live Engine mode' : 'Switched to Sandbox mode', 'info');
           }}
           className={`px-2 sm:px-2.5 py-1 rounded-md text-[11px] font-medium border flex items-center gap-1.5 transition-all cursor-pointer shrink-0 ${
             isLiveMode
               ? 'bg-emerald-950/40 text-emerald-400 border-emerald-500/30 hover:bg-emerald-900/40'
               : 'bg-indigo-950/40 text-indigo-300 border-indigo-500/30 hover:bg-indigo-900/40'
           }`}
-          title="Toggle between Live Production Engine and Demonstration Workspace data"
+          title="Toggle between Live Production Engine and Sandbox mode"
         >
           <span className={`w-1.5 h-1.5 rounded-full ${isLiveMode ? 'bg-emerald-400 animate-pulse' : 'bg-indigo-400'}`} />
-          <span className="hidden xs:inline sm:inline">{isLiveMode ? 'Live engine' : 'Demo data'}</span>
-          <span className="xs:hidden sm:hidden">{isLiveMode ? 'Live' : 'Demo'}</span>
+          <span className="hidden xs:inline sm:inline">{isLiveMode ? 'Live engine' : 'Sandbox mode'}</span>
+          <span className="xs:hidden sm:hidden">{isLiveMode ? 'Live' : 'Sandbox'}</span>
         </button>
 
         {/* Refresh button */}
@@ -288,6 +288,24 @@ export const TopBar: React.FC = () => {
                       <span className="truncate">Sub-Broker (Karan Mehra)</span>
                     </div>
                     {currentUser?.role === 'sub_broker' && <span className="text-[10px] text-indigo-400 shrink-0">Active</span>}
+                  </button>
+
+                  <button
+                    onClick={() => {
+                      switchRole('operations');
+                      setIsProfileOpen(false);
+                    }}
+                    className={`w-full text-left px-2.5 py-1.5 rounded-md text-xs flex items-center justify-between cursor-pointer ${
+                      currentUser?.role === 'operations'
+                        ? 'bg-indigo-600/30 text-indigo-300 font-medium'
+                        : 'text-slate-300 hover:bg-slate-800'
+                    }`}
+                  >
+                    <div className="flex items-center gap-2">
+                      <Shield className="w-3.5 h-3.5 text-cyan-400 shrink-0" />
+                      <span className="truncate">Operations Desk (Pooja Nair)</span>
+                    </div>
+                    {currentUser?.role === 'operations' && <span className="text-[10px] text-indigo-400 shrink-0">Active</span>}
                   </button>
 
                   <button
