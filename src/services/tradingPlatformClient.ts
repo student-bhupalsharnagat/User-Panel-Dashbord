@@ -1,3 +1,64 @@
+
+export function extractOrders(res: any): any[] {
+  if (!res) return [];
+  if (Array.isArray(res)) return res;
+  if (Array.isArray(res.orders)) return res.orders;
+  if (Array.isArray(res.items)) return res.items;
+  if (Array.isArray(res.data)) return res.data;
+  if (res.data) {
+    if (Array.isArray(res.data.orders)) return res.data.orders;
+    if (Array.isArray(res.data.items)) return res.data.items;
+    if (Array.isArray(res.data.data)) return res.data.data;
+  }
+  return [];
+}
+
+export function extractPositions(res: any): any[] {
+  if (!res) return [];
+  if (Array.isArray(res)) return res;
+  if (Array.isArray(res.positions)) return res.positions;
+  if (Array.isArray(res.items)) return res.items;
+  if (Array.isArray(res.data)) return res.data;
+  if (res.data) {
+    if (Array.isArray(res.data.positions)) return res.data.positions;
+    if (Array.isArray(res.data.items)) return res.data.items;
+    if (Array.isArray(res.data.data)) return res.data.data;
+  }
+  return [];
+}
+
+export function extractFunds(res: any): any[] {
+  if (!res) return [];
+  if (Array.isArray(res)) return res;
+  if (Array.isArray(res.funds)) return res.funds;
+  if (Array.isArray(res.transactions)) return res.transactions;
+  if (Array.isArray(res.items)) return res.items;
+  if (Array.isArray(res.data)) return res.data;
+  if (res.data) {
+    if (Array.isArray(res.data.funds)) return res.data.funds;
+    if (Array.isArray(res.data.transactions)) return res.data.transactions;
+    if (Array.isArray(res.data.items)) return res.data.items;
+    if (Array.isArray(res.data.data)) return res.data.data;
+  }
+  return [];
+}
+
+export function extractLedger(res: any): any[] {
+  if (!res) return [];
+  if (Array.isArray(res)) return res;
+  if (Array.isArray(res.entries)) return res.entries;
+  if (Array.isArray(res.ledger)) return res.ledger;
+  if (Array.isArray(res.items)) return res.items;
+  if (Array.isArray(res.data)) return res.data;
+  if (res.data) {
+    if (Array.isArray(res.data.entries)) return res.data.entries;
+    if (Array.isArray(res.data.ledger)) return res.data.ledger;
+    if (Array.isArray(res.data.items)) return res.data.items;
+    if (Array.isArray(res.data.data)) return res.data.data;
+  }
+  return [];
+}
+
 /**
  * @license
  * SPDX-License-Identifier: Apache-2.0
@@ -302,7 +363,7 @@ export class TradingPlatformClient extends EventEmitter {
       timeoutMs: 45000
     });
     if (res.success) {
-      const orders = res.data?.orders || res.data?.items || (Array.isArray(res.data) ? res.data : []);
+      const orders = extractOrders(res.data || res);
       if (Array.isArray(orders) && orders.length > 0) {
         this.setCache(cacheKey, orders);
         return { success: true, orders };
@@ -333,7 +394,7 @@ export class TradingPlatformClient extends EventEmitter {
       timeoutMs: 45000
     });
     if (res.success) {
-      const positions = res.data?.positions || res.data?.items || (Array.isArray(res.data) ? res.data : []);
+      const positions = extractPositions(res.data || res);
       if (Array.isArray(positions) && positions.length > 0) {
         this.setCache(cacheKey, positions);
         return { success: true, positions };
@@ -364,7 +425,7 @@ export class TradingPlatformClient extends EventEmitter {
       timeoutMs: 45000
     });
     if (res.success) {
-      const funds = res.data?.funds || res.data?.transactions || res.data?.items || (Array.isArray(res.data) ? res.data : []);
+      const funds = extractFunds(res.data || res);
       if (Array.isArray(funds) && funds.length > 0) {
         this.setCache(cacheKey, funds);
         return { success: true, funds };
@@ -395,7 +456,7 @@ export class TradingPlatformClient extends EventEmitter {
       timeoutMs: 45000
     });
     if (res.success) {
-      const ledger = res.data?.ledger || res.data?.items || (Array.isArray(res.data) ? res.data : []);
+      const ledger = extractLedger(res.data || res);
       if (Array.isArray(ledger) && ledger.length > 0) {
         this.setCache(cacheKey, ledger);
         return { success: true, ledger };
@@ -454,26 +515,37 @@ export class TradingPlatformClient extends EventEmitter {
    * Multi-Tenant Aggregation: Aggregates live orders across default tenants
    */
   public async fetchAllLiveOrders(tenantId?: string): Promise<{ success: boolean; orders: any[] }> {
-    const cached = this.getCached<any[]>('orders:all', 30000);
+    const cached = this.getCached<any[]>('orders:all', 5000);
     if (cached && cached.length > 0) {
       return { success: true, orders: cached };
     }
 
-    const clean = (tenantId && tenantId !== 'ALL' && tenantId !== 'ALL_TENANTS') ? this.resolveOutboundTenantId(tenantId) : 'vertex-default';
-    const primaryTenant = clean === 'TNT-001' ? 'vertex-default' : clean;
-    
+    const clean = (tenantId && tenantId !== 'ALL' && tenantId !== 'ALL_TENANTS') ? this.resolveOutboundTenantId(tenantId) : 'TNT-001';
+    const primaryTenant = clean;
+    const secondaryTenant = clean === 'TNT-001' ? 'vertex-default' : 'TNT-001';
+
+    const resultsMap = new Map<string, any>();
+
     const primary = await this.fetchLiveOrders(primaryTenant);
-    if (primary.success && Array.isArray(primary.orders) && primary.orders.length > 0) {
-      this.setCache('orders:all', primary.orders);
-      return { success: true, orders: primary.orders };
+    if (primary.success && Array.isArray(primary.orders)) {
+      primary.orders.forEach((o: any) => {
+        const id = o.id || o.order_id || o.client_order_id;
+        if (id) resultsMap.set(String(id), o);
+      });
     }
 
-    if (primaryTenant !== 'TNT-001') {
-      const fallbackTnt = await this.fetchLiveOrders('TNT-001');
-      if (fallbackTnt.success && Array.isArray(fallbackTnt.orders) && fallbackTnt.orders.length > 0) {
-        this.setCache('orders:all', fallbackTnt.orders);
-        return { success: true, orders: fallbackTnt.orders };
-      }
+    const secondary = await this.fetchLiveOrders(secondaryTenant);
+    if (secondary.success && Array.isArray(secondary.orders)) {
+      secondary.orders.forEach((o: any) => {
+        const id = o.id || o.order_id || o.client_order_id;
+        if (id && !resultsMap.has(String(id))) resultsMap.set(String(id), o);
+      });
+    }
+
+    const orders = Array.from(resultsMap.values());
+    if (orders.length > 0) {
+      this.setCache('orders:all', orders);
+      return { success: true, orders };
     }
 
     const fallback = this.getLastSuccessful<any[]>('orders:all');
@@ -487,26 +559,37 @@ export class TradingPlatformClient extends EventEmitter {
    * Multi-Tenant Aggregation: Aggregates live positions across default tenants
    */
   public async fetchAllLivePositions(tenantId?: string): Promise<{ success: boolean; positions: any[] }> {
-    const cached = this.getCached<any[]>('positions:all', 30000);
+    const cached = this.getCached<any[]>('positions:all', 5000);
     if (cached && cached.length > 0) {
       return { success: true, positions: cached };
     }
 
-    const clean = (tenantId && tenantId !== 'ALL' && tenantId !== 'ALL_TENANTS') ? this.resolveOutboundTenantId(tenantId) : 'vertex-default';
-    const primaryTenant = clean === 'TNT-001' ? 'vertex-default' : clean;
-    
+    const clean = (tenantId && tenantId !== 'ALL' && tenantId !== 'ALL_TENANTS') ? this.resolveOutboundTenantId(tenantId) : 'TNT-001';
+    const primaryTenant = clean;
+    const secondaryTenant = clean === 'TNT-001' ? 'vertex-default' : 'TNT-001';
+
+    const resultsMap = new Map<string, any>();
+
     const primary = await this.fetchLivePositions(primaryTenant);
-    if (primary.success && Array.isArray(primary.positions) && primary.positions.length > 0) {
-      this.setCache('positions:all', primary.positions);
-      return { success: true, positions: primary.positions };
+    if (primary.success && Array.isArray(primary.positions)) {
+      primary.positions.forEach((p: any) => {
+        const id = p.id || p.position_id || p.positionId;
+        if (id) resultsMap.set(String(id), p);
+      });
     }
 
-    if (primaryTenant !== 'TNT-001') {
-      const fallbackTnt = await this.fetchLivePositions('TNT-001');
-      if (fallbackTnt.success && Array.isArray(fallbackTnt.positions) && fallbackTnt.positions.length > 0) {
-        this.setCache('positions:all', fallbackTnt.positions);
-        return { success: true, positions: fallbackTnt.positions };
-      }
+    const secondary = await this.fetchLivePositions(secondaryTenant);
+    if (secondary.success && Array.isArray(secondary.positions)) {
+      secondary.positions.forEach((p: any) => {
+        const id = p.id || p.position_id || p.positionId;
+        if (id && !resultsMap.has(String(id))) resultsMap.set(String(id), p);
+      });
+    }
+
+    const positions = Array.from(resultsMap.values());
+    if (positions.length > 0) {
+      this.setCache('positions:all', positions);
+      return { success: true, positions };
     }
 
     const fallback = this.getLastSuccessful<any[]>('positions:all');
@@ -520,26 +603,37 @@ export class TradingPlatformClient extends EventEmitter {
    * Multi-Tenant Aggregation: Aggregates live fund transactions across default tenants
    */
   public async fetchAllLiveFunds(tenantId?: string): Promise<{ success: boolean; funds: any[] }> {
-    const cached = this.getCached<any[]>('funds:all', 30000);
+    const cached = this.getCached<any[]>('funds:all', 5000);
     if (cached && cached.length > 0) {
       return { success: true, funds: cached };
     }
 
-    const clean = (tenantId && tenantId !== 'ALL' && tenantId !== 'ALL_TENANTS') ? this.resolveOutboundTenantId(tenantId) : 'vertex-default';
-    const primaryTenant = clean === 'TNT-001' ? 'vertex-default' : clean;
-    
+    const clean = (tenantId && tenantId !== 'ALL' && tenantId !== 'ALL_TENANTS') ? this.resolveOutboundTenantId(tenantId) : 'TNT-001';
+    const primaryTenant = clean;
+    const secondaryTenant = clean === 'TNT-001' ? 'vertex-default' : 'TNT-001';
+
+    const resultsMap = new Map<string, any>();
+
     const primary = await this.fetchLiveFunds(primaryTenant);
-    if (primary.success && Array.isArray(primary.funds) && primary.funds.length > 0) {
-      this.setCache('funds:all', primary.funds);
-      return { success: true, funds: primary.funds };
+    if (primary.success && Array.isArray(primary.funds)) {
+      primary.funds.forEach((f: any) => {
+        const id = f.id || f.transactionId || f.transaction_id;
+        if (id) resultsMap.set(String(id), f);
+      });
     }
 
-    if (primaryTenant !== 'TNT-001') {
-      const fallbackTnt = await this.fetchLiveFunds('TNT-001');
-      if (fallbackTnt.success && Array.isArray(fallbackTnt.funds) && fallbackTnt.funds.length > 0) {
-        this.setCache('funds:all', fallbackTnt.funds);
-        return { success: true, funds: fallbackTnt.funds };
-      }
+    const secondary = await this.fetchLiveFunds(secondaryTenant);
+    if (secondary.success && Array.isArray(secondary.funds)) {
+      secondary.funds.forEach((f: any) => {
+        const id = f.id || f.transactionId || f.transaction_id;
+        if (id && !resultsMap.has(String(id))) resultsMap.set(String(id), f);
+      });
+    }
+
+    const funds = Array.from(resultsMap.values());
+    if (funds.length > 0) {
+      this.setCache('funds:all', funds);
+      return { success: true, funds };
     }
 
     const fallback = this.getLastSuccessful<any[]>('funds:all');
@@ -553,26 +647,37 @@ export class TradingPlatformClient extends EventEmitter {
    * Multi-Tenant Aggregation: Aggregates live ledger across default tenants
    */
   public async fetchAllLiveLedger(tenantId?: string): Promise<{ success: boolean; ledger: any[] }> {
-    const cached = this.getCached<any[]>('ledger:all', 30000);
+    const cached = this.getCached<any[]>('ledger:all', 5000);
     if (cached && cached.length > 0) {
       return { success: true, ledger: cached };
     }
 
-    const clean = (tenantId && tenantId !== 'ALL' && tenantId !== 'ALL_TENANTS') ? this.resolveOutboundTenantId(tenantId) : 'vertex-default';
-    const primaryTenant = clean === 'TNT-001' ? 'vertex-default' : clean;
-    
+    const clean = (tenantId && tenantId !== 'ALL' && tenantId !== 'ALL_TENANTS') ? this.resolveOutboundTenantId(tenantId) : 'TNT-001';
+    const primaryTenant = clean;
+    const secondaryTenant = clean === 'TNT-001' ? 'vertex-default' : 'TNT-001';
+
+    const resultsMap = new Map<string, any>();
+
     const primary = await this.fetchLiveLedger(primaryTenant);
-    if (primary.success && Array.isArray(primary.ledger) && primary.ledger.length > 0) {
-      this.setCache('ledger:all', primary.ledger);
-      return { success: true, ledger: primary.ledger };
+    if (primary.success && Array.isArray(primary.ledger)) {
+      primary.ledger.forEach((l: any) => {
+        const id = l.id || l.entryId || l.transaction_id;
+        if (id) resultsMap.set(String(id), l);
+      });
     }
 
-    if (primaryTenant !== 'TNT-001') {
-      const fallbackTnt = await this.fetchLiveLedger('TNT-001');
-      if (fallbackTnt.success && Array.isArray(fallbackTnt.ledger) && fallbackTnt.ledger.length > 0) {
-        this.setCache('ledger:all', fallbackTnt.ledger);
-        return { success: true, ledger: fallbackTnt.ledger };
-      }
+    const secondary = await this.fetchLiveLedger(secondaryTenant);
+    if (secondary.success && Array.isArray(secondary.ledger)) {
+      secondary.ledger.forEach((l: any) => {
+        const id = l.id || l.entryId || l.transaction_id;
+        if (id && !resultsMap.has(String(id))) resultsMap.set(String(id), l);
+      });
+    }
+
+    const ledger = Array.from(resultsMap.values());
+    if (ledger.length > 0) {
+      this.setCache('ledger:all', ledger);
+      return { success: true, ledger };
     }
 
     const fallback = this.getLastSuccessful<any[]>('ledger:all');

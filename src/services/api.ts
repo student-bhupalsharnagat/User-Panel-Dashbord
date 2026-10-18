@@ -305,7 +305,7 @@ export const api = {
 
     const res = await authenticatedFetch(`/api/orders?${query.toString()}`);
     const data = await res.json();
-    return data.orders;
+    return Array.isArray(data?.orders) ? data.orders : (Array.isArray(data?.data) ? data.data : (Array.isArray(data) ? data : []));
   },
 
   async placeOrder(orderData: {
@@ -342,7 +342,7 @@ export const api = {
   async getPositions(): Promise<{ positions: Position[]; summary: any }> {
     const res = await authenticatedFetch('/api/positions');
     const data = await res.json();
-    return { positions: data.positions, summary: data.summary };
+    return { positions: Array.isArray(data?.positions) ? data.positions : (Array.isArray(data?.data) ? data.data : []), summary: data?.summary || {} };
   },
 
   async squareOffPosition(id: string): Promise<{ pnl: number }> {
@@ -363,7 +363,7 @@ export const api = {
     if (type) query.set('type', type);
     const res = await authenticatedFetch(`/api/funds?${query.toString()}`);
     const data = await res.json();
-    return data.transactions;
+    return Array.isArray(data?.transactions) ? data.transactions : (Array.isArray(data?.funds) ? data.funds : (Array.isArray(data?.data) ? data.data : []));
   },
 
   async approveFund(id: string): Promise<FundTransaction> {
@@ -395,14 +395,14 @@ export const api = {
   async getLedger(): Promise<{ summary: any; entries: LedgerEntry[] }> {
     const res = await authenticatedFetch('/api/ledger');
     const data = await res.json();
-    return { summary: data.summary, entries: data.entries };
+    return { summary: data?.summary || {}, entries: Array.isArray(data?.entries) ? data.entries : (Array.isArray(data?.ledger) ? data.ledger : (Array.isArray(data?.data) ? data.data : [])) };
   },
 
   // Analytics
   async getAnalytics(): Promise<AnalyticsData> {
     const res = await authenticatedFetch('/api/analytics');
     const data = await res.json();
-    return data.data;
+    return data?.data || data || {};
   },
 
   // Action / Audit Logs

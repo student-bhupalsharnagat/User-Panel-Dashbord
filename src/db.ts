@@ -174,6 +174,14 @@ export async function initDatabase(appEnv: string = 'production'): Promise<boole
     // Run versioned schema migrations
     await runMigrations(pgPool);
 
+    // Unconditionally widen all VARCHAR columns across all tables to TEXT
+    const widenClient = await pgPool.connect();
+    try {
+      await widenColumnsToText(widenClient);
+    } finally {
+      widenClient.release();
+    }
+
     // Purge legacy seeded dummy records from PostgreSQL permanently
     await purgeDummyData(pgPool);
 
@@ -194,6 +202,75 @@ export async function initDatabase(appEnv: string = 'production'): Promise<boole
 /**
  * Versioned schema migrations for User/Broker Panel specific records
  */
+
+export async function widenColumnsToText(client: any): Promise<void> {
+  const tableColumnMap: Record<string, string[]> = {
+    user_panel_clients: [
+      'id', 'name', 'email', 'phone', 'pan', 'status', 'broker_id',
+      'broker_name', 'kyc_status', 'created_date', 'last_active', 'tags'
+    ],
+    user_panel_orders: [
+      'id', 'client_id', 'client_name', 'instrument', 'exchange', 'side',
+      'type', 'order_price', 'status', 'created', 'broker_id', 'rejection_reason'
+    ],
+    user_panel_positions: [
+      'id', 'client_id', 'client_name', 'instrument', 'exchange', 'product', 'broker_id'
+    ],
+    user_panel_fund_transactions: [
+      'id', 'client_id', 'client_name', 'type', 'method', 'request_date',
+      'reference_id', 'status', 'approved_by', 'rejection_reason', 'broker_id', 'verification'
+    ],
+    user_panel_ledger_entries: [
+      'id', 'client_id', 'date', 'reference_id', 'description', 'status', 'type'
+    ],
+    user_panel_audit_logs: [
+      'id', 'timestamp', 'user_name', 'role', 'action', 'related_entity', 'ip_address', 'result'
+    ],
+    user_panel_settings: [
+      'id', 'display_name', 'organization', 'email', 'phone', 'timezone', 'currency'
+    ],
+    user_panel_tenant_branding: [
+      'id', 'brand_name', 'platform_name', 'short_name', 'primary_color', 'secondary_color',
+      'accent_color', 'support_email', 'support_phone', 'version'
+    ],
+    user_panel_instruments: [
+      'symbol', 'name', 'exchange', 'volume', 'type', 'contract_expiry', 'status'
+    ],
+    user_panel_tickets: [
+      'id', 'client_id', 'user_name', 'category', 'subject', 'priority', 'status'
+    ],
+    clients: [
+      'id', 'name', 'email', 'phone', 'pan', 'status', 'broker_id',
+      'broker_name', 'kyc_status', 'created_date', 'last_active', 'tags'
+    ],
+    orders: [
+      'id', 'client_id', 'client_name', 'instrument', 'exchange', 'side',
+      'type', 'order_price', 'status', 'created', 'broker_id', 'rejection_reason'
+    ],
+    positions: [
+      'id', 'client_id', 'client_name', 'instrument', 'exchange', 'product', 'broker_id'
+    ],
+    fund_transactions: [
+      'id', 'client_id', 'client_name', 'type', 'method', 'request_date',
+      'reference_id', 'status', 'approved_by', 'rejection_reason', 'broker_id', 'verification'
+    ],
+    ledger_entries: [
+      'id', 'client_id', 'date', 'reference_id', 'description', 'status', 'type'
+    ],
+    audit_logs: [
+      'id', 'timestamp', 'user_name', 'role', 'action', 'related_entity', 'ip_address', 'result'
+    ],
+  };
+
+  for (const [table, columns] of Object.entries(tableColumnMap)) {
+    for (const col of columns) {
+      try {
+        await client.query('ALTER TABLE IF EXISTS "' + table + '" ALTER COLUMN "' + col + '" TYPE TEXT;');
+      } catch {}
+    }
+  }
+}
+
 async function runMigrations(pool: Pool) {
   const client = await pool.connect();
   try {
@@ -218,7 +295,7 @@ async function runMigrations(pool: Pool) {
       // Tenant branding
       await client.query(`
         CREATE TABLE IF NOT EXISTS user_panel_tenant_branding (
-          id VARCHAR(50) PRIMARY KEY,
+          id TEXT PRIMARY KEY,
           brand_name VARCHAR(255) NOT NULL,
           platform_name VARCHAR(255) NOT NULL,
           short_name VARCHAR(255),
@@ -228,7 +305,7 @@ async function runMigrations(pool: Pool) {
           secondary_color VARCHAR(50),
           accent_color VARCHAR(50),
           support_email VARCHAR(255),
-          support_phone VARCHAR(50),
+          support_phone TEXT,
           footer_copyright TEXT,
           version VARCHAR(50),
           updated_at TIMESTAMPTZ DEFAULT NOW()
@@ -238,12 +315,12 @@ async function runMigrations(pool: Pool) {
       // Workspace settings
       await client.query(`
         CREATE TABLE IF NOT EXISTS user_panel_settings (
-          id VARCHAR(50) PRIMARY KEY,
+          id TEXT PRIMARY KEY,
           profile_image TEXT,
           display_name VARCHAR(255),
           organization VARCHAR(255),
           email VARCHAR(255),
-          phone VARCHAR(50),
+          phone TEXT,
           timezone VARCHAR(100),
           currency VARCHAR(50),
           activity_alerts BOOLEAN DEFAULT TRUE,
@@ -258,12 +335,12 @@ async function runMigrations(pool: Pool) {
       // Clients
       await client.query(`
         CREATE TABLE IF NOT EXISTS user_panel_clients (
-          id VARCHAR(50) PRIMARY KEY,
+          id TEXT PRIMARY KEY,
           name VARCHAR(255) NOT NULL,
           email VARCHAR(255) NOT NULL,
-          phone VARCHAR(50) NOT NULL,
-          pan VARCHAR(50),
-          status VARCHAR(50) NOT NULL DEFAULT 'Active',
+          phone TEXT NOT NULL,
+          pan TEXT,
+          status TEXT NOT NULL DEFAULT 'Active',
           is_demo BOOLEAN DEFAULT FALSE,
           ledger_balance NUMERIC(18, 2) NOT NULL DEFAULT 0,
           open_pnl NUMERIC(18, 2) NOT NULL DEFAULT 0,
@@ -271,12 +348,12 @@ async function runMigrations(pool: Pool) {
           margin_used NUMERIC(18, 2) NOT NULL DEFAULT 0,
           income NUMERIC(18, 2) NOT NULL DEFAULT 0,
           margin_available NUMERIC(18, 2) NOT NULL DEFAULT 0,
-          broker_id VARCHAR(50) NOT NULL,
-          broker_name VARCHAR(255) NOT NULL,
-          kyc_status VARCHAR(50) DEFAULT 'Verified',
+          broker_id TEXT NOT NULL,
+          broker_name TEXT NOT NULL,
+          kyc_status TEXT DEFAULT 'Verified',
           kyc_documents JSONB DEFAULT '[]'::jsonb,
-          created_date VARCHAR(50),
-          last_active VARCHAR(50),
+          created_date TEXT,
+          last_active TEXT,
           risk_limit NUMERIC(18, 2) DEFAULT 0,
           updated_at TIMESTAMPTZ DEFAULT NOW()
         );
@@ -286,20 +363,20 @@ async function runMigrations(pool: Pool) {
       // Orders (User panel workflow log)
       await client.query(`
         CREATE TABLE IF NOT EXISTS user_panel_orders (
-          id VARCHAR(50) PRIMARY KEY,
-          client_id VARCHAR(50) REFERENCES user_panel_clients(id) ON DELETE CASCADE,
+          id TEXT PRIMARY KEY,
+          client_id TEXT REFERENCES user_panel_clients(id) ON DELETE CASCADE,
           client_name VARCHAR(255),
           instrument VARCHAR(100) NOT NULL,
           exchange VARCHAR(50),
           side VARCHAR(10) NOT NULL,
           type VARCHAR(20) NOT NULL,
           quantity NUMERIC(18, 2) NOT NULL,
-          order_price VARCHAR(50),
+          order_price TEXT,
           executed_qty NUMERIC(18, 2) DEFAULT 0,
           avg_price NUMERIC(18, 2) DEFAULT 0,
-          status VARCHAR(50) NOT NULL,
-          created VARCHAR(50),
-          broker_id VARCHAR(50),
+          status TEXT NOT NULL,
+          created TEXT,
+          broker_id TEXT,
           rejection_reason TEXT,
           created_at TIMESTAMPTZ DEFAULT NOW()
         );
@@ -310,8 +387,8 @@ async function runMigrations(pool: Pool) {
       // Positions
       await client.query(`
         CREATE TABLE IF NOT EXISTS user_panel_positions (
-          id VARCHAR(50) PRIMARY KEY,
-          client_id VARCHAR(50) REFERENCES user_panel_clients(id) ON DELETE CASCADE,
+          id TEXT PRIMARY KEY,
+          client_id TEXT REFERENCES user_panel_clients(id) ON DELETE CASCADE,
           client_name VARCHAR(255),
           instrument VARCHAR(100) NOT NULL,
           exchange VARCHAR(50),
@@ -325,7 +402,7 @@ async function runMigrations(pool: Pool) {
           unrealised_pnl NUMERIC(18, 2) DEFAULT 0,
           total_pnl NUMERIC(18, 2) DEFAULT 0,
           margin_used NUMERIC(18, 2) DEFAULT 0,
-          broker_id VARCHAR(50),
+          broker_id TEXT,
           updated_at TIMESTAMPTZ DEFAULT NOW()
         );
         CREATE INDEX IF NOT EXISTS idx_up_positions_client ON user_panel_positions(client_id);
@@ -334,20 +411,20 @@ async function runMigrations(pool: Pool) {
       // Fund transactions (Deposits & Withdrawals)
       await client.query(`
         CREATE TABLE IF NOT EXISTS user_panel_fund_transactions (
-          id VARCHAR(50) PRIMARY KEY,
-          client_id VARCHAR(50) REFERENCES user_panel_clients(id) ON DELETE CASCADE,
+          id TEXT PRIMARY KEY,
+          client_id TEXT REFERENCES user_panel_clients(id) ON DELETE CASCADE,
           client_name VARCHAR(255),
           type VARCHAR(20) NOT NULL,
           amount NUMERIC(18, 2) NOT NULL,
-          method VARCHAR(50),
-          request_date VARCHAR(50),
-          reference_id VARCHAR(100),
-          status VARCHAR(50) NOT NULL,
+          method TEXT,
+          request_date TEXT,
+          reference_id TEXT,
+          status TEXT NOT NULL,
           verification TEXT,
           proof_document TEXT,
           approved_by VARCHAR(255),
           rejection_reason TEXT,
-          broker_id VARCHAR(50),
+          broker_id TEXT,
           created_at TIMESTAMPTZ DEFAULT NOW()
         );
         CREATE INDEX IF NOT EXISTS idx_up_funds_client ON user_panel_fund_transactions(client_id);
@@ -357,15 +434,15 @@ async function runMigrations(pool: Pool) {
       // Ledger entries
       await client.query(`
         CREATE TABLE IF NOT EXISTS user_panel_ledger_entries (
-          id VARCHAR(50) PRIMARY KEY,
-          client_id VARCHAR(50),
-          date VARCHAR(50),
-          reference_id VARCHAR(100),
+          id TEXT PRIMARY KEY,
+          client_id TEXT,
+          date TEXT,
+          reference_id TEXT,
           description TEXT,
           debit NUMERIC(18, 2) DEFAULT 0,
           credit NUMERIC(18, 2) DEFAULT 0,
           running_balance NUMERIC(18, 2) NOT NULL,
-          status VARCHAR(50) DEFAULT 'Completed',
+          status TEXT DEFAULT 'Completed',
           type VARCHAR(50),
           created_at TIMESTAMPTZ DEFAULT NOW()
         );
@@ -375,7 +452,7 @@ async function runMigrations(pool: Pool) {
       // Audit logs
       await client.query(`
         CREATE TABLE IF NOT EXISTS user_panel_audit_logs (
-          id VARCHAR(50) PRIMARY KEY,
+          id TEXT PRIMARY KEY,
           timestamp VARCHAR(100),
           user_name VARCHAR(255),
           role VARCHAR(100),
@@ -406,7 +483,7 @@ async function runMigrations(pool: Pool) {
           contract_expiry VARCHAR(50),
           lot_size NUMERIC(18, 2),
           tick_size NUMERIC(18, 2),
-          status VARCHAR(50),
+          status TEXT,
           updated_at TIMESTAMPTZ DEFAULT NOW()
         );
       `);
@@ -424,14 +501,14 @@ async function runMigrations(pool: Pool) {
       // Support tickets
       await client.query(`
         CREATE TABLE IF NOT EXISTS user_panel_tickets (
-          id VARCHAR(50) PRIMARY KEY,
-          client_id VARCHAR(50),
+          id TEXT PRIMARY KEY,
+          client_id TEXT,
           user_name VARCHAR(255),
           category VARCHAR(100) NOT NULL,
           subject VARCHAR(255) NOT NULL,
           message TEXT NOT NULL,
           priority VARCHAR(50) DEFAULT 'Normal',
-          status VARCHAR(50) DEFAULT 'Open',
+          status TEXT DEFAULT 'Open',
           created_at TIMESTAMPTZ DEFAULT NOW()
         );
       `);
@@ -468,6 +545,19 @@ async function runMigrations(pool: Pool) {
 
       console.log('[Database Migration] Migration 2 successfully committed.');
     }
+    // Migration 3: Widen all VARCHAR columns to TEXT across all tables
+    if (!appliedVersions.has(3)) {
+      console.log('[Database Migration] Running Migration 3: Widen VARCHAR columns to TEXT...');
+      await widenColumnsToText(client);
+      try {
+        await client.query(
+          'INSERT INTO user_panel_schema_migrations (version, name) VALUES (3, $1) ON CONFLICT (version) DO NOTHING',
+          ['Widen all VARCHAR columns across all user panel and legacy tables to TEXT']
+        );
+      } catch {}
+      console.log('[Database Migration] Migration 3 successfully committed.');
+    }
+
 
     // Guarantee created_at columns exist unconditionally on primary tables
     const coreTables = ['user_panel_clients', 'user_panel_positions', 'user_panel_orders', 'user_panel_fund_transactions', 'user_panel_ledger_entries'];

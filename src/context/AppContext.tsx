@@ -3,7 +3,7 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import React, { createContext, useContext, useState, useEffect, ReactNode, useCallback } from 'react';
+import React, { createContext, useContext, useState, useEffect, ReactNode, useCallback, useRef } from 'react';
 import {
   AuthenticatedUser,
   Client,
@@ -192,7 +192,11 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
     setToasts((prev) => prev.filter((t) => t.id !== id));
   }, []);
 
+  const lastRefreshTimestampRef = useRef<number>(0);
   const triggerRefresh = useCallback(() => {
+    const now = Date.now();
+    if (now - lastRefreshTimestampRef.current < 1500) return;
+    lastRefreshTimestampRef.current = now;
     setRefreshTrigger((prev) => prev + 1);
   }, []);
 
@@ -434,12 +438,12 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
     };
   }, [showToast, triggerRefresh, currentUser]);
 
-  // Continuous real-time authoritative polling: refreshes data every 4s
+  // Continuous real-time authoritative polling: refreshes data every 5s
   // so any new user, deposit, position, or order on Trading Platform shows up immediately
   useEffect(() => {
     const poll = setInterval(() => {
       triggerRefresh();
-    }, 4000);
+    }, 5000);
     return () => clearInterval(poll);
   }, [triggerRefresh]);
 
