@@ -23,7 +23,7 @@ async function testLiveS2SAndAggregation() {
 
   // 1. Probe Trading Platform & Central Admin
   console.log('--- 1. Probing Live Upstream Services ---');
-  const tpHealth = await tradingPlatformClient.probeHealth(8000);
+  const tpHealth = await tradingPlatformClient.probeHealth(25000);
   assert(tpHealth.reachable, `Trading Platform live health: ${tpHealth.status} (${tpHealth.latencyMs}ms)`);
 
   // 2. Test S2S HMAC request with shared secret

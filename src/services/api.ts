@@ -138,7 +138,7 @@ function normalizeClients(data: any): Client[] {
     marginUsed: Number(item.marginUsed ?? 0),
     income: Number(item.income ?? 0),
     marginAvailable: Number(item.marginAvailable ?? item.availableMargin ?? (item.ledgerBalance ?? 0)),
-    brokerId: String(item.brokerId || 'BRK-01'),
+    brokerId: String(item.brokerId || 'BRK-ROHAN-01'),
     brokerName: String(item.brokerName || 'Apex Capital Partners'),
     kycStatus: (item.kycStatus === 'Verified' || item.kycStatus === 'Pending' || item.kycStatus === 'Rejected')
       ? item.kycStatus

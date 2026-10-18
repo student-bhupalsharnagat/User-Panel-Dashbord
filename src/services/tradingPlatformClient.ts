@@ -53,11 +53,32 @@ export class TradingPlatformClient extends EventEmitter {
     errorCategory: 'NONE',
   };
 
+  // In-memory cache with 10s TTL and last-successful store for resilience against transient failures
+  private cache = new Map<string, { data: any; cachedAt: number }>();
+  private lastSuccessful = new Map<string, any>();
+
   constructor(config?: Partial<TradingPlatformConfig>) {
     super();
     this.baseUrl = (config?.baseUrl || process.env.TRADING_PLATFORM_URL || process.env.TRADING_PLATFORM_BASE_URL || 'https://trading-platform-2t6r.onrender.com').replace(/\/+$/, '').replace(/\/api$/, '');
     this.tenantId = config?.tenantId || process.env.DEFAULT_TENANT_ID || 'TNT-001';
     this.secret = config?.secret || process.env.INTERNAL_API_SECRET || process.env.INTERNAL_COMMUNICATION_SECRET || process.env.CENTRAL_ADMIN_INTERNAL_SECRET || 'nextrade-internal-hmac-secret-2026';
+  }
+
+  private getCached<T>(key: string, ttlMs = 10000): T | null {
+    const entry = this.cache.get(key);
+    if (entry && (Date.now() - entry.cachedAt < ttlMs)) {
+      return entry.data as T;
+    }
+    return null;
+  }
+
+  private setCache<T>(key: string, data: T): void {
+    this.cache.set(key, { data, cachedAt: Date.now() });
+    this.lastSuccessful.set(key, data);
+  }
+
+  private getLastSuccessful<T>(key: string): T | null {
+    return (this.lastSuccessful.get(key) as T) || null;
   }
 
   public getStatus(): UpstreamStatus {
@@ -69,13 +90,15 @@ export class TradingPlatformClient extends EventEmitter {
   }
 
   /**
-   * Resolves outgoing tenant ID (defaults to TNT-001)
+   * Resolves outgoing tenant ID (defaults to TNT-001).
+   * Strips any accidental comma-separated duplicates (e.g. "TNT-001, TNT-001" -> "TNT-001").
    */
   public resolveOutboundTenantId(tenantId?: string): string {
     if (!tenantId || tenantId === 'ALL' || tenantId === 'ALL_TENANTS') {
       return 'TNT-001';
     }
-    return tenantId;
+    const clean = tenantId.split(',')[0].trim();
+    return clean || 'TNT-001';
   }
 
   /**
@@ -131,6 +154,7 @@ export class TradingPlatformClient extends EventEmitter {
 
     const url = `${this.baseUrl}${cleanPath}`.replace(/\/api\/api\//g, '/api/');
     const isMutation = ['POST', 'PUT', 'PATCH'].includes(method);
+    // Send single lowercase headers only - never mix lowercase and uppercase to prevent undici header duplication!
     const headers: Record<string, string> = {
       'Accept': 'application/json',
       ...(isMutation ? { 'Content-Type': 'application/json' } : {}),
@@ -139,18 +163,11 @@ export class TradingPlatformClient extends EventEmitter {
       'x-tenant-id': outboundTenant,
       'x-internal-nonce': nonce,
       'x-correlation-id': correlationId,
-      'X-Internal-Signature': signature,
-      'X-Internal-Timestamp': timestamp,
-      'X-Tenant-ID': outboundTenant,
-      'X-Internal-Nonce': nonce,
-      'X-Correlation-ID': correlationId,
-      'X-Signature-SHA256': signature,
-      'X-HMAC-Signature': signature,
     };
 
     try {
       const controller = new AbortController();
-      const timer = setTimeout(() => controller.abort(), options.timeoutMs || 45000);
+      const timer = setTimeout(() => controller.abort(), options.timeoutMs || 20000);
       const res = await fetch(url, {
         method,
         headers,
@@ -170,56 +187,189 @@ export class TradingPlatformClient extends EventEmitter {
   }
 
   /**
-   * Live authoritative Clients from Trading Platform for a specific tenant
+   * Live authoritative Clients from Trading Platform for a specific tenant with 10s cache and fallback
    */
   public async fetchLiveClients(tenantId?: string): Promise<{ success: boolean; clients: any[] }> {
-    const res = await this.s2sRequest({ method: 'GET', path: '/api/internal/v1/trading/clients', tenantId, timeoutMs: 15000 });
-    const clients = res.success ? (res.data?.clients || res.data?.items || (Array.isArray(res.data) ? res.data : [])) : [];
-    return { success: res.success, clients };
+    const cleanTenant = this.resolveOutboundTenantId(tenantId);
+    const cacheKey = `clients:${cleanTenant}`;
+    const cached = this.getCached<any[]>(cacheKey, 10000);
+    if (cached) {
+      return { success: true, clients: cached };
+    }
+
+    const res = await this.s2sRequest({
+      method: 'GET',
+      path: '/api/internal/v1/trading/clients?limit=250',
+      tenantId: cleanTenant,
+      timeoutMs: 45000
+    });
+    if (res.success) {
+      const clients = res.data?.clients || res.data?.items || (Array.isArray(res.data) ? res.data : []);
+      if (Array.isArray(clients) && clients.length > 0) {
+        this.setCache(cacheKey, clients);
+        return { success: true, clients };
+      }
+    }
+    const fallback = this.getLastSuccessful<any[]>(cacheKey);
+    if (fallback && fallback.length > 0) {
+      return { success: true, clients: fallback };
+    }
+    return { success: res.success, clients: [] };
   }
 
   /**
    * Live authoritative Dashboard summary metrics from Trading Platform for a specific tenant
    */
   public async fetchLiveSummary(tenantId?: string): Promise<{ success: boolean; metrics: any }> {
-    const res = await this.s2sRequest({ method: 'GET', path: '/api/internal/v1/trading/summary', tenantId, timeoutMs: 15000 });
-    return { success: res.success, metrics: res.data?.metrics || res.data || {} };
+    const cleanTenant = this.resolveOutboundTenantId(tenantId);
+    const cacheKey = `summary:${cleanTenant}`;
+    const cached = this.getCached<any>(cacheKey, 10000);
+    if (cached) {
+      return { success: true, metrics: cached };
+    }
+
+    const res = await this.s2sRequest({
+      method: 'GET',
+      path: '/api/internal/v1/trading/summary',
+      tenantId: cleanTenant,
+      timeoutMs: 20000
+    });
+    if (res.success) {
+      const metrics = res.data?.metrics || res.data || {};
+      if (metrics && Object.keys(metrics).length > 0) {
+        this.setCache(cacheKey, metrics);
+        return { success: true, metrics };
+      }
+    }
+    const fallback = this.getLastSuccessful<any>(cacheKey);
+    if (fallback) {
+      return { success: true, metrics: fallback };
+    }
+    return { success: res.success, metrics: {} };
   }
 
   /**
    * Live authoritative Orders from Trading Platform for a specific tenant
    */
   public async fetchLiveOrders(tenantId?: string): Promise<{ success: boolean; orders: any[] }> {
-    const res = await this.s2sRequest({ method: 'GET', path: '/api/internal/v1/trading/orders', tenantId, timeoutMs: 15000 });
-    const orders = res.success ? (res.data?.orders || res.data?.items || (Array.isArray(res.data) ? res.data : [])) : [];
-    return { success: res.success, orders };
+    const cleanTenant = this.resolveOutboundTenantId(tenantId);
+    const cacheKey = `orders:${cleanTenant}`;
+    const cached = this.getCached<any[]>(cacheKey, 10000);
+    if (cached) {
+      return { success: true, orders: cached };
+    }
+
+    const res = await this.s2sRequest({
+      method: 'GET',
+      path: '/api/internal/v1/trading/orders?limit=250',
+      tenantId: cleanTenant,
+      timeoutMs: 20000
+    });
+    if (res.success) {
+      const orders = res.data?.orders || res.data?.items || (Array.isArray(res.data) ? res.data : []);
+      if (Array.isArray(orders) && orders.length > 0) {
+        this.setCache(cacheKey, orders);
+        return { success: true, orders };
+      }
+    }
+    const fallback = this.getLastSuccessful<any[]>(cacheKey);
+    if (fallback && fallback.length > 0) {
+      return { success: true, orders: fallback };
+    }
+    return { success: res.success, orders: [] };
   }
 
   /**
    * Live authoritative Positions from Trading Platform for a specific tenant
    */
   public async fetchLivePositions(tenantId?: string): Promise<{ success: boolean; positions: any[] }> {
-    const res = await this.s2sRequest({ method: 'GET', path: '/api/internal/v1/trading/positions', tenantId, timeoutMs: 15000 });
-    const positions = res.success ? (res.data?.positions || res.data?.items || (Array.isArray(res.data) ? res.data : [])) : [];
-    return { success: res.success, positions };
+    const cleanTenant = this.resolveOutboundTenantId(tenantId);
+    const cacheKey = `positions:${cleanTenant}`;
+    const cached = this.getCached<any[]>(cacheKey, 10000);
+    if (cached) {
+      return { success: true, positions: cached };
+    }
+
+    const res = await this.s2sRequest({
+      method: 'GET',
+      path: '/api/internal/v1/trading/positions?limit=250',
+      tenantId: cleanTenant,
+      timeoutMs: 20000
+    });
+    if (res.success) {
+      const positions = res.data?.positions || res.data?.items || (Array.isArray(res.data) ? res.data : []);
+      if (Array.isArray(positions) && positions.length > 0) {
+        this.setCache(cacheKey, positions);
+        return { success: true, positions };
+      }
+    }
+    const fallback = this.getLastSuccessful<any[]>(cacheKey);
+    if (fallback && fallback.length > 0) {
+      return { success: true, positions: fallback };
+    }
+    return { success: res.success, positions: [] };
   }
 
   /**
    * Live authoritative Fund transactions from Trading Platform for a specific tenant
    */
   public async fetchLiveFunds(tenantId?: string): Promise<{ success: boolean; funds: any[] }> {
-    const res = await this.s2sRequest({ method: 'GET', path: '/api/internal/v1/trading/funds', tenantId, timeoutMs: 15000 });
-    const funds = res.success ? (res.data?.funds || res.data?.transactions || res.data?.items || (Array.isArray(res.data) ? res.data : [])) : [];
-    return { success: res.success, funds };
+    const cleanTenant = this.resolveOutboundTenantId(tenantId);
+    const cacheKey = `funds:${cleanTenant}`;
+    const cached = this.getCached<any[]>(cacheKey, 10000);
+    if (cached) {
+      return { success: true, funds: cached };
+    }
+
+    const res = await this.s2sRequest({
+      method: 'GET',
+      path: '/api/internal/v1/trading/funds?limit=250',
+      tenantId: cleanTenant,
+      timeoutMs: 20000
+    });
+    if (res.success) {
+      const funds = res.data?.funds || res.data?.transactions || res.data?.items || (Array.isArray(res.data) ? res.data : []);
+      if (Array.isArray(funds) && funds.length > 0) {
+        this.setCache(cacheKey, funds);
+        return { success: true, funds };
+      }
+    }
+    const fallback = this.getLastSuccessful<any[]>(cacheKey);
+    if (fallback && fallback.length > 0) {
+      return { success: true, funds: fallback };
+    }
+    return { success: res.success, funds: [] };
   }
 
   /**
    * Live authoritative Ledger from Trading Platform for a specific tenant
    */
   public async fetchLiveLedger(tenantId?: string): Promise<{ success: boolean; ledger: any[] }> {
-    const res = await this.s2sRequest({ method: 'GET', path: '/api/internal/v1/trading/ledger', tenantId, timeoutMs: 15000 });
-    const ledger = res.success ? (res.data?.ledger || res.data?.items || (Array.isArray(res.data) ? res.data : [])) : [];
-    return { success: res.success, ledger };
+    const cleanTenant = this.resolveOutboundTenantId(tenantId);
+    const cacheKey = `ledger:${cleanTenant}`;
+    const cached = this.getCached<any[]>(cacheKey, 10000);
+    if (cached) {
+      return { success: true, ledger: cached };
+    }
+
+    const res = await this.s2sRequest({
+      method: 'GET',
+      path: '/api/internal/v1/trading/ledger?limit=250',
+      tenantId: cleanTenant,
+      timeoutMs: 20000
+    });
+    if (res.success) {
+      const ledger = res.data?.ledger || res.data?.items || (Array.isArray(res.data) ? res.data : []);
+      if (Array.isArray(ledger) && ledger.length > 0) {
+        this.setCache(cacheKey, ledger);
+        return { success: true, ledger };
+      }
+    }
+    const fallback = this.getLastSuccessful<any[]>(cacheKey);
+    if (fallback && fallback.length > 0) {
+      return { success: true, ledger: fallback };
+    }
+    return { success: res.success, ledger: [] };
   }
 
   /**
@@ -227,7 +377,7 @@ export class TradingPlatformClient extends EventEmitter {
    * ('TNT-001', 'vertex-default', 'default', 'TNT-002', 'TNT-003') so no user is hidden.
    */
   public async fetchAllLiveClients(tenantId?: string): Promise<{ success: boolean; clients: any[] }> {
-    const targetTenant = (tenantId && tenantId !== 'ALL' && tenantId !== 'ALL_TENANTS') ? tenantId : 'TNT-001';
+    const targetTenant = (tenantId && tenantId !== 'ALL' && tenantId !== 'ALL_TENANTS') ? this.resolveOutboundTenantId(tenantId) : 'TNT-001';
     const res = await this.fetchLiveClients(targetTenant);
     if (res.success && res.clients.length > 0) return res;
     if (targetTenant !== 'vertex-default') {
@@ -241,7 +391,7 @@ export class TradingPlatformClient extends EventEmitter {
    * Multi-Tenant Aggregation: Aggregates live orders across default tenants
    */
   public async fetchAllLiveOrders(tenantId?: string): Promise<{ success: boolean; orders: any[] }> {
-    const targetTenant = (tenantId && tenantId !== 'ALL' && tenantId !== 'ALL_TENANTS') ? tenantId : 'TNT-001';
+    const targetTenant = (tenantId && tenantId !== 'ALL' && tenantId !== 'ALL_TENANTS') ? this.resolveOutboundTenantId(tenantId) : 'TNT-001';
     const res = await this.fetchLiveOrders(targetTenant);
     if (res.success && res.orders.length > 0) return res;
     if (targetTenant !== 'vertex-default') {
@@ -255,7 +405,7 @@ export class TradingPlatformClient extends EventEmitter {
    * Multi-Tenant Aggregation: Aggregates live positions across default tenants
    */
   public async fetchAllLivePositions(tenantId?: string): Promise<{ success: boolean; positions: any[] }> {
-    const targetTenant = (tenantId && tenantId !== 'ALL' && tenantId !== 'ALL_TENANTS') ? tenantId : 'TNT-001';
+    const targetTenant = (tenantId && tenantId !== 'ALL' && tenantId !== 'ALL_TENANTS') ? this.resolveOutboundTenantId(tenantId) : 'TNT-001';
     const res = await this.fetchLivePositions(targetTenant);
     if (res.success && res.positions.length > 0) return res;
     if (targetTenant !== 'vertex-default') {
@@ -269,7 +419,7 @@ export class TradingPlatformClient extends EventEmitter {
    * Multi-Tenant Aggregation: Aggregates live fund transactions across default tenants
    */
   public async fetchAllLiveFunds(tenantId?: string): Promise<{ success: boolean; funds: any[] }> {
-    const targetTenant = (tenantId && tenantId !== 'ALL' && tenantId !== 'ALL_TENANTS') ? tenantId : 'TNT-001';
+    const targetTenant = (tenantId && tenantId !== 'ALL' && tenantId !== 'ALL_TENANTS') ? this.resolveOutboundTenantId(tenantId) : 'TNT-001';
     const res = await this.fetchLiveFunds(targetTenant);
     if (res.success && res.funds.length > 0) return res;
     if (targetTenant !== 'vertex-default') {
@@ -283,7 +433,7 @@ export class TradingPlatformClient extends EventEmitter {
    * Multi-Tenant Aggregation: Aggregates live ledger across default tenants
    */
   public async fetchAllLiveLedger(tenantId?: string): Promise<{ success: boolean; ledger: any[] }> {
-    const targetTenant = (tenantId && tenantId !== 'ALL' && tenantId !== 'ALL_TENANTS') ? tenantId : 'TNT-001';
+    const targetTenant = (tenantId && tenantId !== 'ALL' && tenantId !== 'ALL_TENANTS') ? this.resolveOutboundTenantId(tenantId) : 'TNT-001';
     const res = await this.fetchLiveLedger(targetTenant);
     if (res.success && res.ledger.length > 0) return res;
     if (targetTenant !== 'vertex-default') {
@@ -297,7 +447,7 @@ export class TradingPlatformClient extends EventEmitter {
    * Multi-Tenant Aggregation: Aggregates summary KPIs across default tenants
    */
   public async fetchAllLiveSummary(tenantId?: string): Promise<{ success: boolean; metrics: any }> {
-    const targetTenant = (tenantId && tenantId !== 'ALL' && tenantId !== 'ALL_TENANTS') ? tenantId : 'TNT-001';
+    const targetTenant = (tenantId && tenantId !== 'ALL' && tenantId !== 'ALL_TENANTS') ? this.resolveOutboundTenantId(tenantId) : 'TNT-001';
     const res = await this.fetchLiveSummary(targetTenant);
     if (res.success && res.metrics && Object.keys(res.metrics).length > 0) return res;
     if (targetTenant !== 'vertex-default') {
@@ -351,7 +501,7 @@ export class TradingPlatformClient extends EventEmitter {
   /**
    * Probe platform health & authoritative PostgreSQL engine status
    */
-  public async probeHealth(timeoutMs = 7000): Promise<UpstreamStatus> {
+  public async probeHealth(timeoutMs = 20000): Promise<UpstreamStatus> {
     const start = Date.now();
     try {
       const controller = new AbortController();
@@ -417,26 +567,36 @@ export class TradingPlatformClient extends EventEmitter {
   }
 
   /**
-   * Fetch live market instruments quote catalog
+   * Fetch live market instruments quote catalog with 30s cache and fallback
    */
   public async fetchInstruments(): Promise<any[]> {
+    const cacheKey = 'instruments';
+    const cached = this.getCached<any[]>(cacheKey, 30000);
+    if (cached && cached.length > 0) return cached;
+
     try {
+      const controller = new AbortController();
+      const timer = setTimeout(() => controller.abort(), 20000);
       const res = await fetch(`${this.baseUrl}/api/trading/instruments`.replace(/\/api\/api\//g, '/api/'), {
         headers: {
           'Accept': 'application/json',
           'x-tenant-id': this.resolveOutboundTenantId(this.tenantId),
         },
+        signal: controller.signal,
       });
+      clearTimeout(timer);
       if (res.ok) {
         const data = await res.json();
-        if (Array.isArray(data.instruments)) {
-          return data.instruments;
+        const list = Array.isArray(data.instruments) ? data.instruments : (Array.isArray(data) ? data : []);
+        if (list.length > 0) {
+          this.setCache(cacheKey, list);
+          return list;
         }
       }
     } catch (err: any) {
       console.warn('[TradingPlatformClient] Error fetching instruments:', err.message);
     }
-    return [];
+    return this.getLastSuccessful<any[]>(cacheKey) || [];
   }
 
   /**

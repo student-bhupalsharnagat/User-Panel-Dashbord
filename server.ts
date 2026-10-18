@@ -701,14 +701,19 @@ export async function syncUpstreamMarketInstruments() {
   }
 }
 
+let isSyncingAuthoritative = false;
+let lastInstrumentSyncTime = 0;
+
 export async function syncAuthoritativeData(requestedTenantId?: string) {
+  if (isSyncingAuthoritative) return;
+  isSyncingAuthoritative = true;
   try {
     const [liveClients, liveOrders, livePositions, liveFunds, liveLedger] = await Promise.all([
-      tradingPlatformClient.fetchAllLiveClients(),
-      tradingPlatformClient.fetchAllLiveOrders(),
-      tradingPlatformClient.fetchAllLivePositions(),
-      tradingPlatformClient.fetchAllLiveFunds(),
-      tradingPlatformClient.fetchAllLiveLedger(),
+      tradingPlatformClient.fetchAllLiveClients(requestedTenantId),
+      tradingPlatformClient.fetchAllLiveOrders(requestedTenantId),
+      tradingPlatformClient.fetchAllLivePositions(requestedTenantId),
+      tradingPlatformClient.fetchAllLiveFunds(requestedTenantId),
+      tradingPlatformClient.fetchAllLiveLedger(requestedTenantId),
     ]);
 
     const clientsList = Array.isArray(liveClients) ? liveClients : ((liveClients as any)?.clients || []);
@@ -718,24 +723,164 @@ export async function syncAuthoritativeData(requestedTenantId?: string) {
     const ledgerList = Array.isArray(liveLedger) ? liveLedger : ((liveLedger as any)?.ledger || []);
 
     if (clientsList.length > 0) {
-      clients = clientsList;
+      clients = clientsList.map((rc: any) => {
+        const cId = String(rc.id || rc.userId || `CLT-${rc.clientCode || '001'}`).trim();
+        const bal = parseFloat(rc.ledgerBalance ?? rc.balance ?? rc.wallet_balance ?? rc.wallet?.balance ?? '100000');
+        const equity = parseFloat(rc.marginAvailable ?? rc.equity ?? rc.available_margin ?? bal);
+        return {
+          id: cId,
+          name: rc.fullName || rc.name || rc.username || 'Trader',
+          email: rc.email || `${cId.toLowerCase()}@tradingplatform.com`,
+          phone: rc.phone || rc.mobile || '+91 98000 00000',
+          pan: rc.pan || 'ABCDE1234F',
+          status: (rc.status || rc.accountStatus || 'Active').toUpperCase() === 'ACTIVE' ? 'Active' : 'Inactive',
+          isDemo: Boolean(rc.isDemo ?? (rc.accountType === 'demo')),
+          ledgerBalance: isNaN(bal) ? 100000 : bal,
+          openPnL: parseFloat(rc.openPnL ?? rc.pnl ?? '0'),
+          peakLedger: isNaN(bal) ? 100000 : bal,
+          marginUsed: parseFloat(rc.marginUsed ?? rc.margin ?? '0'),
+          income: parseFloat(rc.income ?? '0'),
+          marginAvailable: isNaN(equity) ? 100000 : equity,
+          brokerId: rc.brokerId || 'BRK-ROHAN-01',
+          brokerName: rc.brokerName || 'NexTrade Broker',
+          subBrokerId: rc.subBrokerId || 'SUB-BRK-001',
+          masterId: rc.masterId || 'MST-ALPHA-01',
+          tenantId: rc.tenantId || 'TNT-001',
+          kycStatus: rc.kycStatus || 'Verified',
+          kycDocuments: rc.kycDocuments || [],
+          createdDate: rc.createdDate || (rc.createdAt ? new Date(rc.createdAt).toISOString().split('T')[0] : '2026-03-29'),
+          lastActive: rc.lastActive || 'Just now',
+          riskLimit: parseFloat(rc.riskLimit ?? '500000'),
+        };
+      });
     }
+
     if (ordersList.length > 0) {
-      orders = ordersList;
+      orders = ordersList.map((ro: any) => {
+        const orderId = String(ro.id || ro.order_id || `ORD-${Date.now()}`).trim();
+        const qty = Number(ro.quantity || ro.qty || ro.lots || 1);
+        const price = Number(ro.price || ro.orderPrice || 0);
+        const statusMap: Record<string, Order['status']> = {
+          EXECUTED: 'Executed',
+          OPEN: 'Open',
+          PENDING: 'Pending',
+          REJECTED: 'Rejected',
+          CANCELLED: 'Cancelled',
+        };
+        const mappedStatus: Order['status'] = statusMap[String(ro.status).toUpperCase()] || 'Executed';
+        const side: 'BUY' | 'SELL' = ro.side === 'SELL' || ro.type === 'SELL' ? 'SELL' : 'BUY';
+        const type: 'LIMIT' | 'MARKET' | 'SL-M' = ro.order_type === 'LIMIT' || ro.orderType === 'LIMIT' ? 'LIMIT' : 'MARKET';
+
+        return {
+          id: orderId,
+          clientId: ro.clientId || ro.client_id || ro.user_id || clients[0]?.id || 'NT10482',
+          clientName: ro.clientName || ro.client_name || clients[0]?.name || 'Trader',
+          instrument: ro.symbol || ro.instrument || 'RELIANCE',
+          exchange: ro.symbol?.includes('FUT') ? 'NFO' : (ro.symbol?.includes('/') ? 'MCX' : 'NSE'),
+          side,
+          type,
+          quantity: qty,
+          orderPrice: price > 0 ? price : 'Market',
+          executedQty: mappedStatus === 'Executed' ? qty : 0,
+          avgPrice: price,
+          status: mappedStatus,
+          created: ro.created_at ? new Date(ro.created_at).toLocaleTimeString('en-GB') : (ro.time ? `${ro.time}, ${ro.date || 'Today'}` : new Date().toLocaleTimeString('en-GB')),
+          brokerId: ro.brokerId || 'BRK-ROHAN-01',
+          subBrokerId: ro.subBrokerId || 'SUB-BRK-001',
+          masterId: ro.masterId || 'MST-ALPHA-01',
+          tenantId: ro.tenantId || 'TNT-001',
+        };
+      });
     }
+
     if (positionsList.length > 0) {
-      positions = positionsList;
+      positions = positionsList.map((rp: any) => {
+        const posId = String(rp.id || rp.positionId || `POS-${rp.symbol}`).trim();
+        const buyQty = Number(rp.buyQty || (rp.side === 'BUY' ? rp.quantity : 0));
+        const sellQty = Number(rp.sellQty || (rp.side === 'SELL' ? rp.quantity : 0));
+        const netQty = Number(rp.netQty ?? (rp.side === 'SELL' ? -rp.quantity : (rp.quantity || (buyQty - sellQty))));
+        const avgPrice = Number(rp.buyPrice || rp.avgPrice || rp.price || 0);
+        const currentPrice = Number(rp.currentPrice || rp.markPrice || rp.ltp || avgPrice);
+        const realisedPnL = Number(rp.realisedPnL || 0);
+        const unrealisedPnL = Number(rp.pnl || rp.unrealisedPnL || (netQty * (currentPrice - avgPrice)));
+
+        return {
+          id: posId,
+          clientId: rp.clientId || rp.userId || rp.client_id || clients[0]?.id || 'NT10482',
+          clientName: rp.clientName || rp.client_name || clients[0]?.name || 'Trader',
+          instrument: rp.symbol || 'RELIANCE',
+          exchange: rp.symbol?.includes('FUT') ? 'NFO' : (rp.symbol?.includes('/') ? 'MCX' : 'NSE'),
+          product: rp.product === 'CNC' ? 'CNC' : 'MIS',
+          buyQty,
+          sellQty,
+          netQty,
+          avgPrice,
+          currentPrice,
+          realisedPnL,
+          unrealisedPnL,
+          totalPnL: realisedPnL + unrealisedPnL,
+          marginUsed: Number(rp.margin || rp.marginUsed || 0),
+          brokerId: rp.brokerId || 'BRK-ROHAN-01',
+          subBrokerId: rp.subBrokerId || 'SUB-BRK-001',
+          masterId: rp.masterId || 'MST-ALPHA-01',
+          tenantId: rp.tenantId || 'TNT-001',
+        };
+      });
     }
+
     if (fundsList.length > 0) {
-      fundTransactions = fundsList;
+      fundTransactions = fundsList.map((rf: any) => {
+        const id = String(rf.id || rf.transactionId || `TXN-${Date.now()}`);
+        const tType = (rf.type || rf.transaction_type || '').toUpperCase().includes('WITHDRAW') ? 'Withdrawal' : 'Deposit';
+        return {
+          id,
+          clientId: rf.clientId || rf.client_id || rf.user_id || clients[0]?.id || 'NT10482',
+          clientName: rf.clientName || rf.client_name || clients[0]?.name || 'Trader',
+          type: tType as 'Deposit' | 'Withdrawal',
+          amount: parseFloat(rf.amount || '0'),
+          method: (rf.method || 'Bank transfer') as 'Bank transfer' | 'UPI' | 'Net banking',
+          requestDate: rf.createdAt ? new Date(rf.createdAt).toISOString().split('T')[0] : '2026-03-29',
+          referenceId: rf.reference || rf.refNo || id,
+          status: (rf.status || 'Completed').toUpperCase() === 'PENDING' ? 'Pending' : 'Completed',
+          verification: 'Verified',
+          proofDocument: undefined,
+          approvedBy: rf.approvedBy || 'Trading Platform S2S',
+          rejectionReason: undefined,
+          brokerId: rf.brokerId || 'BRK-ROHAN-01',
+          subBrokerId: rf.subBrokerId || 'SUB-BRK-001',
+          masterId: rf.masterId || 'MST-ALPHA-01',
+          tenantId: rf.tenantId || 'TNT-001',
+        };
+      });
     }
+
     if (ledgerList.length > 0) {
-      ledgerEntries = ledgerList;
+      ledgerEntries = ledgerList.map((rl: any) => {
+        const id = String(rl.id || rl.entryId || `LDG-${Date.now()}`);
+        const isDebit = (rl.type || rl.entryType || '').toLowerCase().includes('debit');
+        const amt = parseFloat(rl.amount || (isDebit ? rl.debit : rl.credit) || '0');
+        return {
+          id,
+          date: rl.created_at ? new Date(rl.created_at).toISOString().split('T')[0] : '2026-03-29',
+          referenceId: rl.referenceId || rl.reference_id || id,
+          description: rl.description || rl.particulars || 'Authoritative Ledger Transaction',
+          debit: isDebit ? amt : 0,
+          credit: isDebit ? 0 : amt,
+          runningBalance: parseFloat(rl.balanceAfter || rl.balance_after || '100000'),
+          status: 'Completed',
+          type: isDebit ? 'Withdrawal' : 'Deposit',
+          clientId: rl.clientId || rl.client_id || rl.user_id,
+          brokerId: rl.brokerId || 'BRK-ROHAN-01',
+          tenantId: rl.tenantId || 'TNT-001',
+        };
+      });
     }
 
     savePersistence();
   } catch (err: any) {
     console.warn('[Authoritative Sync] Notice syncing data from upstream:', err.message);
+  } finally {
+    isSyncingAuthoritative = false;
   }
 }
 
@@ -751,19 +896,15 @@ setTimeout(async () => {
   await syncAuthoritativeData().catch(() => {});
 }, 500);
 
-// Continuous background sync with authoritative Trading Platform (4s interval)
+// Continuous background sync with authoritative Trading Platform (10s interval for data, 30s for instruments)
 setInterval(async () => {
-  if (upstreamTradingPlatformStatus.reachable) {
+  const now = Date.now();
+  if (now - lastInstrumentSyncTime >= 30000) {
+    lastInstrumentSyncTime = now;
     await syncUpstreamMarketInstruments().catch(() => {});
-    await syncAuthoritativeData().catch(() => {});
-  } else {
-    const probe = await probeUpstreamTradingPlatform(4000).catch(() => null);
-    if (probe?.reachable) {
-      await syncUpstreamMarketInstruments().catch(() => {});
-      await syncAuthoritativeData().catch(() => {});
-    }
   }
-}, 4000);
+  await syncAuthoritativeData().catch(() => {});
+}, 10000);
 
 // ==========================================
 // IDEMPOTENCY CACHE & OUTBOX
@@ -959,10 +1100,6 @@ function calculateAuthoritativeMetrics(userRole: string, brokerId: string, clien
     filteredClients = clients.filter(c => c.id === clientId);
     filteredPositions = positions.filter(p => p.clientId === clientId);
     filteredOrders = orders.filter(o => o.clientId === clientId);
-  } else if (userRole === 'broker_admin' || userRole === 'sub_broker') {
-    filteredClients = clients.filter(c => c.brokerId === brokerId || !c.brokerId || c.brokerId === 'BRK-ROHAN-01');
-    filteredPositions = positions.filter(p => p.brokerId === brokerId || !p.brokerId || p.brokerId === 'BRK-ROHAN-01');
-    filteredOrders = orders.filter(o => o.brokerId === brokerId || !o.brokerId || o.brokerId === 'BRK-ROHAN-01');
   }
 
   const activeCount = filteredClients.filter(c => c.status === 'Active').length;
@@ -1093,11 +1230,7 @@ app.get('/api/bootstrap', authMiddleware, async (req: AuthenticatedRequest, res:
     scopedOrders = orders.filter(o => o.clientId === user.sub);
     scopedPositions = positions.filter(p => p.clientId === user.sub);
     scopedFunds = fundTransactions.filter(f => f.clientId === user.sub);
-  } else if (user.role === 'broker_admin' || user.role === 'sub_broker') {
-    scopedClients = clients.filter(c => c.brokerId === user.brokerId || !c.brokerId || c.brokerId === 'BRK-ROHAN-01');
-    scopedOrders = orders.filter(o => o.brokerId === user.brokerId || !o.brokerId || o.brokerId === 'BRK-ROHAN-01');
-    scopedPositions = positions.filter(p => p.brokerId === user.brokerId || !p.brokerId || p.brokerId === 'BRK-ROHAN-01');
-    scopedFunds = fundTransactions.filter(f => f.brokerId === user.brokerId || !f.brokerId || f.brokerId === 'BRK-ROHAN-01');
+    scopedLedger = ledgerEntries.filter(l => (l as any).clientId === user.sub);
   }
 
   res.json({
@@ -1260,35 +1393,44 @@ app.get(['/api/clients', '/api/admin/clients'], authMiddleware, async (req: Auth
 
   // Actively fetch live authoritative clients from Trading Platform
   try {
-    const liveClientsRes = await tradingPlatformClient.fetchLiveClients(user.tenantId);
+    const liveClientsRes = await tradingPlatformClient.fetchAllLiveClients(user.tenantId);
     if (liveClientsRes.success && Array.isArray(liveClientsRes.clients) && liveClientsRes.clients.length > 0) {
       const existingIds = new Set(clients.map(c => c.id));
       for (const rc of liveClientsRes.clients) {
-        const cId = String(rc.id || rc.userId || `CLT-${rc.clientCode || '001'}`);
+        const cId = String(rc.id || rc.userId || `CLT-${rc.clientCode || '001'}`).trim();
+        const bal = parseFloat(rc.ledgerBalance ?? rc.balance ?? rc.wallet_balance ?? rc.wallet?.balance ?? '100000');
+        const equity = parseFloat(rc.marginAvailable ?? rc.equity ?? rc.available_margin ?? bal);
+        const mappedClient: Client = {
+          id: cId,
+          name: rc.fullName || rc.name || rc.username || 'Trader',
+          email: rc.email || `${cId.toLowerCase()}@tradingplatform.com`,
+          phone: rc.phone || rc.mobile || '+91 98000 00000',
+          pan: rc.pan || 'ABCDE1234F',
+          status: (rc.status || rc.accountStatus || 'Active').toUpperCase() === 'ACTIVE' ? 'Active' : 'Inactive',
+          isDemo: Boolean(rc.isDemo ?? (rc.accountType === 'demo')),
+          ledgerBalance: isNaN(bal) ? 100000 : bal,
+          openPnL: parseFloat(rc.openPnL ?? rc.pnl ?? '0'),
+          peakLedger: isNaN(bal) ? 100000 : bal,
+          marginUsed: parseFloat(rc.marginUsed ?? rc.margin ?? '0'),
+          income: parseFloat(rc.income ?? '0'),
+          marginAvailable: isNaN(equity) ? 100000 : equity,
+          brokerId: rc.brokerId || 'BRK-ROHAN-01',
+          brokerName: rc.brokerName || 'NexTrade Broker',
+          subBrokerId: rc.subBrokerId || 'SUB-BRK-001',
+          masterId: rc.masterId || 'MST-ALPHA-01',
+          tenantId: rc.tenantId || 'TNT-001',
+          kycStatus: rc.kycStatus || 'Verified',
+          kycDocuments: rc.kycDocuments || [],
+          createdDate: rc.createdDate || (rc.createdAt ? new Date(rc.createdAt).toISOString().split('T')[0] : '2026-03-29'),
+          lastActive: rc.lastActive || 'Just now',
+          riskLimit: parseFloat(rc.riskLimit ?? '500000')
+        };
         if (!existingIds.has(cId)) {
           existingIds.add(cId);
-          clients.push({
-            id: cId,
-            name: rc.fullName || rc.name || 'Trader',
-            email: rc.email || `${cId.toLowerCase()}@tradingplatform.com`,
-            phone: rc.phone || '+91 98000 00000',
-            pan: rc.pan || 'ABCDE1234F',
-            status: (rc.status || rc.accountStatus || 'Active').toUpperCase() === 'ACTIVE' ? 'Active' : 'Inactive',
-            isDemo: false,
-            ledgerBalance: parseFloat(rc.balance || rc.wallet_balance || '100000'),
-            openPnL: 0,
-            peakLedger: parseFloat(rc.balance || rc.wallet_balance || '100000'),
-            marginUsed: 0,
-            income: 0,
-            marginAvailable: parseFloat(rc.equity || rc.available_margin || rc.balance || '100000'),
-            brokerId: user.brokerId || 'BRK-ROHAN-01',
-            brokerName: 'NexTrade Broker',
-            kycStatus: 'Verified',
-            kycDocuments: [],
-            createdDate: rc.createdAt ? new Date(rc.createdAt).toISOString().split('T')[0] : '2026-03-29',
-            lastActive: 'Just now',
-            riskLimit: 500000
-          });
+          clients.push(mappedClient);
+        } else {
+          const idx = clients.findIndex(c => c.id === cId);
+          if (idx !== -1) clients[idx] = { ...clients[idx], ...mappedClient };
         }
       }
     }
@@ -1296,15 +1438,10 @@ app.get(['/api/clients', '/api/admin/clients'], authMiddleware, async (req: Auth
     console.warn('[Clients API] Remote fetch notice:', err.message);
   }
 
-  // Display all records without filtering out vertex-default, default, TNT-001, TNT-002, TNT-003
+  // Display all records without filtering out - for super_admin, broker_admin, master, and default views
   let result = clients;
-
   if (user.role === 'trader_client') {
-    const userClients = clients.filter(c => c.id === user.sub);
-    result = userClients.length > 0 ? userClients : clients;
-  } else if (user.role === 'broker_admin') {
-    const brokerClients = clients.filter(c => c.brokerId === user.brokerId || !c.brokerId || c.brokerId === 'BRK-ROHAN-01');
-    result = brokerClients.length > 0 ? brokerClients : clients;
+    result = clients.filter(c => c.id === user.sub);
   }
 
   if (hideDemo === 'true') {
@@ -1436,7 +1573,7 @@ app.get('/api/orders', authMiddleware, async (req: AuthenticatedRequest, res: Re
 
   // Actively fetch live authoritative orders from Trading Platform
   try {
-    const liveOrdersRes = await tradingPlatformClient.fetchLiveOrders(user.tenantId);
+    const liveOrdersRes = await tradingPlatformClient.fetchAllLiveOrders(user.tenantId);
     if (liveOrdersRes.success && Array.isArray(liveOrdersRes.orders) && liveOrdersRes.orders.length > 0) {
       liveOrdersRes.orders.forEach((remoteOrder: any) => {
         const orderId = String(remoteOrder.id || remoteOrder.order_id || '').trim();
@@ -1457,9 +1594,9 @@ app.get('/api/orders', authMiddleware, async (req: AuthenticatedRequest, res: Re
 
         const orderObj: Order = {
           id: orderId,
-          clientId: remoteOrder.client_id || remoteOrder.clientId || clients[0]?.id || 'NT10482',
+          clientId: remoteOrder.client_id || remoteOrder.clientId || remoteOrder.user_id || clients[0]?.id || 'NT10482',
           clientName: remoteOrder.client_name || remoteOrder.clientName || clients[0]?.name || 'Trader',
-          instrument: remoteOrder.symbol || 'RELIANCE',
+          instrument: remoteOrder.symbol || remoteOrder.instrument || 'RELIANCE',
           exchange: remoteOrder.symbol?.includes('FUT') ? 'NFO' : (remoteOrder.symbol?.includes('/') ? 'MCX' : 'NSE'),
           side,
           type,
@@ -1469,7 +1606,10 @@ app.get('/api/orders', authMiddleware, async (req: AuthenticatedRequest, res: Re
           avgPrice: price,
           status: mappedStatus,
           created: remoteOrder.created_at ? new Date(remoteOrder.created_at).toLocaleTimeString('en-GB') : (remoteOrder.time ? `${remoteOrder.time}, ${remoteOrder.date || 'Today'}` : new Date().toLocaleTimeString('en-GB')),
-          brokerId: clients[0]?.brokerId || 'BRK-ROHAN-01',
+          brokerId: remoteOrder.brokerId || 'BRK-ROHAN-01',
+          subBrokerId: remoteOrder.subBrokerId || 'SUB-BRK-001',
+          masterId: remoteOrder.masterId || 'MST-ALPHA-01',
+          tenantId: remoteOrder.tenantId || 'TNT-001',
         };
 
         if (match) {
@@ -1486,8 +1626,6 @@ app.get('/api/orders', authMiddleware, async (req: AuthenticatedRequest, res: Re
   let result = orders;
   if (user.role === 'trader_client') {
     result = orders.filter(o => o.clientId === user.sub);
-  } else if (user.role === 'broker_admin') {
-    result = orders.filter(o => o.brokerId === user.brokerId || !o.brokerId || o.brokerId === 'BRK-ROHAN-01');
   }
 
   if (status && status !== 'All') {
@@ -1774,7 +1912,7 @@ app.get('/api/positions', authMiddleware, async (req: AuthenticatedRequest, res:
 
   // Actively fetch live authoritative positions from Trading Platform
   try {
-    const livePosRes = await tradingPlatformClient.fetchLivePositions(user.tenantId);
+    const livePosRes = await tradingPlatformClient.fetchAllLivePositions(user.tenantId);
     if (livePosRes.success && Array.isArray(livePosRes.positions) && livePosRes.positions.length > 0) {
       livePosRes.positions.forEach((remotePos: any) => {
         const posId = String(remotePos.id || remotePos.positionId || `POS-${remotePos.symbol}`).trim();
@@ -1789,9 +1927,9 @@ app.get('/api/positions', authMiddleware, async (req: AuthenticatedRequest, res:
 
         const posObj: Position = {
           id: posId,
-          clientId: remotePos.clientId || remotePos.userId || clients[0]?.id || 'NT10482',
-          clientName: remotePos.clientName || clients[0]?.name || 'Trader',
-          instrument: remotePos.symbol,
+          clientId: remotePos.clientId || remotePos.userId || remotePos.client_id || clients[0]?.id || 'NT10482',
+          clientName: remotePos.clientName || remotePos.client_name || clients[0]?.name || 'Trader',
+          instrument: remotePos.symbol || 'RELIANCE',
           exchange: remotePos.symbol?.includes('FUT') ? 'NFO' : (remotePos.symbol?.includes('/') ? 'MCX' : 'NSE'),
           product: remotePos.product === 'CNC' ? 'CNC' : 'MIS',
           buyQty,
@@ -1803,7 +1941,10 @@ app.get('/api/positions', authMiddleware, async (req: AuthenticatedRequest, res:
           unrealisedPnL,
           totalPnL: realisedPnL + unrealisedPnL,
           marginUsed: Number(remotePos.margin || remotePos.marginUsed || 0),
-          brokerId: clients[0]?.brokerId || 'BRK-ROHAN-01',
+          brokerId: remotePos.brokerId || 'BRK-ROHAN-01',
+          subBrokerId: remotePos.subBrokerId || 'SUB-BRK-001',
+          masterId: remotePos.masterId || 'MST-ALPHA-01',
+          tenantId: remotePos.tenantId || 'TNT-001',
         };
 
         if (match) {
@@ -1820,8 +1961,6 @@ app.get('/api/positions', authMiddleware, async (req: AuthenticatedRequest, res:
   let result = positions;
   if (user.role === 'trader_client') {
     result = positions.filter(p => p.clientId === user.sub);
-  } else if (user.role === 'broker_admin') {
-    result = positions.filter(p => p.brokerId === user.brokerId || !p.brokerId || p.brokerId === 'BRK-ROHAN-01');
   }
 
   const totalRealised = result.reduce((acc, p) => acc + p.realisedPnL, 0);
@@ -1977,7 +2116,7 @@ app.get('/api/funds', authMiddleware, async (req: AuthenticatedRequest, res: Res
 
   // Actively fetch live authoritative fund transactions from Trading Platform
   try {
-    const liveFundsRes = await tradingPlatformClient.fetchLiveFunds(user.tenantId);
+    const liveFundsRes = await tradingPlatformClient.fetchAllLiveFunds(user.tenantId);
     if (liveFundsRes.success && Array.isArray(liveFundsRes.funds) && liveFundsRes.funds.length > 0) {
       const existingIds = new Set(fundTransactions.map(f => f.id));
       for (const rf of liveFundsRes.funds) {
@@ -1987,7 +2126,7 @@ app.get('/api/funds', authMiddleware, async (req: AuthenticatedRequest, res: Res
           const tType = (rf.type || rf.transaction_type || '').toUpperCase().includes('WITHDRAW') ? 'Withdrawal' : 'Deposit';
           fundTransactions.unshift({
             id,
-            clientId: rf.clientId || rf.client_id || clients[0]?.id || 'NT10482',
+            clientId: rf.clientId || rf.client_id || rf.user_id || clients[0]?.id || 'NT10482',
             clientName: rf.clientName || rf.client_name || clients[0]?.name || 'Trader',
             type: tType as 'Deposit' | 'Withdrawal',
             amount: parseFloat(rf.amount || '0'),
@@ -1999,7 +2138,10 @@ app.get('/api/funds', authMiddleware, async (req: AuthenticatedRequest, res: Res
             proofDocument: undefined,
             approvedBy: rf.approvedBy || 'Trading Platform S2S',
             rejectionReason: undefined,
-            brokerId: clients[0]?.brokerId || 'BRK-ROHAN-01'
+            brokerId: rf.brokerId || 'BRK-ROHAN-01',
+            subBrokerId: rf.subBrokerId || 'SUB-BRK-001',
+            masterId: rf.masterId || 'MST-ALPHA-01',
+            tenantId: rf.tenantId || 'TNT-001',
           });
         }
       }
@@ -2011,8 +2153,6 @@ app.get('/api/funds', authMiddleware, async (req: AuthenticatedRequest, res: Res
   let result = fundTransactions;
   if (user.role === 'trader_client') {
     result = fundTransactions.filter(f => f.clientId === user.sub);
-  } else if (user.role === 'broker_admin') {
-    result = fundTransactions.filter(f => f.brokerId === user.brokerId || !f.brokerId || f.brokerId === 'BRK-ROHAN-01');
   }
 
   if (type && type !== 'All') {
@@ -2160,7 +2300,7 @@ app.get('/api/ledger', authMiddleware, async (req: AuthenticatedRequest, res: Re
 
   // Actively fetch live authoritative ledger entries from Trading Platform
   try {
-    const liveLedgerRes = await tradingPlatformClient.fetchLiveLedger(user?.tenantId);
+    const liveLedgerRes = await tradingPlatformClient.fetchAllLiveLedger(user?.tenantId);
     if (liveLedgerRes.success && Array.isArray(liveLedgerRes.ledger) && liveLedgerRes.ledger.length > 0) {
       const existingIds = new Set(ledgerEntries.map(l => l.id));
       for (const rl of liveLedgerRes.ledger) {
@@ -2178,13 +2318,21 @@ app.get('/api/ledger', authMiddleware, async (req: AuthenticatedRequest, res: Re
             credit: isDebit ? 0 : amt,
             runningBalance: parseFloat(rl.balanceAfter || rl.balance_after || '100000'),
             status: 'Completed',
-            type: isDebit ? 'Withdrawal' : 'Deposit'
+            type: isDebit ? 'Withdrawal' : 'Deposit',
+            clientId: rl.clientId || rl.client_id || rl.user_id,
+            brokerId: rl.brokerId || 'BRK-ROHAN-01',
+            tenantId: rl.tenantId || 'TNT-001',
           });
         }
       }
     }
   } catch (err: any) {
     console.warn('[Ledger API] Remote fetch notice:', err.message);
+  }
+
+  let resultEntries = ledgerEntries;
+  if (user?.role === 'trader_client') {
+    resultEntries = ledgerEntries.filter(l => (l as any).clientId === user.sub);
   }
 
   res.json({
@@ -2195,7 +2343,7 @@ app.get('/api/ledger', authMiddleware, async (req: AuthenticatedRequest, res: Re
       usedMarginL: 72.18,
       commissionL: 9.42,
     },
-    entries: ledgerEntries,
+    entries: resultEntries,
   });
 });
 
@@ -2544,18 +2692,34 @@ async function startServer() {
     try {
       const pgClients = await dbRepo.getClients();
       if (pgClients && pgClients.length > 0) clients = pgClients;
+    } catch (e: any) {
+      console.warn('[Database] Notice loading clients from PostgreSQL:', e.message);
+    }
+    try {
       const pgOrders = await dbRepo.getOrders();
       if (pgOrders && pgOrders.length > 0) orders = pgOrders;
+    } catch (e: any) {
+      console.warn('[Database] Notice loading orders from PostgreSQL:', e.message);
+    }
+    try {
       const pgPositions = await dbRepo.getPositions();
       if (pgPositions && pgPositions.length > 0) positions = pgPositions;
+    } catch (e: any) {
+      console.warn('[Database] Notice loading positions from PostgreSQL:', e.message);
+    }
+    try {
       const pgTxns = await dbRepo.getFundTransactions();
       if (pgTxns && pgTxns.length > 0) fundTransactions = pgTxns;
+    } catch (e: any) {
+      console.warn('[Database] Notice loading funds from PostgreSQL:', e.message);
+    }
+    try {
       const pgLedger = await dbRepo.getLedgerEntries();
       if (pgLedger && pgLedger.length > 0) ledgerEntries = pgLedger;
-      console.log(`[Database] Loaded authoritative records from PostgreSQL: ${clients.length} clients, ${orders.length} orders, ${positions.length} positions.`);
     } catch (e: any) {
-      console.error('[Database] Error loading initial records from PostgreSQL:', e.message);
+      console.warn('[Database] Notice loading ledger from PostgreSQL:', e.message);
     }
+    console.log(`[Database] Loaded authoritative records from PostgreSQL: ${clients.length} clients, ${orders.length} orders, ${positions.length} positions.`);
   }
 
   // Probe upstream Trading Platform & Central Admin

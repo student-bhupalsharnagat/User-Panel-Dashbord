@@ -389,10 +389,11 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
     };
   }, [showToast, triggerRefresh, currentUser]);
 
-    // Continuous real-time authoritative polling: refreshes data every few seconds
+  // Continuous real-time authoritative polling: refreshes data periodically
   // so any new user, deposit, position, or order on Trading Platform shows up immediately
+  // throttled to 8s/12s so Render container is never spammed with concurrent requests
   useEffect(() => {
-    const pollIntervalMs = isRealtimeConnected ? 5000 : 3500;
+    const pollIntervalMs = isRealtimeConnected ? 12000 : 8000;
     const poll = setInterval(() => {
       triggerRefresh();
     }, pollIntervalMs);
