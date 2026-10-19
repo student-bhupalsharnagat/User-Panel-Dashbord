@@ -723,6 +723,47 @@ let lastAuthoritativeSyncTimestamp = 0;
 const AUTHORITATIVE_SYNC_COOLDOWN_MS = 5000;
 let lastInstrumentSyncTime = 0;
 
+export function resolveClientForRecord(
+  rawIdOrCode?: string | null,
+  rawName?: string | null,
+  clientList: Client[] = clients
+): { clientId: string; clientName: string } {
+  const query = String(rawIdOrCode || '').trim().toLowerCase();
+  const nameQuery = String(rawName || '').trim().toLowerCase();
+
+  // 1. Direct match by id, userId, clientCode, or email
+  if (query) {
+    const match = clientList.find(c =>
+      (c.id && c.id.toLowerCase() === query) ||
+      (c.userId && c.userId.toLowerCase() === query) ||
+      (c.clientCode && c.clientCode.toLowerCase() === query) ||
+      (c.email && c.email.toLowerCase() === query)
+    );
+    if (match) {
+      return { clientId: match.id, clientName: match.name };
+    }
+  }
+
+  // 2. Match by client name if provided and not generic
+  if (nameQuery && nameQuery !== 'trader' && nameQuery !== 'client' && nameQuery !== 'unknown' && nameQuery !== 'user') {
+    const matchByName = clientList.find(c =>
+      c.name && c.name.toLowerCase() === nameQuery
+    );
+    if (matchByName) {
+      return { clientId: matchByName.id, clientName: matchByName.name };
+    }
+  }
+
+  // 3. Fallback to first available clean client if rawIdOrCode is missing or unknown
+  const defaultClient = clientList.find(c => !isDummyRecord(c));
+  const resolvedId = rawIdOrCode ? String(rawIdOrCode).trim() : (defaultClient?.id || 'CLT-001');
+  const resolvedName = (rawName && rawName !== 'Trader' && rawName !== 'Unknown')
+    ? String(rawName).trim()
+    : (defaultClient?.name || 'Trader');
+
+  return { clientId: resolvedId, clientName: resolvedName };
+}
+
 export function mergeClients(existing: Client[], incomingRaw: any[]): Client[] {
   if (!Array.isArray(incomingRaw) || incomingRaw.length === 0) return existing.filter(c => !isDummyRecord(c));
   const clientMap = new Map<string, Client>();
@@ -731,18 +772,25 @@ export function mergeClients(existing: Client[], incomingRaw: any[]): Client[] {
   for (const c of existing) {
     if (!isDummyRecord(c)) {
       if (c.id) clientMap.set(c.id.toLowerCase().trim(), c);
+      if (c.userId) clientMap.set(c.userId.toLowerCase().trim(), c);
+      if (c.clientCode) clientMap.set(c.clientCode.toLowerCase().trim(), c);
       if (c.email) clientMap.set(c.email.toLowerCase().trim(), c);
     }
   }
 
   for (const rc of incomingRaw) {
     if (isDummyRecord(rc)) continue;
-    const cId = String(rc.id || rc.userId || rc.clientCode || `CLT-${Date.now()}`).trim();
+    const rawId = String(rc.id || rc.clientId || '').trim();
+    const rawUserId = String(rc.userId || rc.user_id || '').trim();
+    const rawClientCode = String(rc.clientCode || rc.client_code || '').trim();
+    const cId = rawId || rawUserId || rawClientCode || `CLT-${Date.now()}`;
     const email = String(rc.email || '').toLowerCase().trim();
     const bal = parseFloat(rc.ledgerBalance ?? rc.balance ?? rc.wallet_balance ?? rc.wallet?.balance ?? '100000');
     const equity = parseFloat(rc.marginAvailable ?? rc.availableMargin ?? rc.equity ?? rc.available_margin ?? bal);
     const mappedClient: Client = {
       id: cId,
+      userId: rawUserId || rawId || cId,
+      clientCode: rawClientCode || cId,
       name: rc.fullName || rc.name || rc.username || 'Trader',
       email: rc.email || `${cId.toLowerCase()}@tradingplatform.com`,
       phone: rc.phone || rc.mobile || '+91 98000 00000',
@@ -768,11 +816,17 @@ export function mergeClients(existing: Client[], incomingRaw: any[]): Client[] {
       isLive: true,
     };
 
-    const existingMatch = clientMap.get(cId.toLowerCase()) || (email ? clientMap.get(email) : undefined);
+    const existingMatch = clientMap.get(cId.toLowerCase()) ||
+      (rawUserId ? clientMap.get(rawUserId.toLowerCase()) : undefined) ||
+      (rawClientCode ? clientMap.get(rawClientCode.toLowerCase()) : undefined) ||
+      (email ? clientMap.get(email) : undefined);
+
     if (existingMatch) {
       Object.assign(existingMatch, mappedClient);
     } else {
       clientMap.set(cId.toLowerCase(), mappedClient);
+      if (rawUserId) clientMap.set(rawUserId.toLowerCase(), mappedClient);
+      if (rawClientCode) clientMap.set(rawClientCode.toLowerCase(), mappedClient);
       if (email) clientMap.set(email, mappedClient);
     }
   }
@@ -846,10 +900,16 @@ export async function syncAuthoritativeData(requestedTenantId?: string, force = 
         const side: 'BUY' | 'SELL' = (String(ro.side).toUpperCase() === 'SELL' || String(ro.type).toUpperCase() === 'SELL') ? 'SELL' : 'BUY';
         const type: 'LIMIT' | 'MARKET' | 'SL-M' = (String(ro.order_type || ro.orderType).toUpperCase() === 'LIMIT') ? 'LIMIT' : ((String(ro.order_type || ro.orderType).toUpperCase() === 'SL-M') ? 'SL-M' : 'MARKET');
 
+        const { clientId, clientName } = resolveClientForRecord(
+          ro.clientId || ro.client_id || ro.user_id || ro.userId || ro.clientCode || ro.client_code,
+          ro.clientName || ro.client_name,
+          clients
+        );
+
         return {
           id: orderId,
-          clientId: ro.clientId || ro.client_id || ro.user_id || ro.userId || clients[0]?.id || 'CLT-001',
-          clientName: ro.clientName || ro.client_name || clients.find(c => c.id === (ro.clientId || ro.user_id || ro.userId))?.name || 'Trader',
+          clientId,
+          clientName,
           instrument: ro.symbol || ro.instrument || ro.instrument_id || 'RELIANCE',
           exchange: ro.exchange || (String(ro.symbol).includes('FUT') ? 'NFO' : (String(ro.symbol).includes('/') ? 'MCX' : 'NSE')),
           side,
@@ -868,9 +928,7 @@ export async function syncAuthoritativeData(requestedTenantId?: string, force = 
         };
       }).filter((o: Order) => !isDummyRecord(o));
 
-      const liveIds = new Set(incomingOrders.map(o => o.id));
-      const locallyCreated = orders.filter(o => !isDummyRecord(o) && !liveIds.has(o.id));
-      orders = [...incomingOrders, ...locallyCreated];
+      orders = incomingOrders;
 
       if (isUsingPostgres()) {
         for (const o of orders) {
@@ -878,7 +936,7 @@ export async function syncAuthoritativeData(requestedTenantId?: string, force = 
         }
       }
     } else {
-      orders = orders.filter(o => !isDummyRecord(o));
+      orders = [];
     }
 
     if (positionsList.length > 0) {
@@ -892,10 +950,16 @@ export async function syncAuthoritativeData(requestedTenantId?: string, force = 
         const realisedPnL = Number(rp.realized_pnl || rp.realisedPnL || 0);
         const unrealisedPnL = Number(rp.unrealized_pnl || rp.pnl || rp.unrealisedPnL || (netQty * (currentPrice - avgPrice)));
 
+        const { clientId, clientName } = resolveClientForRecord(
+          rp.clientId || rp.userId || rp.user_id || rp.client_id || rp.clientCode || rp.client_code,
+          rp.clientName || rp.client_name,
+          clients
+        );
+
         return {
           id: posId,
-          clientId: rp.clientId || rp.userId || rp.user_id || rp.client_id || clients[0]?.id || 'CLT-001',
-          clientName: rp.clientName || rp.client_name || clients.find(c => c.id === (rp.clientId || rp.userId || rp.user_id))?.name || 'Trader',
+          clientId,
+          clientName,
           instrument: rp.symbol || rp.instrument || 'RELIANCE',
           exchange: rp.exchange || (String(rp.symbol).includes('FUT') ? 'NFO' : (String(rp.symbol).includes('/') ? 'MCX' : 'NSE')),
           product: (rp.product === 'CNC' || rp.product === 'NRML') ? rp.product : 'MIS',
@@ -915,9 +979,7 @@ export async function syncAuthoritativeData(requestedTenantId?: string, force = 
         };
       }).filter((p: Position) => !isDummyRecord(p));
 
-      const liveIds = new Set(incomingPositions.map(p => p.id));
-      const locallyCreated = positions.filter(p => !isDummyRecord(p) && !liveIds.has(p.id));
-      positions = [...incomingPositions, ...locallyCreated];
+      positions = incomingPositions;
 
       if (isUsingPostgres()) {
         for (const p of positions) {
@@ -925,7 +987,7 @@ export async function syncAuthoritativeData(requestedTenantId?: string, force = 
         }
       }
     } else {
-      positions = positions.filter(p => !isDummyRecord(p));
+      positions = [];
     }
 
     if (fundsList.length > 0) {
@@ -937,10 +999,16 @@ export async function syncAuthoritativeData(requestedTenantId?: string, force = 
         const statusRaw = String(rf.status || '').toUpperCase();
         const mappedStatus: 'Pending' | 'Approved' | 'Completed' | 'Rejected' = statusRaw === 'PENDING' ? 'Pending' : (statusRaw === 'REJECTED' ? 'Rejected' : (statusRaw === 'APPROVED' ? 'Approved' : 'Completed'));
 
+        const { clientId, clientName } = resolveClientForRecord(
+          rf.clientId || rf.userId || rf.user_id || rf.client_id || rf.clientCode || rf.client_code,
+          rf.clientName || rf.client_name,
+          clients
+        );
+
         return {
           id,
-          clientId: rf.clientId || rf.userId || rf.user_id || rf.client_id || rf.clientCode || clients[0]?.id || 'CLT-001',
-          clientName: rf.clientName || rf.client_name || clients.find(c => c.id === (rf.clientId || rf.userId || rf.user_id))?.name || 'Trader',
+          clientId,
+          clientName,
           type: tType as 'Deposit' | 'Withdrawal',
           amount: Math.abs(parseFloat(rf.amount || '0')),
           method,
@@ -958,11 +1026,15 @@ export async function syncAuthoritativeData(requestedTenantId?: string, force = 
         };
       }).filter((f: FundTransaction) => !isDummyRecord(f));
 
-      const liveIds = new Set(incomingFunds.map(f => f.id));
-      const locallyCreated = fundTransactions.filter(f => !isDummyRecord(f) && !liveIds.has(f.id));
-      fundTransactions = [...incomingFunds, ...locallyCreated];
+      fundTransactions = incomingFunds;
+
+      if (isUsingPostgres()) {
+        for (const f of fundTransactions) {
+          dbRepo.insertFundTransaction(f).catch(() => {});
+        }
+      }
     } else {
-      fundTransactions = fundTransactions.filter(f => !isDummyRecord(f));
+      fundTransactions = [];
     }
 
     if (ledgerList.length > 0) {
@@ -977,6 +1049,12 @@ export async function syncAuthoritativeData(requestedTenantId?: string, force = 
         else if (typeStr.includes('settle')) mappedType = 'Trade Settlement';
         else if (typeStr.includes('margin')) mappedType = 'Margin Funding';
 
+        const { clientId } = resolveClientForRecord(
+          rl.clientId || rl.client_id || rl.user_id || rl.userId || rl.clientCode || rl.client_code,
+          undefined,
+          clients
+        );
+
         return {
           id,
           date: rl.created_at || rl.createdAt ? new Date(rl.created_at || rl.createdAt).toISOString().split('T')[0] : '2026-03-29',
@@ -987,91 +1065,21 @@ export async function syncAuthoritativeData(requestedTenantId?: string, force = 
           runningBalance: runningBal,
           status: 'Completed',
           type: mappedType,
-          clientId: rl.clientId || rl.client_id || rl.user_id || rl.userId,
+          clientId,
           brokerId: rl.brokerId || rl.broker_id || 'BRK-ROHAN-01',
           tenantId: rl.tenantId || rl.tenant_id || 'TNT-001',
         };
       }).filter((l: LedgerEntry) => !isDummyRecord(l));
 
-      const liveIds = new Set(incomingLedger.map(l => l.id));
-      const locallyCreated = ledgerEntries.filter(l => !isDummyRecord(l) && !liveIds.has(l.id));
-      ledgerEntries = [...incomingLedger, ...locallyCreated];
+      ledgerEntries = incomingLedger;
+
+      if (isUsingPostgres()) {
+        for (const l of ledgerEntries) {
+          dbRepo.insertLedgerEntry(l).catch(() => {});
+        }
+      }
     } else {
-      ledgerEntries = ledgerEntries.filter(l => !isDummyRecord(l));
-    }
-
-    // Auto-derive ledger entries if ledgerEntries is empty but funds or orders exist
-    if (ledgerEntries.length === 0 && (fundTransactions.length > 0 || orders.length > 0)) {
-      const derived: LedgerEntry[] = [];
-      let running = 500000;
-      for (const f of fundTransactions) {
-        if (f.status === 'Completed' || f.status === 'Approved') {
-          const isDeposit = f.type === 'Deposit';
-          if (isDeposit) running += f.amount;
-          else running = Math.max(0, running - f.amount);
-
-          derived.push({
-            id: `LDG-FND-${f.id}`,
-            date: f.requestDate || new Date().toISOString().split('T')[0],
-            referenceId: f.referenceId || f.id,
-            description: `${f.type} via ${f.method} - Ref: ${f.referenceId}`,
-            debit: isDeposit ? 0 : f.amount,
-            credit: isDeposit ? f.amount : 0,
-            runningBalance: running,
-            status: 'Completed',
-            type: isDeposit ? 'Deposit' : 'Withdrawal',
-            clientId: f.clientId,
-            brokerId: f.brokerId || 'BRK-ROHAN-01',
-            tenantId: f.tenantId || 'TNT-001',
-          });
-        }
-      }
-
-      for (const o of orders) {
-        if (o.status === 'Executed') {
-          const price = typeof o.orderPrice === 'number' ? o.orderPrice : (Number(o.avgPrice) || 100);
-          const tradeVal = Math.round(price * o.quantity);
-          const brk = Math.min(20, Math.round(tradeVal * 0.0003));
-          if (brk > 0) {
-            running = Math.max(0, running - brk);
-            derived.push({
-              id: `LDG-BRK-${o.id}`,
-              date: new Date().toISOString().split('T')[0],
-              referenceId: `BRK-${o.id}`,
-              description: `Brokerage on ${o.side} ${o.quantity} ${o.instrument}`,
-              debit: brk,
-              credit: 0,
-              runningBalance: running,
-              status: 'Completed',
-              type: 'Brokerage',
-              clientId: o.clientId,
-              brokerId: o.brokerId || 'BRK-ROHAN-01',
-              tenantId: o.tenantId || 'TNT-001',
-            });
-          }
-          if (o.side === 'SELL') {
-            running += tradeVal;
-            derived.push({
-              id: `LDG-SETTLE-${o.id}`,
-              date: new Date().toISOString().split('T')[0],
-              referenceId: `SETTLE-${o.id}`,
-              description: `Trade Settlement: Sold ${o.quantity} ${o.instrument} @ ${price}`,
-              debit: 0,
-              credit: tradeVal,
-              runningBalance: running,
-              status: 'Completed',
-              type: 'Trade Settlement',
-              clientId: o.clientId,
-              brokerId: o.brokerId || 'BRK-ROHAN-01',
-              tenantId: o.tenantId || 'TNT-001',
-            });
-          }
-        }
-      }
-
-      if (derived.length > 0) {
-        ledgerEntries = derived;
-      }
+      ledgerEntries = [];
     }
 
     if (clientsList.length > 0 || ordersList.length > 0 || positionsList.length > 0 || fundsList.length > 0) {
@@ -1697,11 +1705,13 @@ app.post('/api/clients', authMiddleware, requireRole(['broker_admin', 'super_adm
     return res.status(400).json({ success: false, message: 'Name, email, and phone are required' });
   }
 
-  const newId = isDemo ? `DM${Math.floor(20000 + Math.random() * 90000)}` : `NT${Math.floor(10000 + Math.random() * 90000)}`;
+  const newId = isDemo ? `CLT-DM-${Date.now()}` : `CLT-LIVE-${Date.now()}`;
   const margin = Number(initialMargin) || 100000;
 
   const newClient: Client = {
     id: newId,
+    userId: newId,
+    clientCode: newId,
     name,
     email,
     phone,
@@ -1789,10 +1799,16 @@ app.get('/api/orders', authMiddleware, async (req: AuthenticatedRequest, res: Re
         const side: 'BUY' | 'SELL' = remoteOrder.side === 'SELL' || remoteOrder.type === 'SELL' ? 'SELL' : 'BUY';
         const type: 'LIMIT' | 'MARKET' | 'SL-M' = remoteOrder.order_type === 'LIMIT' || remoteOrder.orderType === 'LIMIT' ? 'LIMIT' : 'MARKET';
 
+        const { clientId, clientName } = resolveClientForRecord(
+          remoteOrder.client_id || remoteOrder.clientId || remoteOrder.user_id || remoteOrder.userId || remoteOrder.clientCode,
+          remoteOrder.client_name || remoteOrder.clientName,
+          clients
+        );
+
         const orderObj: Order = {
           id: orderId,
-          clientId: remoteOrder.client_id || remoteOrder.clientId || remoteOrder.user_id || clients[0]?.id || 'CLT-001',
-          clientName: remoteOrder.client_name || remoteOrder.clientName || clients[0]?.name || 'Trader',
+          clientId,
+          clientName,
           instrument: remoteOrder.symbol || remoteOrder.instrument || 'RELIANCE',
           exchange: remoteOrder.symbol?.includes('FUT') ? 'NFO' : (remoteOrder.symbol?.includes('/') ? 'MCX' : 'NSE'),
           side,
@@ -1896,7 +1912,7 @@ app.post('/api/orders', authMiddleware, async (req: AuthenticatedRequest, res: R
   // Authoritative RMS Check
   if (client.marginAvailable < marginRequired) {
     const rejectedOrder: Order = {
-      id: `ORD-${Math.floor(98000 + Math.random() * 1999)}`,
+      id: `ORD-REJ-${Date.now()}-${Math.floor(1000 + Math.random() * 9000)}`,
       clientId: client.id,
       clientName: client.name,
       instrument: targetInst.symbol,
@@ -1959,7 +1975,7 @@ app.post('/api/orders', authMiddleware, async (req: AuthenticatedRequest, res: R
   // Atomic local execution and persistence
   const isExecuted = type === 'MARKET';
   const newOrder: Order = {
-    id: upstreamOrderId || `ORD-${Math.floor(98000 + Math.random() * 1999)}`,
+    id: upstreamOrderId || `ORD-LIVE-${Date.now()}-${Math.floor(1000 + Math.random() * 9000)}`,
     clientId: client.id,
     clientName: client.name,
     instrument: targetInst.symbol,
@@ -1996,7 +2012,7 @@ app.post('/api/orders', authMiddleware, async (req: AuthenticatedRequest, res: R
       if (isUsingPostgres()) dbRepo.upsertPosition(existingPos).catch(console.warn);
     } else {
       const newPos: Position = {
-        id: `POS-${Math.floor(77000 + Math.random() * 999)}`,
+        id: `POS-LIVE-${Date.now()}-${Math.floor(1000 + Math.random() * 9000)}`,
         clientId: client.id,
         clientName: client.name,
         instrument: targetInst.symbol,
@@ -2114,10 +2130,16 @@ app.get('/api/positions', authMiddleware, async (req: AuthenticatedRequest, res:
         const realisedPnL = Number(remotePos.realisedPnL || 0);
         const unrealisedPnL = Number(remotePos.pnl || remotePos.unrealisedPnL || (netQty * (currentPrice - avgPrice)));
 
+        const { clientId, clientName } = resolveClientForRecord(
+          remotePos.clientId || remotePos.userId || remotePos.user_id || remotePos.client_id || remotePos.clientCode,
+          remotePos.clientName || remotePos.client_name,
+          clients
+        );
+
         const posObj: Position = {
           id: posId,
-          clientId: remotePos.clientId || remotePos.userId || remotePos.client_id || clients[0]?.id || 'CLT-001',
-          clientName: remotePos.clientName || remotePos.client_name || clients[0]?.name || 'Trader',
+          clientId,
+          clientName,
           instrument: remotePos.symbol || 'RELIANCE',
           exchange: remotePos.symbol?.includes('FUT') ? 'NFO' : (remotePos.symbol?.includes('/') ? 'MCX' : 'NSE'),
           product: remotePos.product === 'CNC' ? 'CNC' : 'MIS',
@@ -2195,7 +2217,7 @@ app.post('/api/positions/:id/square-off', authMiddleware, (req: AuthenticatedReq
 
     // Record ledger entry for square-off settlement
     ledgerEntries.unshift({
-      id: `LED-${Math.floor(39000 + Math.random() * 999)}`,
+      id: `LED-TXN-${Date.now()}-${Math.floor(1000 + Math.random() * 9000)}`,
       date: new Date().toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' }),
       referenceId: pos.id,
       description: `Square-off settlement: ${pos.instrument} (${pos.netQty} qty)`,
@@ -2308,10 +2330,16 @@ app.get('/api/funds', authMiddleware, async (req: AuthenticatedRequest, res: Res
         if (!existingIds.has(id)) {
           existingIds.add(id);
           const tType = (rf.type || rf.transaction_type || '').toUpperCase().includes('WITHDRAW') ? 'Withdrawal' : 'Deposit';
+          const { clientId, clientName } = resolveClientForRecord(
+            rf.clientId || rf.client_id || rf.user_id || rf.userId || rf.clientCode,
+            rf.clientName || rf.client_name,
+            clients
+          );
+
           const fundObj: FundTransaction = {
             id,
-            clientId: rf.clientId || rf.client_id || rf.user_id || clients[0]?.id || 'CLT-001',
-            clientName: rf.clientName || rf.client_name || clients[0]?.name || 'Trader',
+            clientId,
+            clientName,
             type: tType as 'Deposit' | 'Withdrawal',
             amount: parseFloat(rf.amount || '0'),
             method: (rf.method || 'Bank transfer') as 'Bank transfer' | 'UPI' | 'Net banking',
@@ -2379,7 +2407,7 @@ app.post('/api/funds/:id/approve', authMiddleware, requireRole(['broker_admin', 
     }
 
     ledgerEntries.unshift({
-      id: `LED-${Math.floor(39000 + Math.random() * 999)}`,
+      id: `LED-TXN-${Date.now()}-${Math.floor(1000 + Math.random() * 9000)}`,
       date: new Date().toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' }),
       referenceId: txn.referenceId,
       description: `Client ${txn.type.toLowerCase()} approved (${client.name})`,
@@ -2489,6 +2517,12 @@ app.get('/api/ledger', authMiddleware, async (req: AuthenticatedRequest, res: Re
           existingIds.add(id);
           const isDebit = (rl.type || rl.entryType || '').toLowerCase().includes('debit');
           const amt = parseFloat(rl.amount || (isDebit ? rl.debit : rl.credit) || '0');
+          const { clientId } = resolveClientForRecord(
+            rl.clientId || rl.client_id || rl.user_id || rl.userId || rl.clientCode,
+            undefined,
+            clients
+          );
+
           const ledgerObj: LedgerEntry = {
             id,
             date: rl.created_at ? new Date(rl.created_at).toISOString().split('T')[0] : '2026-03-29',
@@ -2499,7 +2533,7 @@ app.get('/api/ledger', authMiddleware, async (req: AuthenticatedRequest, res: Re
             runningBalance: parseFloat(rl.balanceAfter || rl.balance_after || '100000'),
             status: 'Completed',
             type: isDebit ? 'Withdrawal' : 'Deposit',
-            clientId: rl.clientId || rl.client_id || rl.user_id,
+            clientId,
             brokerId: rl.brokerId || 'BRK-ROHAN-01',
             tenantId: rl.tenantId || 'TNT-001',
           };
@@ -2513,42 +2547,13 @@ app.get('/api/ledger', authMiddleware, async (req: AuthenticatedRequest, res: Re
     console.warn('[Ledger API] Remote fetch notice:', err.message);
   }
 
-  let resultEntries = filterByHierarchy(ledgerEntries.filter(l => !isDummyRecord(l)), user);
-
-  // Auto-derive if empty so LedgerView is never blank
-  if (resultEntries.length === 0 && (fundTransactions.length > 0 || orders.length > 0)) {
-    const derived: LedgerEntry[] = [];
-    let running = 500000;
-    for (const f of fundTransactions) {
-      if (f.status === 'Completed' || f.status === 'Approved') {
-        const isDeposit = f.type === 'Deposit';
-        if (isDeposit) running += f.amount;
-        else running = Math.max(0, running - f.amount);
-
-        derived.push({
-          id: `LDG-FND-${f.id}`,
-          date: f.requestDate || new Date().toISOString().split('T')[0],
-          referenceId: f.referenceId || f.id,
-          description: `${f.type} via ${f.method} - Ref: ${f.referenceId}`,
-          debit: isDeposit ? 0 : f.amount,
-          credit: isDeposit ? f.amount : 0,
-          runningBalance: running,
-          status: 'Completed',
-          type: isDeposit ? 'Deposit' : 'Withdrawal',
-          clientId: f.clientId,
-          brokerId: f.brokerId || 'BRK-ROHAN-01',
-          tenantId: f.tenantId || 'TNT-001',
-        });
-      }
-    }
-    resultEntries = derived;
-  }
+  const resultEntries = filterByHierarchy(ledgerEntries.filter(l => !isDummyRecord(l)), user);
 
   const userClients = user ? filterByHierarchy(clients.filter(c => !isDummyRecord(c)), user) : clients;
   const userPositions = user ? filterByHierarchy(positions.filter(p => !isDummyRecord(p)), user) : positions;
   const userOrders = user ? filterByHierarchy(orders.filter(o => !isDummyRecord(o)), user) : orders;
 
-  const totalLedger = userClients.reduce((acc, c) => acc + (c.ledgerBalance || 0), 0) || (resultEntries[0]?.runningBalance || 500000);
+  const totalLedger = userClients.reduce((acc, c) => acc + (c.ledgerBalance || 0), 0) || (resultEntries[0]?.runningBalance || 0);
   const totalMarginUsed = userPositions.reduce((acc, p) => acc + (p.marginUsed || 0), 0);
   const totalMarginAvail = Math.max(0, totalLedger - totalMarginUsed);
   const totalCommission = userOrders.filter(o => o.status === 'Executed').length * 20;

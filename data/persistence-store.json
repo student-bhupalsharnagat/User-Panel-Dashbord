@@ -12,7 +12,7 @@
     "accentColor": "#10b981",
     "supportEmail": "support@nextrade.example",
     "supportPhone": "+91 98765 42000",
-    "footerCopyright": "© 2026 NexTrade Technologies Ltd. All rights reserved.",
+    "footerCopyright": "\u00a9 2026 NexTrade Technologies Ltd. All rights reserved.",
     "version": "v4.3.0-live",
     "updatedAt": "2026-10-18T00:00:00.000Z"
   },

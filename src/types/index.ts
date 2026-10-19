@@ -85,6 +85,8 @@ export interface MarketInstrument {
 
 export interface Client {
   id: string;
+  userId?: string;
+  clientCode?: string;
   name: string;
   email: string;
   phone: string;

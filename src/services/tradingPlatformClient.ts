@@ -66,6 +66,7 @@ export function extractLedger(res: any): any[] {
 
 import { EventEmitter } from 'events';
 import crypto from 'crypto';
+import { isDummyRecord } from '../db.ts';
 
 export interface TradingPlatformConfig {
   baseUrl: string;
@@ -473,40 +474,54 @@ export class TradingPlatformClient extends EventEmitter {
    * Multi-Tenant Aggregation: Aggregates live clients across TNT-001, vertex-default, and Central Admin
    */
   public async fetchAllLiveClients(tenantId?: string): Promise<{ success: boolean; clients: any[] }> {
-    const cached = this.getCached<any[]>('clients:all', 30000);
+    const cached = this.getCached<any[]>('clients:all', 10000);
     if (cached && cached.length > 0) {
       return { success: true, clients: cached };
     }
 
-    const clean = (tenantId && tenantId !== 'ALL' && tenantId !== 'ALL_TENANTS') ? this.resolveOutboundTenantId(tenantId) : 'vertex-default';
-    const primaryTenant = clean === 'TNT-001' ? 'vertex-default' : clean;
-    
-    // 1. Authoritative primary query (vertex-default has the authoritative live client records)
+    const clean = (tenantId && tenantId !== 'ALL' && tenantId !== 'ALL_TENANTS') ? this.resolveOutboundTenantId(tenantId) : 'TNT-001';
+    const primaryTenant = clean;
+    const secondaryTenant = clean === 'TNT-001' ? 'vertex-default' : 'TNT-001';
+
+    const clientMap = new Map<string, any>();
+    const addCleanClients = (list: any[]) => {
+      if (!Array.isArray(list)) return;
+      for (const c of list) {
+        if (!c || isDummyRecord(c)) continue;
+        const key = String(c.id || c.userId || c.user_id || c.clientCode || c.client_code || '').trim().toLowerCase();
+        if (key && !clientMap.has(key)) {
+          clientMap.set(key, c);
+        }
+      }
+    };
+
     const primary = await this.fetchLiveClients(primaryTenant);
-    if (primary.success && Array.isArray(primary.clients) && primary.clients.length > 0) {
-      this.setCache('clients:all', primary.clients);
-      return { success: true, clients: primary.clients };
+    if (primary.success && Array.isArray(primary.clients)) {
+      addCleanClients(primary.clients);
     }
 
-    // 2. Fallback to TNT-001 if primary tenant was vertex-default
-    if (primaryTenant !== 'TNT-001') {
-      const fallbackTnt = await this.fetchLiveClients('TNT-001');
-      if (fallbackTnt.success && Array.isArray(fallbackTnt.clients) && fallbackTnt.clients.length > 0) {
-        this.setCache('clients:all', fallbackTnt.clients);
-        return { success: true, clients: fallbackTnt.clients };
+    const secondary = await this.fetchLiveClients(secondaryTenant);
+    if (secondary.success && Array.isArray(secondary.clients)) {
+      addCleanClients(secondary.clients);
+    }
+
+    if (clientMap.size === 0) {
+      const central = await this.fetchCentralAdminClients();
+      if (central.success && Array.isArray(central.clients)) {
+        addCleanClients(central.clients);
       }
     }
 
-    // 3. Fallback to Central Admin
-    const central = await this.fetchCentralAdminClients();
-    if (central.success && Array.isArray(central.clients) && central.clients.length > 0) {
-      this.setCache('clients:all', central.clients);
-      return { success: true, clients: central.clients };
+    const clients = Array.from(clientMap.values());
+    if (clients.length > 0) {
+      this.setCache('clients:all', clients);
+      return { success: true, clients };
     }
 
     const fallback = this.getLastSuccessful<any[]>('clients:all');
     if (fallback && fallback.length > 0) {
-      return { success: true, clients: fallback };
+      const cleanFallback = fallback.filter(c => !isDummyRecord(c));
+      return { success: true, clients: cleanFallback };
     }
     return { success: false, clients: [] };
   }
@@ -542,7 +557,7 @@ export class TradingPlatformClient extends EventEmitter {
       });
     }
 
-    const orders = Array.from(resultsMap.values());
+    const orders = Array.from(resultsMap.values()).filter(o => !isDummyRecord(o));
     if (orders.length > 0) {
       this.setCache('orders:all', orders);
       return { success: true, orders };
@@ -586,7 +601,7 @@ export class TradingPlatformClient extends EventEmitter {
       });
     }
 
-    const positions = Array.from(resultsMap.values());
+    const positions = Array.from(resultsMap.values()).filter(p => !isDummyRecord(p));
     if (positions.length > 0) {
       this.setCache('positions:all', positions);
       return { success: true, positions };
@@ -630,7 +645,7 @@ export class TradingPlatformClient extends EventEmitter {
       });
     }
 
-    const funds = Array.from(resultsMap.values());
+    const funds = Array.from(resultsMap.values()).filter(f => !isDummyRecord(f));
     if (funds.length > 0) {
       this.setCache('funds:all', funds);
       return { success: true, funds };
@@ -674,7 +689,7 @@ export class TradingPlatformClient extends EventEmitter {
       });
     }
 
-    const ledger = Array.from(resultsMap.values());
+    const ledger = Array.from(resultsMap.values()).filter(l => !isDummyRecord(l));
     if (ledger.length > 0) {
       this.setCache('ledger:all', ledger);
       return { success: true, ledger };

@@ -64,30 +64,76 @@ export const DUMMY_CLIENT_IDS = [
 
 export const DUMMY_CLIENT_NAMES = [
   'Aarav Mehta', 'Ananya Iyer', 'Arjun Verma', 'Diya Kapoor',
-  'Ishita Singh', 'Kabir Rao', 'Meera Nair', 'Vivaan Shah', 'Rohan Gupta'
+  'Ishita Singh', 'Kabir Rao', 'Meera Nair', 'Vivaan Shah', 'Rohan Gupta', 'Persist Audit'
 ];
 
-export function isDummyIdOrName(val?: string | null): boolean {
-  if (!val) return false;
-  const str = String(val).trim();
-  if (DUMMY_CLIENT_IDS.includes(str)) return true;
-  if (DUMMY_CLIENT_NAMES.includes(str)) return true;
-  if (/^ORD-984/i.test(str)) return true;
-  if (/^POS-77/i.test(str)) return true;
-  if (/^TXN-804/i.test(str)) return true;
-  if (/^LED-39/i.test(str)) return true;
+export const DUMMY_PATTERNS = [
+  '@test.example',
+  '@demo.example',
+  '@example.com',
+  'audit.trader',
+  'persist audit',
+  'vtx999',
+  'aarav mehta',
+  'ananya iyer',
+  'arjun verma',
+  'diya kapoor',
+  'ishita singh',
+  'kabir rao',
+  'meera nair',
+  'vivaan shah',
+  'rohan gupta',
+  'nt10482',
+  'nt10387',
+  'dm20791',
+  'nt10315',
+  'nt10078',
+  'nt10198',
+  'nt10154',
+  'dm20945',
+  'nt59729',
+  'nt61825',
+];
+
+export function isDummyString(val?: any): boolean {
+  if (val === undefined || val === null) return false;
+  const str = String(val).trim().toLowerCase();
+  if (!str) return false;
+  for (const pat of DUMMY_PATTERNS) {
+    if (str.includes(pat)) return true;
+  }
+  if (/^ord-984/i.test(str)) return true;
+  if (/^pos-77/i.test(str)) return true;
+  if (/^txn-804/i.test(str)) return true;
+  if (/^led-39/i.test(str)) return true;
   return false;
+}
+
+export function isDummyIdOrName(val?: string | null): boolean {
+  return isDummyString(val);
 }
 
 export function isDummyRecord(record: any): boolean {
   if (!record) return false;
-  const id = record.id || '';
-  const clientId = record.clientId || record.client_id || '';
-  const name = record.name || record.clientName || record.client_name || '';
-  if (isDummyIdOrName(id)) return true;
-  if (isDummyIdOrName(clientId)) return true;
-  if (isDummyIdOrName(name)) return true;
-  return false;
+  const fields = [
+    record.id,
+    record.clientId,
+    record.client_id,
+    record.userId,
+    record.user_id,
+    record.clientCode,
+    record.client_code,
+    record.name,
+    record.fullName,
+    record.clientName,
+    record.client_name,
+    record.email,
+    record.username,
+    record.referenceId,
+    record.reference_id,
+    record.description,
+  ];
+  return fields.some(f => isDummyString(f));
 }
 
 export async function purgeDummyData(pool: Pool): Promise<void> {
@@ -95,15 +141,37 @@ export async function purgeDummyData(pool: Pool): Promise<void> {
   try {
     await client.query('BEGIN');
     const dummyClientsSql = DUMMY_CLIENT_IDS.map(id => `'${id}'`).join(',');
-    const dummyNamesSql = DUMMY_CLIENT_NAMES.map(name => `'${name.replace(/'/g, "''")}'`).join(',');
 
-    // Explicitly purge dummy records from all user_panel tables
+    const dummyClientsClause = `(
+      id IN (${dummyClientsSql})
+      OR id ILIKE '%vtx999%' OR id ILIKE '%audit.trader%'
+      OR email ILIKE '%@test.example%' OR email ILIKE '%@demo.example%' OR email ILIKE '%@example.com%' OR email ILIKE '%audit.trader%'
+      OR name ILIKE '%Aarav Mehta%' OR name ILIKE '%Ananya Iyer%' OR name ILIKE '%Arjun Verma%' OR name ILIKE '%Diya Kapoor%'
+      OR name ILIKE '%Ishita Singh%' OR name ILIKE '%Kabir Rao%' OR name ILIKE '%Meera Nair%' OR name ILIKE '%Vivaan Shah%'
+      OR name ILIKE '%Persist Audit%' OR name ILIKE '%Rohan Gupta%'
+    )`;
+
+    const dummyRelatedClause = `(
+      client_id IN (${dummyClientsSql})
+      OR client_id ILIKE '%vtx999%' OR client_id ILIKE '%audit.trader%'
+      OR client_name ILIKE '%Aarav Mehta%' OR client_name ILIKE '%Ananya Iyer%' OR client_name ILIKE '%Arjun Verma%' OR client_name ILIKE '%Diya Kapoor%'
+      OR client_name ILIKE '%Ishita Singh%' OR client_name ILIKE '%Kabir Rao%' OR client_name ILIKE '%Meera Nair%' OR client_name ILIKE '%Vivaan Shah%'
+      OR client_name ILIKE '%Persist Audit%' OR client_name ILIKE '%Rohan Gupta%'
+    )`;
+
+    // Explicitly purge dummy records from all user_panel tables and legacy tables
     const tableCleanups = [
-      `DELETE FROM user_panel_orders WHERE id LIKE 'ORD-984%' OR client_id IN (${dummyClientsSql}) OR client_name IN (${dummyNamesSql})`,
-      `DELETE FROM user_panel_positions WHERE id IN ('POS-77102', 'POS-77103') OR id LIKE 'POS-77%' OR client_id IN (${dummyClientsSql}) OR client_name IN (${dummyNamesSql})`,
-      `DELETE FROM user_panel_fund_transactions WHERE id LIKE 'TXN-804%' OR client_id IN (${dummyClientsSql}) OR client_name IN (${dummyNamesSql})`,
-      `DELETE FROM user_panel_ledger_entries WHERE id LIKE 'LED-39%' OR client_id IN (${dummyClientsSql})`,
-      `DELETE FROM user_panel_clients WHERE id IN (${dummyClientsSql}) OR name IN (${dummyNamesSql})`,
+      `DELETE FROM user_panel_orders WHERE id LIKE 'ORD-984%' OR id ILIKE '%vtx999%' OR id ILIKE '%audit.trader%' OR ${dummyRelatedClause}`,
+      `DELETE FROM user_panel_positions WHERE id IN ('POS-77102', 'POS-77103') OR id LIKE 'POS-77%' OR id ILIKE '%vtx999%' OR id ILIKE '%audit.trader%' OR ${dummyRelatedClause}`,
+      `DELETE FROM user_panel_fund_transactions WHERE id LIKE 'TXN-804%' OR id ILIKE '%vtx999%' OR id ILIKE '%audit.trader%' OR ${dummyRelatedClause}`,
+      `DELETE FROM user_panel_ledger_entries WHERE id LIKE 'LED-39%' OR id ILIKE '%vtx999%' OR id ILIKE '%audit.trader%' OR client_id IN (${dummyClientsSql}) OR client_id ILIKE '%vtx999%' OR client_id ILIKE '%audit.trader%'`,
+      `DELETE FROM user_panel_clients WHERE ${dummyClientsClause}`,
+      `DELETE FROM user_panel_audit_logs WHERE user_name ILIKE '%audit.trader%' OR user_name ILIKE '%Persist Audit%' OR related_entity ILIKE '%audit.trader%'`,
+      `DELETE FROM orders WHERE id LIKE 'ORD-984%' OR ${dummyRelatedClause}`,
+      `DELETE FROM positions WHERE id IN ('POS-77102', 'POS-77103') OR id LIKE 'POS-77%' OR ${dummyRelatedClause}`,
+      `DELETE FROM fund_transactions WHERE id LIKE 'TXN-804%' OR ${dummyRelatedClause}`,
+      `DELETE FROM ledger_entries WHERE id LIKE 'LED-39%' OR client_id IN (${dummyClientsSql}) OR client_id ILIKE '%vtx999%' OR client_id ILIKE '%audit.trader%'`,
+      `DELETE FROM clients WHERE ${dummyClientsClause}`,
     ];
 
     for (const sql of tableCleanups) {
@@ -114,23 +182,8 @@ export async function purgeDummyData(pool: Pool): Promise<void> {
       }
     }
 
-    // Also attempt cleanup on legacy un-prefixed tables if present
-    const legacyTableCleanups = [
-      `DELETE FROM orders WHERE id LIKE 'ORD-984%' OR client_id IN (${dummyClientsSql})`,
-      `DELETE FROM positions WHERE id IN ('POS-77102', 'POS-77103') OR id LIKE 'POS-77%' OR client_id IN (${dummyClientsSql})`,
-      `DELETE FROM fund_transactions WHERE id LIKE 'TXN-804%' OR client_id IN (${dummyClientsSql})`,
-      `DELETE FROM ledger_entries WHERE id LIKE 'LED-39%' OR client_id IN (${dummyClientsSql})`,
-      `DELETE FROM clients WHERE id IN (${dummyClientsSql}) OR name IN (${dummyNamesSql})`,
-    ];
-
-    for (const sql of legacyTableCleanups) {
-      try {
-        await client.query(sql);
-      } catch {}
-    }
-
     await client.query('COMMIT');
-    console.log('[Database] Purged all legacy seeded dummy records from PostgreSQL.');
+    console.log('[Database] Purged all dummy records from PostgreSQL.');
   } catch (err: any) {
     await client.query('ROLLBACK').catch(() => {});
     console.warn('[Database] Notice during dummy data purge:', err.message);
@@ -182,6 +235,16 @@ export async function initDatabase(appEnv: string = 'production'): Promise<boole
       widenClient.release();
     }
 
+    // Unconditionally drop all foreign key constraints on orders, positions, funds, and ledger
+    const dropFkClient = await pgPool.connect();
+    try {
+      await dropForeignKeyConstraints(dropFkClient);
+      await dropFkClient.query('ALTER TABLE IF EXISTS user_panel_clients ADD COLUMN IF NOT EXISTS user_id TEXT;');
+      await dropFkClient.query('ALTER TABLE IF EXISTS user_panel_clients ADD COLUMN IF NOT EXISTS client_code TEXT;');
+    } finally {
+      dropFkClient.release();
+    }
+
     // Purge legacy seeded dummy records from PostgreSQL permanently
     await purgeDummyData(pgPool);
 
@@ -202,6 +265,54 @@ export async function initDatabase(appEnv: string = 'production'): Promise<boole
 /**
  * Versioned schema migrations for User/Broker Panel specific records
  */
+
+export async function dropForeignKeyConstraints(client: any): Promise<void> {
+  const explicitDrops = [
+    'ALTER TABLE IF EXISTS user_panel_orders DROP CONSTRAINT IF EXISTS user_panel_orders_client_id_fkey;',
+    'ALTER TABLE IF EXISTS user_panel_positions DROP CONSTRAINT IF EXISTS user_panel_positions_client_id_fkey;',
+    'ALTER TABLE IF EXISTS user_panel_fund_transactions DROP CONSTRAINT IF EXISTS user_panel_fund_transactions_client_id_fkey;',
+    'ALTER TABLE IF EXISTS user_panel_ledger_entries DROP CONSTRAINT IF EXISTS user_panel_ledger_entries_client_id_fkey;',
+    'ALTER TABLE IF EXISTS orders DROP CONSTRAINT IF EXISTS orders_client_id_fkey;',
+    'ALTER TABLE IF EXISTS positions DROP CONSTRAINT IF EXISTS positions_client_id_fkey;',
+    'ALTER TABLE IF EXISTS fund_transactions DROP CONSTRAINT IF EXISTS fund_transactions_client_id_fkey;',
+    'ALTER TABLE IF EXISTS ledger_entries DROP CONSTRAINT IF EXISTS ledger_entries_client_id_fkey;',
+  ];
+
+  for (const sql of explicitDrops) {
+    try {
+      await client.query(sql);
+    } catch (err: any) {
+      console.warn('[Database Migration] Drop FK notice:', err.message);
+    }
+  }
+
+  try {
+    const dynamicDropSql = `
+      DO $$
+      DECLARE
+          r RECORD;
+      BEGIN
+          FOR r IN (
+              SELECT tc.table_name, tc.constraint_name
+              FROM information_schema.table_constraints AS tc
+              JOIN information_schema.key_column_usage AS kcu
+                ON tc.constraint_name = kcu.constraint_name
+                AND tc.table_schema = kcu.table_schema
+              WHERE tc.constraint_type = 'FOREIGN KEY'
+                AND tc.table_name IN (
+                  'user_panel_orders', 'user_panel_positions', 'user_panel_fund_transactions', 'user_panel_ledger_entries',
+                  'orders', 'positions', 'fund_transactions', 'ledger_entries'
+                )
+          ) LOOP
+              EXECUTE format('ALTER TABLE IF EXISTS %I DROP CONSTRAINT IF EXISTS %I;', r.table_name, r.constraint_name);
+          END LOOP;
+      END $$;
+    `;
+    await client.query(dynamicDropSql);
+  } catch (err: any) {
+    console.warn('[Database Migration] Dynamic drop FK notice:', err.message);
+  }
+}
 
 export async function widenColumnsToText(client: any): Promise<void> {
   const tableColumnMap: Record<string, string[]> = {
@@ -336,6 +447,8 @@ async function runMigrations(pool: Pool) {
       await client.query(`
         CREATE TABLE IF NOT EXISTS user_panel_clients (
           id TEXT PRIMARY KEY,
+          user_id TEXT,
+          client_code TEXT,
           name VARCHAR(255) NOT NULL,
           email VARCHAR(255) NOT NULL,
           phone TEXT NOT NULL,
@@ -364,7 +477,7 @@ async function runMigrations(pool: Pool) {
       await client.query(`
         CREATE TABLE IF NOT EXISTS user_panel_orders (
           id TEXT PRIMARY KEY,
-          client_id TEXT REFERENCES user_panel_clients(id) ON DELETE CASCADE,
+          client_id TEXT,
           client_name VARCHAR(255),
           instrument VARCHAR(100) NOT NULL,
           exchange VARCHAR(50),
@@ -388,7 +501,7 @@ async function runMigrations(pool: Pool) {
       await client.query(`
         CREATE TABLE IF NOT EXISTS user_panel_positions (
           id TEXT PRIMARY KEY,
-          client_id TEXT REFERENCES user_panel_clients(id) ON DELETE CASCADE,
+          client_id TEXT,
           client_name VARCHAR(255),
           instrument VARCHAR(100) NOT NULL,
           exchange VARCHAR(50),
@@ -412,7 +525,7 @@ async function runMigrations(pool: Pool) {
       await client.query(`
         CREATE TABLE IF NOT EXISTS user_panel_fund_transactions (
           id TEXT PRIMARY KEY,
-          client_id TEXT REFERENCES user_panel_clients(id) ON DELETE CASCADE,
+          client_id TEXT,
           client_name VARCHAR(255),
           type VARCHAR(20) NOT NULL,
           amount NUMERIC(18, 2) NOT NULL,
@@ -559,6 +672,23 @@ async function runMigrations(pool: Pool) {
     }
 
 
+    // Migration 4: Drop all foreign key constraints on orders, positions, funds, and ledger
+    if (!appliedVersions.has(4)) {
+      console.log('[Database Migration] Running Migration 4: Drop foreign key constraints...');
+      await dropForeignKeyConstraints(client);
+      try {
+        await client.query('ALTER TABLE IF EXISTS user_panel_clients ADD COLUMN IF NOT EXISTS user_id TEXT;');
+        await client.query('ALTER TABLE IF EXISTS user_panel_clients ADD COLUMN IF NOT EXISTS client_code TEXT;');
+      } catch {}
+      try {
+        await client.query(
+          'INSERT INTO user_panel_schema_migrations (version, name) VALUES (4, $1) ON CONFLICT (version) DO NOTHING',
+          ['Drop foreign key constraints on orders, positions, funds, and ledger']
+        );
+      } catch {}
+      console.log('[Database Migration] Migration 4 successfully committed.');
+    }
+
     // Guarantee created_at columns exist unconditionally on primary tables
     const coreTables = ['user_panel_clients', 'user_panel_positions', 'user_panel_orders', 'user_panel_fund_transactions', 'user_panel_ledger_entries'];
     for (const tbl of coreTables) {
@@ -677,6 +807,8 @@ export const dbRepo = {
     }
     return rows.map(r => ({
       id: r.id,
+      userId: r.user_id || r.id,
+      clientCode: r.client_code || r.id,
       name: r.name,
       email: r.email,
       phone: r.phone,
@@ -715,13 +847,15 @@ export const dbRepo = {
           status = EXCLUDED.status,
           ledger_balance = EXCLUDED.ledger_balance,
           margin_available = EXCLUDED.margin_available,
+          user_id = COALESCE(EXCLUDED.user_id, user_panel_clients.user_id),
+          client_code = COALESCE(EXCLUDED.client_code, user_panel_clients.client_code),
           updated_at = NOW();
       `, [
         client.id, client.name, client.email, client.phone, client.pan, client.status,
         client.isDemo, client.ledgerBalance, client.openPnL, client.peakLedger,
         client.marginUsed, client.income, client.marginAvailable, client.brokerId,
         client.brokerName, client.kycStatus, JSON.stringify(client.kycDocuments),
-        client.createdDate, client.lastActive, client.riskLimit
+        client.createdDate, client.lastActive, client.riskLimit, client.userId || client.id, client.clientCode || client.id
       ]);
     } catch (e: any) {
       console.warn('[Database dbRepo.insertClient] insert notice:', e.message);
@@ -930,6 +1064,29 @@ export const dbRepo = {
     }));
   },
 
+  async insertFundTransaction(txn: FundTransaction): Promise<void> {
+    if (!pgPool || !isPostgresReady || isDummyRecord(txn)) return;
+    try {
+      await pgPool.query(`
+        INSERT INTO user_panel_fund_transactions (
+          id, client_id, client_name, type, amount, method, request_date,
+          reference_id, status, verification, approved_by, rejection_reason, broker_id, created_at
+        ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, NOW())
+        ON CONFLICT (id) DO UPDATE SET
+          status = EXCLUDED.status,
+          verification = EXCLUDED.verification,
+          approved_by = EXCLUDED.approved_by,
+          rejection_reason = EXCLUDED.rejection_reason;
+      `, [
+        txn.id, txn.clientId, txn.clientName, txn.type, txn.amount, txn.method,
+        txn.requestDate, txn.referenceId, txn.status, txn.verification,
+        txn.approvedBy || null, txn.rejectionReason || null, txn.brokerId || 'BRK-ROHAN-01'
+      ]);
+    } catch (e: any) {
+      console.warn('[Database dbRepo.insertFundTransaction] notice:', e.message);
+    }
+  },
+
   async updateFundStatus(id: string, status: string, verification: string, approvedBy?: string, reason?: string): Promise<void> {
     if (!pgPool || !isPostgresReady) return;
     try {
@@ -968,6 +1125,7 @@ export const dbRepo = {
     }
     return rows.map(r => ({
       id: r.id,
+      clientId: r.client_id,
       date: r.date,
       referenceId: r.reference_id,
       description: r.description,
@@ -1060,6 +1218,25 @@ export const dbRepo = {
       settings.activityAlerts, settings.compactTableDensity, settings.twoFactorAuth,
       settings.emailNotifications, settings.marginCallAlerts
     ]);
+  },
+
+  async insertLedgerEntry(entry: LedgerEntry): Promise<void> {
+    if (!pgPool || !isPostgresReady || isDummyRecord(entry)) return;
+    try {
+      await pgPool.query(`
+        INSERT INTO user_panel_ledger_entries (
+          id, client_id, date, reference_id, description, debit, credit,
+          running_balance, status, type, created_at
+        ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, NOW())
+        ON CONFLICT (id) DO NOTHING;
+      `, [
+        entry.id, entry.clientId || null, entry.date, entry.referenceId,
+        entry.description, entry.debit, entry.credit, entry.runningBalance,
+        entry.status, entry.type
+      ]);
+    } catch (e: any) {
+      console.warn('[Database dbRepo.insertLedgerEntry] notice:', e.message);
+    }
   },
 
   // Audit Logs
