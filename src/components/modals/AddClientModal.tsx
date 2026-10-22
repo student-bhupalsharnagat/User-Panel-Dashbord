@@ -28,6 +28,12 @@ export const AddClientModal: React.FC = () => {
       return;
     }
 
+    const digitsOnly = phone.replace(/\D/g, '');
+    if (digitsOnly.length < 10 || digitsOnly.length > 15) {
+      showToast('Please enter a valid 10-digit mobile number', 'error');
+      return;
+    }
+
     setIsSubmitting(true);
     try {
       const newClient = await api.createClient({

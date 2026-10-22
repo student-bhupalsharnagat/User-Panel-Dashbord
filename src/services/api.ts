@@ -358,10 +358,11 @@ export const api = {
   },
 
   // Orders
-  async getOrders(params?: { status?: string; q?: string }): Promise<Order[]> {
+  async getOrders(params?: { status?: string; q?: string; timeRange?: string }): Promise<Order[]> {
     const query = new URLSearchParams();
     if (params?.status) query.set('status', params.status);
     if (params?.q) query.set('q', params.q);
+    if (params?.timeRange) query.set('timeRange', params.timeRange);
 
     const res = await authenticatedFetch(`/api/orders?${query.toString()}`);
     const data = await res.json();
@@ -418,9 +419,10 @@ export const api = {
   },
 
   // Funds
-  async getFunds(type?: string): Promise<FundTransaction[]> {
+  async getFunds(type?: string, timeRange?: string): Promise<FundTransaction[]> {
     const query = new URLSearchParams();
     if (type) query.set('type', type);
+    if (timeRange) query.set('timeRange', timeRange);
     const res = await authenticatedFetch(`/api/funds?${query.toString()}`);
     const data = await res.json();
     return Array.isArray(data?.transactions) ? data.transactions : (Array.isArray(data?.funds) ? data.funds : (Array.isArray(data?.data) ? data.data : []));
@@ -452,15 +454,17 @@ export const api = {
   },
 
   // Ledger
-  async getLedger(): Promise<{ summary: any; entries: LedgerEntry[] }> {
-    const res = await authenticatedFetch('/api/ledger');
+  async getLedger(timeRange?: string): Promise<{ summary: any; entries: LedgerEntry[] }> {
+    const q = timeRange ? `?timeRange=${encodeURIComponent(timeRange)}` : '';
+    const res = await authenticatedFetch(`/api/ledger${q}`);
     const data = await res.json();
     return { summary: data?.summary || {}, entries: Array.isArray(data?.entries) ? data.entries : (Array.isArray(data?.ledger) ? data.ledger : (Array.isArray(data?.data) ? data.data : [])) };
   },
 
   // Analytics
-  async getAnalytics(): Promise<AnalyticsData> {
-    const res = await authenticatedFetch('/api/analytics');
+  async getAnalytics(timeRange?: string): Promise<AnalyticsData> {
+    const q = timeRange ? `?timeRange=${encodeURIComponent(timeRange)}` : '';
+    const res = await authenticatedFetch(`/api/analytics${q}`);
     const data = await res.json();
     return data?.data || data || {};
   },
@@ -479,8 +483,9 @@ export const api = {
     return data.reports;
   },
 
-  async getReportPreview(id: string): Promise<{ report: ReportItem; data: any[] }> {
-    const res = await authenticatedFetch(`/api/reports/preview/${id}`);
+  async getReportPreview(id: string, period?: string): Promise<{ report: ReportItem; data: any[] }> {
+    const q = period ? `?period=${encodeURIComponent(period)}` : '';
+    const res = await authenticatedFetch(`/api/reports/preview/${id}${q}`);
     const data = await res.json();
     return { report: data.report, data: data.data };
   },

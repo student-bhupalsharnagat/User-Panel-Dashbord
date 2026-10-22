@@ -58,7 +58,7 @@ export const ReportsView: React.FC = () => {
 
   const handleQuickExport = async (report: ReportItem) => {
     try {
-      const res = await api.getReportPreview(report.id);
+      const res = await api.getReportPreview(report.id, period);
       if (res.data.length === 0) {
         showToast('No records to export', 'error');
         return;
@@ -114,8 +114,10 @@ export const ReportsView: React.FC = () => {
               onChange={(e) => setPeriod(e.target.value)}
               className="bg-[#131b2e] border border-[#1e2a42] text-xs text-slate-200 rounded-lg px-3 py-2 pr-8 appearance-none focus:outline-none cursor-pointer"
             >
-              <option value="This month">This month</option>
               <option value="Today">Today</option>
+              <option value="Yesterday">Yesterday</option>
+              <option value="7 Days">7 Days</option>
+              <option value="This month">This month</option>
               <option value="Last 30 days">Last 30 days</option>
               <option value="Fiscal Q1">Fiscal Q1 (Apr - Jun)</option>
             </select>
@@ -170,7 +172,7 @@ export const ReportsView: React.FC = () => {
 
               <div className="pt-3 border-t border-slate-800 flex items-center justify-between gap-2">
                 <button
-                  onClick={() => openReportPreview(report)}
+                  onClick={() => openReportPreview(report, period)}
                   className="flex-1 py-1.5 px-2.5 rounded-lg bg-[#131b2e] hover:bg-slate-800 border border-[#1e2a42] text-xs font-semibold text-slate-300 hover:text-white flex items-center justify-center gap-1.5 transition-colors cursor-pointer"
                 >
                   <Eye className="w-3.5 h-3.5 text-slate-400" />

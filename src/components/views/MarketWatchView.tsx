@@ -28,6 +28,7 @@ export const MarketWatchView: React.FC = () => {
     isRealtimeConnected,
     lastTickTimestamp,
     isLiveMode,
+    isCompactMode,
     latestTicks,
   } = useApp();
 
@@ -38,6 +39,10 @@ export const MarketWatchView: React.FC = () => {
   const [pageSize, setPageSize] = useState<number>(10);
   const [page, setPage] = useState<number>(1);
   const [loading, setLoading] = useState<boolean>(true);
+
+  useEffect(() => {
+    setPage(1);
+  }, [searchQuery, selectedType, timeRange]);
 
   // Load instruments
   useEffect(() => {
@@ -82,6 +87,8 @@ export const MarketWatchView: React.FC = () => {
   });
 
   const paginatedInstruments = filteredInstruments.slice((page - 1) * pageSize, page * pageSize);
+  const cellPad = isCompactMode ? 'px-3 py-1.5' : 'px-4 py-3';
+  const headPad = isCompactMode ? 'px-3 py-2' : 'px-4 py-3';
 
   const handleExportCSV = () => {
     if (instruments.length === 0) return;
@@ -218,15 +225,15 @@ export const MarketWatchView: React.FC = () => {
           <table className="w-full min-w-[700px] text-xs text-left">
             <thead className="bg-[#141d30] text-slate-400 uppercase font-bold text-[10px] tracking-wider border-b border-slate-800">
               <tr>
-                <th className="px-4 py-3">Instrument</th>
-                <th className="px-4 py-3">Exchange</th>
-                <th className="px-4 py-3 text-right">Last Traded Price</th>
-                <th className="px-4 py-3 text-right">Change</th>
-                <th className="px-4 py-3 text-right">Change %</th>
-                <th className="px-4 py-3 text-right">Bid</th>
-                <th className="px-4 py-3 text-right">Ask</th>
-                <th className="px-4 py-3 text-right">Volume</th>
-                <th className="px-4 py-3 text-center">Action</th>
+                <th className={`${headPad}`}>Instrument</th>
+                <th className={`${headPad}`}>Exchange</th>
+                <th className={`${headPad} text-right`}>Last Traded Price</th>
+                <th className={`${headPad} text-right`}>Change</th>
+                <th className={`${headPad} text-right`}>Change %</th>
+                <th className={`${headPad} text-right`}>Bid</th>
+                <th className={`${headPad} text-right`}>Ask</th>
+                <th className={`${headPad} text-right`}>Volume</th>
+                <th className={`${headPad} text-center`}>Action</th>
               </tr>
             </thead>
             <tbody className="divide-y divide-slate-800/80 bg-slate-900/60 font-mono">
@@ -234,34 +241,34 @@ export const MarketWatchView: React.FC = () => {
                 const isPositive = inst.change >= 0;
                 return (
                   <tr key={inst.symbol} className="hover:bg-slate-800/60 transition-colors group">
-                    <td className="px-4 py-3 font-sans">
+                    <td className={`${cellPad} font-sans`}>
                       <div className="font-bold text-white text-xs">{inst.symbol}</div>
                       <div className="text-[11px] text-slate-400 truncate max-w-[160px]">{inst.name}</div>
                     </td>
-                    <td className="px-4 py-3 text-slate-400 text-xs font-sans">
+                    <td className={`${cellPad} text-slate-400 text-xs font-sans`}>
                       <span className="px-1.5 py-0.5 rounded bg-slate-800 text-[10px] font-bold text-slate-300">
                         {inst.exchange}
                       </span>
                     </td>
-                    <td className="px-4 py-3 text-right font-bold text-white text-xs">
+                    <td className={`${cellPad} text-right font-bold text-white text-xs`}>
                       ₹{inst.lastPrice.toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
                     </td>
-                    <td className={`px-4 py-3 text-right font-medium ${isPositive ? 'text-emerald-400' : 'text-rose-400'}`}>
+                    <td className={`${cellPad} text-right font-medium ${isPositive ? 'text-emerald-400' : 'text-rose-400'}`}>
                       {isPositive ? '+' : ''}{inst.change.toFixed(2)}
                     </td>
-                    <td className={`px-4 py-3 text-right font-bold ${isPositive ? 'text-emerald-400' : 'text-rose-400'}`}>
+                    <td className={`${cellPad} text-right font-bold ${isPositive ? 'text-emerald-400' : 'text-rose-400'}`}>
                       {isPositive ? '+' : ''}{inst.changePercent.toFixed(2)}%
                     </td>
-                    <td className="px-4 py-3 text-right text-slate-400">
+                    <td className={`${cellPad} text-right text-slate-400`}>
                       ₹{inst.bid.toLocaleString('en-IN', { minimumFractionDigits: 2 })}
                     </td>
-                    <td className="px-4 py-3 text-right text-slate-400">
+                    <td className={`${cellPad} text-right text-slate-400`}>
                       ₹{inst.ask.toLocaleString('en-IN', { minimumFractionDigits: 2 })}
                     </td>
-                    <td className="px-4 py-3 text-right text-slate-300">
+                    <td className={`${cellPad} text-right text-slate-300`}>
                       {inst.volume}
                     </td>
-                    <td className="px-4 py-3 text-center font-sans">
+                    <td className={`${cellPad} text-center font-sans`}>
                       <div className="flex items-center justify-center gap-1.5">
                         <button
                           onClick={() => openOrderModal(inst, 'BUY')}

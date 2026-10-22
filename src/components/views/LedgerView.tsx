@@ -19,9 +19,10 @@ import {
 import { useApp } from '../../context/AppContext';
 import { api } from '../../services/api';
 import { LedgerEntry } from '../../types';
+import { matchesDateFilter } from '../../utils/dateUtils';
 
 export const LedgerView: React.FC = () => {
-  const { refreshTrigger, showToast, isLiveMode } = useApp();
+  const { refreshTrigger, showToast, isLiveMode, isCompactMode } = useApp();
 
   const [ledgerEntries, setLedgerEntries] = useState<LedgerEntry[]>([]);
   const [summary, setSummary] = useState<any>(null);
@@ -32,26 +33,34 @@ export const LedgerView: React.FC = () => {
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
+    setPage(1);
+  }, [searchQuery, timeRange]);
+
+  useEffect(() => {
     setLoading(true);
-    api.getLedger()
+    api.getLedger(timeRange)
       .then((data) => {
         setLedgerEntries(data.entries);
         setSummary(data.summary);
       })
       .catch((err) => console.error('Failed to load ledger:', err))
       .finally(() => setLoading(false));
-  }, [refreshTrigger]);
+  }, [timeRange, refreshTrigger]);
 
   const filteredEntries = ledgerEntries.filter((e) => {
     const q = searchQuery.toLowerCase();
-    return (
+    const matchesSearch = (
       e.id.toLowerCase().includes(q) ||
       e.referenceId.toLowerCase().includes(q) ||
       e.description.toLowerCase().includes(q)
     );
+    return matchesSearch && matchesDateFilter(e.date, timeRange);
   });
 
   const paginatedEntries = filteredEntries.slice((page - 1) * pageSize, page * pageSize);
+
+  const cellPad = isCompactMode ? 'px-3 py-1.5' : 'px-4 py-3';
+  const headPad = isCompactMode ? 'px-3 py-2' : 'px-4 py-3';
 
   const handleExportCSV = () => {
     if (ledgerEntries.length === 0) return;
@@ -221,43 +230,43 @@ export const LedgerView: React.FC = () => {
           <table className="w-full min-w-[800px] text-xs text-left">
             <thead className="bg-[#141d30] text-slate-400 uppercase font-bold text-[10px] tracking-wider border-b border-slate-800">
               <tr>
-                <th className="px-4 py-3">Transaction Date</th>
-                <th className="px-4 py-3">Reference ID</th>
-                <th className="px-4 py-3">Description</th>
-                <th className="px-4 py-3 text-right">Debit</th>
-                <th className="px-4 py-3 text-right">Credit</th>
-                <th className="px-4 py-3 text-right">Running Balance</th>
-                <th className="px-4 py-3 text-center">Status</th>
+                <th className={headPad}>Transaction Date</th>
+                <th className={headPad}>Reference ID</th>
+                <th className={headPad}>Description</th>
+                <th className={`${headPad} text-right`}>Debit</th>
+                <th className={`${headPad} text-right`}>Credit</th>
+                <th className={`${headPad} text-right`}>Running Balance</th>
+                <th className={`${headPad} text-center`}>Status</th>
               </tr>
             </thead>
             <tbody className="divide-y divide-slate-800/80 bg-slate-900/60 font-mono">
               {paginatedEntries.map((entry) => (
                 <tr key={entry.id} className="hover:bg-slate-800/60 transition-colors">
-                  <td className="px-4 py-3 font-sans text-slate-400 text-xs">
+                  <td className={`${cellPad} font-sans text-slate-400 text-xs`}>
                     {entry.date}
                   </td>
 
-                  <td className="px-4 py-3 font-bold text-indigo-300 text-xs">
+                  <td className={`${cellPad} font-bold text-indigo-300 text-xs`}>
                     {entry.referenceId}
                   </td>
 
-                  <td className="px-4 py-3 font-sans text-slate-200 font-medium">
+                  <td className={`${cellPad} font-sans text-slate-200 font-medium`}>
                     {entry.description}
                   </td>
 
-                  <td className="px-4 py-3 text-right text-rose-400">
+                  <td className={`${cellPad} text-right text-rose-400`}>
                     {entry.debit > 0 ? `₹${entry.debit.toLocaleString('en-IN')}` : '—'}
                   </td>
 
-                  <td className="px-4 py-3 text-right text-emerald-400 font-bold">
+                  <td className={`${cellPad} text-right text-emerald-400 font-bold`}>
                     {entry.credit > 0 ? `₹${entry.credit.toLocaleString('en-IN')}` : '—'}
                   </td>
 
-                  <td className="px-4 py-3 text-right font-bold text-white text-xs">
+                  <td className={`${cellPad} text-right font-bold text-white text-xs`}>
                     ₹{entry.runningBalance.toLocaleString('en-IN')}
                   </td>
 
-                  <td className="px-4 py-3 text-center font-sans">
+                  <td className={`${cellPad} text-center font-sans`}>
                     <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-semibold bg-emerald-500/15 text-emerald-400">
                       <span className="w-1.5 h-1.5 rounded-full bg-emerald-400" />
                       <span>{entry.status}</span>

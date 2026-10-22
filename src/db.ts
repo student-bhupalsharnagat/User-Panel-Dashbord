@@ -64,7 +64,7 @@ export const DUMMY_CLIENT_IDS = [
 ];
 
 export const DUMMY_CLIENT_NAMES = [
-  'Aarav Mehta', 'Ananya Iyer', 'Arjun Verma', 'Diya Kapoor',
+  'Aarav Mehta', 'Ananya Iyer', 'Arjun Verma',
   'Ishita Singh', 'Kabir Rao', 'Meera Nair', 'Vivaan Shah', 'Rohan Gupta', 'Persist Audit'
 ];
 
@@ -78,7 +78,6 @@ export const DUMMY_PATTERNS = [
   'aarav mehta',
   'ananya iyer',
   'arjun verma',
-  'diya kapoor',
   'ishita singh',
   'kabir rao',
   'meera nair',
@@ -147,7 +146,7 @@ export async function purgeDummyData(pool: Pool): Promise<void> {
       id IN (${dummyClientsSql})
       OR id ILIKE '%vtx999%' OR id ILIKE '%audit.trader%'
       OR email ILIKE '%@test.example%' OR email ILIKE '%@demo.example%' OR email ILIKE '%@example.com%' OR email ILIKE '%audit.trader%'
-      OR name ILIKE '%Aarav Mehta%' OR name ILIKE '%Ananya Iyer%' OR name ILIKE '%Arjun Verma%' OR name ILIKE '%Diya Kapoor%'
+      OR name ILIKE '%Aarav Mehta%' OR name ILIKE '%Ananya Iyer%' OR name ILIKE '%Arjun Verma%'
       OR name ILIKE '%Ishita Singh%' OR name ILIKE '%Kabir Rao%' OR name ILIKE '%Meera Nair%' OR name ILIKE '%Vivaan Shah%'
       OR name ILIKE '%Persist Audit%' OR name ILIKE '%Rohan Gupta%'
     )`;
@@ -155,7 +154,7 @@ export async function purgeDummyData(pool: Pool): Promise<void> {
     const dummyRelatedClause = `(
       client_id IN (${dummyClientsSql})
       OR client_id ILIKE '%vtx999%' OR client_id ILIKE '%audit.trader%'
-      OR client_name ILIKE '%Aarav Mehta%' OR client_name ILIKE '%Ananya Iyer%' OR client_name ILIKE '%Arjun Verma%' OR client_name ILIKE '%Diya Kapoor%'
+      OR client_name ILIKE '%Aarav Mehta%' OR client_name ILIKE '%Ananya Iyer%' OR client_name ILIKE '%Arjun Verma%'
       OR client_name ILIKE '%Ishita Singh%' OR client_name ILIKE '%Kabir Rao%' OR client_name ILIKE '%Meera Nair%' OR client_name ILIKE '%Vivaan Shah%'
       OR client_name ILIKE '%Persist Audit%' OR client_name ILIKE '%Rohan Gupta%'
     )`;

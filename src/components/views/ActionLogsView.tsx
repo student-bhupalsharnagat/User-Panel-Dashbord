@@ -20,9 +20,10 @@ import {
 import { useApp } from '../../context/AppContext';
 import { api } from '../../services/api';
 import { AuditLog } from '../../types';
+import { matchesDateFilter } from '../../utils/dateUtils';
 
 export const ActionLogsView: React.FC = () => {
-  const { refreshTrigger, showToast, isLiveMode } = useApp();
+  const { refreshTrigger, showToast, isLiveMode, isCompactMode } = useApp();
 
   const [logs, setLogs] = useState<AuditLog[]>([]);
   const [searchQuery, setSearchQuery] = useState('');
@@ -31,6 +32,10 @@ export const ActionLogsView: React.FC = () => {
   const [pageSize, setPageSize] = useState(10);
   const [page, setPage] = useState(1);
   const [loading, setLoading] = useState(true);
+
+  useEffect(() => {
+    setPage(1);
+  }, [searchQuery, timeRange]);
 
   useEffect(() => {
     setLoading(true);
@@ -42,15 +47,18 @@ export const ActionLogsView: React.FC = () => {
 
   const filteredLogs = logs.filter((l) => {
     const q = searchQuery.toLowerCase();
-    return (
+    const matchesSearch =
       l.user.toLowerCase().includes(q) ||
       l.action.toLowerCase().includes(q) ||
       l.relatedEntity.toLowerCase().includes(q) ||
-      l.role.toLowerCase().includes(q)
-    );
+      l.role.toLowerCase().includes(q);
+    const matchesDate = timeRange === 'All Time' || matchesDateFilter(l.timestamp, timeRange);
+    return matchesSearch && matchesDate;
   });
 
   const paginatedLogs = filteredLogs.slice((page - 1) * pageSize, page * pageSize);
+  const cellPad = isCompactMode ? 'px-3 py-1.5' : 'px-3.5 py-3';
+  const headPad = isCompactMode ? 'px-3 py-2' : 'px-3.5 py-3';
 
   const handleExportCSV = () => {
     if (logs.length === 0) return;
@@ -159,46 +167,46 @@ export const ActionLogsView: React.FC = () => {
           <table className="w-full min-w-[800px] text-xs text-left">
             <thead className="bg-[#141d30] text-slate-400 uppercase font-bold text-[10px] tracking-wider border-b border-slate-800">
               <tr>
-                <th className="px-3.5 py-3">Timestamp</th>
-                <th className="px-3.5 py-3">User / Staff</th>
-                <th className="px-3.5 py-3">Role</th>
-                <th className="px-3.5 py-3">Action Performed</th>
-                <th className="px-3.5 py-3">Related Entity</th>
-                <th className="px-3.5 py-3 font-mono">IP Address</th>
-                <th className="px-3.5 py-3 text-center">Result</th>
-                <th className="px-3.5 py-3 text-center">Details</th>
+                <th className={headPad}>Timestamp</th>
+                <th className={headPad}>User / Staff</th>
+                <th className={headPad}>Role</th>
+                <th className={headPad}>Action Performed</th>
+                <th className={headPad}>Related Entity</th>
+                <th className={`${headPad} font-mono`}>IP Address</th>
+                <th className={`${headPad} text-center`}>Result</th>
+                <th className={`${headPad} text-center`}>Details</th>
               </tr>
             </thead>
             <tbody className="divide-y divide-slate-800/80 bg-slate-900/60 font-mono">
               {paginatedLogs.map((log) => (
                 <tr key={log.id} className="hover:bg-slate-800/60 transition-colors">
-                  <td className="px-3.5 py-3 font-sans text-slate-400 text-xs">
+                  <td className={`${cellPad} font-sans text-slate-400 text-xs`}>
                     {log.timestamp}
                   </td>
 
-                  <td className="px-3.5 py-3 font-sans font-semibold text-white">
+                  <td className={`${cellPad} font-sans font-semibold text-white`}>
                     {log.user}
                   </td>
 
-                  <td className="px-3.5 py-3 font-sans text-slate-300">
+                  <td className={`${cellPad} font-sans text-slate-300`}>
                     <span className="px-1.5 py-0.5 rounded bg-slate-800 text-[10px] font-medium text-slate-300">
                       {log.role}
                     </span>
                   </td>
 
-                  <td className="px-3.5 py-3 font-sans font-medium text-slate-200">
+                  <td className={`${cellPad} font-sans font-medium text-slate-200`}>
                     {log.action}
                   </td>
 
-                  <td className="px-3.5 py-3 text-indigo-300 font-bold">
+                  <td className={`${cellPad} text-indigo-300 font-bold`}>
                     {log.relatedEntity}
                   </td>
 
-                  <td className="px-3.5 py-3 text-slate-400">
+                  <td className={`${cellPad} text-slate-400`}>
                     {log.ipAddress}
                   </td>
 
-                  <td className="px-3.5 py-3 text-center font-sans">
+                  <td className={`${cellPad} text-center font-sans`}>
                     <span className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-semibold ${
                       log.result === 'Success'
                         ? 'bg-emerald-500/15 text-emerald-400'
@@ -217,7 +225,7 @@ export const ActionLogsView: React.FC = () => {
                     </span>
                   </td>
 
-                  <td className="px-3.5 py-3 text-center font-sans">
+                  <td className={`${cellPad} text-center font-sans`}>
                     <button
                       onClick={() => setSelectedLog(log)}
                       className="p-1.5 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-400 hover:text-white transition-colors"

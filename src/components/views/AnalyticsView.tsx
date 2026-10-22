@@ -29,11 +29,70 @@ export const AnalyticsView: React.FC = () => {
 
   useEffect(() => {
     setLoading(true);
-    api.getAnalytics()
+    api.getAnalytics(timeRange)
       .then((data) => setAnalytics(data))
       .catch((err) => console.error('Failed to load analytics:', err))
       .finally(() => setLoading(false));
   }, [refreshTrigger, timeRange]);
+
+  const trendList = React.useMemo(() => {
+    if (analytics?.turnoverTrend && analytics.turnoverTrend.length > 0) {
+      return analytics.turnoverTrend;
+    }
+    const dates = timeRange === '90 Days'
+      ? ['24 Jul', '07 Aug', '21 Aug', '04 Sep', '18 Sep', '02 Oct', '22 Oct']
+      : timeRange === '30 Days'
+      ? ['23 Sep', '28 Sep', '03 Oct', '08 Oct', '13 Oct', '18 Oct', '22 Oct']
+      : ['16 Oct', '17 Oct', '18 Oct', '19 Oct', '20 Oct', '21 Oct', '22 Oct'];
+    const base = Number(analytics?.monthlyTurnoverCr) || 128.4;
+    return dates.map((d, i) => ({
+      day: d,
+      volumeCr: +((base * (0.7 + (i * 0.05))).toFixed(1))
+    }));
+  }, [analytics?.turnoverTrend, analytics?.monthlyTurnoverCr, timeRange]);
+
+  const maxVolume = React.useMemo(() => {
+    return Math.max(1, ...trendList.map((t: any) => Number(t.volumeCr) || 0));
+  }, [trendList]);
+
+  const svgPoints = React.useMemo(() => {
+    return trendList.map((item: any, i: number) => {
+      const cx = 20 + i * (560 / Math.max(1, trendList.length - 1));
+      const ratio = (Number(item.volumeCr) || 0) / maxVolume;
+      const cy = 180 - Math.min(140, Math.round(ratio * 130));
+      return { cx, cy, day: item.day, val: `₹${item.volumeCr} Cr` };
+    });
+  }, [trendList, maxVolume]);
+
+  const svgLineD = React.useMemo(() => {
+    if (svgPoints.length === 0) return '';
+    return svgPoints.reduce((acc, pt, i) => (i === 0 ? `M ${pt.cx} ${pt.cy}` : `${acc} L ${pt.cx} ${pt.cy}`), '');
+  }, [svgPoints]);
+
+  const svgAreaD = React.useMemo(() => {
+    if (svgPoints.length === 0) return '';
+    return `${svgLineD} L ${svgPoints[svgPoints.length - 1].cx} 195 L ${svgPoints[0].cx} 195 Z`;
+  }, [svgLineD, svgPoints]);
+
+  const commissionList = React.useMemo(() => {
+    if (analytics?.commissionEarnings && analytics.commissionEarnings.length > 0) {
+      return analytics.commissionEarnings;
+    }
+    const dates = timeRange === '90 Days'
+      ? ['24 Jul', '07 Aug', '21 Aug', '04 Sep', '18 Sep', '02 Oct', '22 Oct']
+      : timeRange === '30 Days'
+      ? ['23 Sep', '28 Sep', '03 Oct', '08 Oct', '13 Oct', '18 Oct', '22 Oct']
+      : ['16 Oct', '17 Oct', '18 Oct', '19 Oct', '20 Oct', '21 Oct', '22 Oct'];
+    const base = Number(analytics?.commissionEarnedL) || 28.4;
+    return dates.map((d, i) => ({
+      day: d,
+      netL: +((base * 0.14).toFixed(1))
+    }));
+  }, [analytics?.commissionEarnings, analytics?.commissionEarnedL, timeRange]);
+
+  const maxCommission = React.useMemo(() => {
+    return Math.max(1, ...commissionList.map((c: any) => Number(c.netL) || 0));
+  }, [commissionList]);
 
   const handleExportDashboard = () => {
     window.print();
@@ -140,7 +199,9 @@ export const AnalyticsView: React.FC = () => {
               <h3 className="text-sm font-bold text-white">Trading turnover</h3>
               <p className="text-[11px] text-slate-400">Daily volume in crores</p>
             </div>
-            <span className="text-xs font-mono font-bold text-indigo-400">Peak: ₹172.5 Cr</span>
+            <span className="text-xs font-mono font-bold text-indigo-400">
+              Peak: ₹{maxVolume.toFixed(1)} Cr
+            </span>
           </div>
 
           <div className="h-56 w-full relative pt-2">
@@ -157,26 +218,18 @@ export const AnalyticsView: React.FC = () => {
               ))}
 
               <path
-                d="M 20 150 Q 110 120 200 160 T 380 90 T 500 70 T 580 110 L 580 195 L 20 195 Z"
+                d={svgAreaD}
                 fill="url(#analyticsTurnover)"
               />
               <path
-                d="M 20 150 Q 110 120 200 160 T 380 90 T 500 70 T 580 110"
+                d={svgLineD}
                 fill="none"
                 stroke="#6366f1"
                 strokeWidth="2.5"
                 strokeLinecap="round"
               />
 
-              {[
-                { cx: 20, cy: 150, val: '88.5 Cr' },
-                { cx: 110, cy: 122, val: '112.4 Cr' },
-                { cx: 205, cy: 158, val: '96.2 Cr' },
-                { cx: 295, cy: 108, val: '145.0 Cr' },
-                { cx: 390, cy: 126, val: '118.8 Cr' },
-                { cx: 485, cy: 72, val: '172.5 Cr' },
-                { cx: 580, cy: 110, val: '128.4 Cr' },
-              ].map((pt, i) => (
+              {svgPoints.map((pt, i) => (
                 <circle
                   key={i}
                   cx={pt.cx}
@@ -186,18 +239,16 @@ export const AnalyticsView: React.FC = () => {
                   stroke="#818cf8"
                   strokeWidth="2"
                   className="hover:r-6 cursor-pointer transition-all"
-                />
+                >
+                  <title>{`${pt.day}: ${pt.val}`}</title>
+                </circle>
               ))}
             </svg>
 
             <div className="flex justify-between text-[11px] text-slate-500 pt-2 font-mono">
-              <span>16 Apr</span>
-              <span>17 Apr</span>
-              <span>18 Apr</span>
-              <span>19 Apr</span>
-              <span>20 Apr</span>
-              <span>21 Apr</span>
-              <span>22 Apr</span>
+              {svgPoints.map((pt, i) => (
+                <span key={i}>{pt.day}</span>
+              ))}
             </div>
           </div>
         </div>
@@ -209,28 +260,25 @@ export const AnalyticsView: React.FC = () => {
               <h3 className="text-sm font-bold text-white">Commission earnings</h3>
               <p className="text-[11px] text-slate-400">Daily net earnings in lakhs</p>
             </div>
-            <span className="text-xs font-mono font-bold text-purple-400">Total: ₹33.2 L</span>
+            <span className="text-xs font-mono font-bold text-purple-400">
+              Total: ₹{analytics?.commissionEarnedL || '28.4'} L
+            </span>
           </div>
 
           <div className="h-56 w-full flex items-end justify-between gap-3 pt-6 px-3">
-            {[
-              { day: '16 Apr', h: 50, val: '₹3.2 L' },
-              { day: '17 Apr', h: 75, val: '₹4.8 L' },
-              { day: '18 Apr', h: 60, val: '₹3.9 L' },
-              { day: '19 Apr', h: 88, val: '₹5.6 L' },
-              { day: '20 Apr', h: 65, val: '₹4.2 L' },
-              { day: '21 Apr', h: 100, val: '₹6.4 L' },
-              { day: '22 Apr', h: 80, val: '₹5.1 L' },
-            ].map((bar, i) => (
-              <div key={i} className="flex-1 flex flex-col items-center gap-2 h-full justify-end group">
-                <div
-                  style={{ height: `${bar.h}%` }}
-                  className="w-full max-w-[28px] bg-purple-600 rounded-t-sm group-hover:bg-purple-500 transition-all relative"
-                  title={bar.val}
-                />
-                <span className="text-[10px] text-slate-500 font-mono">{bar.day}</span>
-              </div>
-            ))}
+            {commissionList.map((bar: any, i: number) => {
+              const h = Math.min(100, Math.max(15, Math.round(((Number(bar.netL) || 0) / maxCommission) * 100)));
+              return (
+                <div key={i} className="flex-1 flex flex-col items-center gap-2 h-full justify-end group">
+                  <div
+                    style={{ height: `${h}%` }}
+                    className="w-full max-w-[28px] bg-purple-600 rounded-t-sm group-hover:bg-purple-500 transition-all relative"
+                    title={`₹${bar.netL} L`}
+                  />
+                  <span className="text-[10px] text-slate-500 font-mono">{bar.day}</span>
+                </div>
+              );
+            })}
           </div>
         </div>
       </div>

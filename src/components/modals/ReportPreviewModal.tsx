@@ -1,12 +1,8 @@
-/**
- * @license
- * SPDX-License-Identifier: Apache-2.0
- */
-
 import React, { useState, useEffect } from 'react';
 import { X, FileBarChart, Download, FileSpreadsheet, Loader2 } from 'lucide-react';
 import { useApp } from '../../context/AppContext';
 import { api } from '../../services/api';
+import { matchesDateFilter } from '../../utils/dateUtils';
 
 export const ReportPreviewModal: React.FC = () => {
   const { reportPreviewModal, closeReportPreview, showToast } = useApp();
@@ -14,11 +10,12 @@ export const ReportPreviewModal: React.FC = () => {
   const [loading, setLoading] = useState<boolean>(true);
 
   const report = reportPreviewModal.report;
+  const period = reportPreviewModal.period;
 
   useEffect(() => {
     if (reportPreviewModal.isOpen && report) {
       setLoading(true);
-      api.getReportPreview(report.id)
+      api.getReportPreview(report.id, period)
         .then((res) => {
           setData(res.data);
         })
@@ -29,14 +26,23 @@ export const ReportPreviewModal: React.FC = () => {
           setLoading(false);
         });
     }
-  }, [reportPreviewModal.isOpen, report]);
+  }, [reportPreviewModal.isOpen, report, period]);
+
+  const filteredData = React.useMemo(() => {
+    if (!period || data.length === 0) return data;
+    return data.filter((row) => {
+      const dateVal = row.Date || row.date || row.Created || row.created || row.requestDate || row['Request Date'] || row['Transaction Date'];
+      if (!dateVal) return true;
+      return matchesDateFilter(dateVal, period);
+    });
+  }, [data, period]);
 
   if (!reportPreviewModal.isOpen || !report) return null;
 
   const handleExportCSV = () => {
-    if (data.length === 0) return;
-    const headers = Object.keys(data[0]).join(',');
-    const rows = data.map((row) =>
+    if (filteredData.length === 0) return;
+    const headers = Object.keys(filteredData[0]).join(',');
+    const rows = filteredData.map((row) =>
       Object.values(row)
         .map((val) => `"${val}"`)
         .join(',')
@@ -45,14 +51,14 @@ export const ReportPreviewModal: React.FC = () => {
     const encodedUri = encodeURI(csvContent);
     const link = document.createElement('a');
     link.setAttribute('href', encodedUri);
-    link.setAttribute('download', `${report.id}_${new Date().toISOString().slice(0, 10)}.csv`);
+    link.setAttribute('download', `${report.id}_${(period || 'period').replace(/\s+/g, '_')}_${new Date().toISOString().slice(0, 10)}.csv`);
     document.body.appendChild(link);
     link.click();
     document.body.removeChild(link);
     showToast(`Exported ${report.title} to CSV`, 'success');
   };
 
-  const columns = data.length > 0 ? Object.keys(data[0]) : [];
+  const columns = filteredData.length > 0 ? Object.keys(filteredData[0]) : [];
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center p-3 sm:p-4 bg-black/75 backdrop-blur-sm animate-in fade-in duration-150">
@@ -63,14 +69,21 @@ export const ReportPreviewModal: React.FC = () => {
               <FileBarChart className="w-4 h-4" />
             </div>
             <div>
-              <h3 className="text-sm font-bold text-white">{report.title}</h3>
+              <div className="flex items-center gap-2">
+                <h3 className="text-sm font-bold text-white">{report.title}</h3>
+                {period && (
+                  <span className="text-[10px] font-mono text-indigo-400 bg-indigo-500/10 px-2 py-0.5 rounded border border-indigo-500/20">
+                    {period}
+                  </span>
+                )}
+              </div>
               <p className="text-[11px] text-slate-400">{report.description}</p>
             </div>
           </div>
           <div className="flex items-center gap-2">
             <button
               onClick={handleExportCSV}
-              disabled={loading || data.length === 0}
+              disabled={loading || filteredData.length === 0}
               className="px-3 py-1.5 rounded-lg bg-indigo-600 hover:bg-indigo-500 text-white text-xs font-semibold flex items-center gap-1.5 transition-colors disabled:opacity-50"
             >
               <Download className="w-3.5 h-3.5" />
@@ -91,8 +104,8 @@ export const ReportPreviewModal: React.FC = () => {
               <Loader2 className="w-6 h-6 animate-spin text-indigo-500" />
               <span className="text-xs">Generating verified report preview...</span>
             </div>
-          ) : data.length === 0 ? (
-            <div className="py-12 text-center text-xs text-slate-500">No records found for this period.</div>
+          ) : filteredData.length === 0 ? (
+            <div className="py-12 text-center text-xs text-slate-500">No records found for period: {period || 'selected period'}.</div>
           ) : (
             <div className="overflow-x-auto rounded-xl border border-slate-800">
               <table className="w-full min-w-[550px] text-xs text-left">
@@ -104,7 +117,7 @@ export const ReportPreviewModal: React.FC = () => {
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-slate-800/80 bg-slate-900/60 font-mono">
-                  {data.map((row, idx) => (
+                  {filteredData.map((row, idx) => (
                     <tr key={idx} className="hover:bg-slate-800/60 transition-colors">
                       {columns.map((col) => (
                         <td key={col} className="px-3.5 py-2.5 text-slate-300">
@@ -122,7 +135,7 @@ export const ReportPreviewModal: React.FC = () => {
 
           <div className="mt-4 flex items-center justify-between text-xs text-slate-500">
             <span>Showing verified records from authoritative ledger and order books</span>
-            <span className="font-semibold text-slate-400">Total matched: {report.recordCount.toLocaleString()}</span>
+            <span className="font-semibold text-slate-400">Total matched: {filteredData.length}</span>
           </div>
         </div>
       </div>

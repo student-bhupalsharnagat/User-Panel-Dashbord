@@ -19,6 +19,7 @@ import {
 import { useApp } from '../../context/AppContext';
 import { api } from '../../services/api';
 import { Order } from '../../types';
+import { matchesDateFilter } from '../../utils/dateUtils';
 
 export const OrdersView: React.FC = () => {
   const {
@@ -27,6 +28,7 @@ export const OrdersView: React.FC = () => {
     showToast,
     triggerRefresh,
     isLiveMode,
+    isCompactMode,
   } = useApp();
 
   const [orders, setOrders] = useState<Order[]>([]);
@@ -38,12 +40,16 @@ export const OrdersView: React.FC = () => {
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
+    setPage(1);
+  }, [searchQuery, activeStatusTab, timeRange]);
+
+  useEffect(() => {
     setLoading(true);
-    api.getOrders({ status: activeStatusTab, q: searchQuery })
+    api.getOrders({ status: activeStatusTab, q: searchQuery, timeRange })
       .then((data) => setOrders(data))
       .catch((err) => console.error('Failed to load orders:', err))
       .finally(() => setLoading(false));
-  }, [activeStatusTab, searchQuery, refreshTrigger]);
+  }, [activeStatusTab, searchQuery, timeRange, refreshTrigger]);
 
   const handleCancelOrder = async (id: string) => {
     try {
@@ -55,7 +61,11 @@ export const OrdersView: React.FC = () => {
     }
   };
 
-  const paginatedOrders = orders.slice((page - 1) * pageSize, page * pageSize);
+  const filteredOrders = orders.filter((o) => matchesDateFilter(o.created, timeRange));
+  const paginatedOrders = filteredOrders.slice((page - 1) * pageSize, page * pageSize);
+
+  const cellPad = isCompactMode ? 'px-2.5 py-1.5' : 'px-3.5 py-3';
+  const headPad = isCompactMode ? 'px-2.5 py-2' : 'px-3.5 py-3';
 
   const handleExportCSV = () => {
     if (orders.length === 0) return;
@@ -194,37 +204,37 @@ export const OrdersView: React.FC = () => {
           <table className="w-full min-w-[850px] text-xs text-left">
             <thead className="bg-[#141d30] text-slate-400 uppercase font-bold text-[10px] tracking-wider border-b border-slate-800">
               <tr>
-                <th className="px-3.5 py-3">Order ID</th>
-                <th className="px-3.5 py-3">Client</th>
-                <th className="px-3.5 py-3">Instrument</th>
-                <th className="px-3.5 py-3 text-center">Side</th>
-                <th className="px-3.5 py-3 text-center">Type</th>
-                <th className="px-3.5 py-3 text-right">Quantity</th>
-                <th className="px-3.5 py-3 text-right">Order Price</th>
-                <th className="px-3.5 py-3 text-right">Executed</th>
-                <th className="px-3.5 py-3 text-right">Avg. Price</th>
-                <th className="px-3.5 py-3 text-center">Status</th>
-                <th className="px-3.5 py-3 text-right">Created</th>
-                <th className="px-3.5 py-3 text-center">Action</th>
+                <th className={headPad}>Order ID</th>
+                <th className={headPad}>Client</th>
+                <th className={headPad}>Instrument</th>
+                <th className={`${headPad} text-center`}>Side</th>
+                <th className={`${headPad} text-center`}>Type</th>
+                <th className={`${headPad} text-right`}>Quantity</th>
+                <th className={`${headPad} text-right`}>Order Price</th>
+                <th className={`${headPad} text-right`}>Executed</th>
+                <th className={`${headPad} text-right`}>Avg. Price</th>
+                <th className={`${headPad} text-center`}>Status</th>
+                <th className={`${headPad} text-right`}>Created</th>
+                <th className={`${headPad} text-center`}>Action</th>
               </tr>
             </thead>
             <tbody className="divide-y divide-slate-800/80 bg-slate-900/60 font-mono">
               {paginatedOrders.map((order) => (
                 <tr key={order.id} className="hover:bg-slate-800/60 transition-colors">
-                  <td className="px-3.5 py-3 font-bold text-white text-xs">
+                  <td className={`${cellPad} font-bold text-white text-xs`}>
                     {order.id}
                   </td>
 
-                  <td className="px-3.5 py-3 font-sans text-xs">
+                  <td className={`${cellPad} font-sans text-xs`}>
                     <div className="font-semibold text-slate-200">{order.clientName}</div>
                     <div className="text-[10px] text-slate-400">{order.clientId}</div>
                   </td>
 
-                  <td className="px-3.5 py-3 font-bold text-white text-xs">
+                  <td className={`${cellPad} font-bold text-white text-xs`}>
                     {order.instrument}
                   </td>
 
-                  <td className="px-3.5 py-3 text-center">
+                  <td className={`${cellPad} text-center`}>
                     <span className={`px-2 py-0.5 rounded text-[10px] font-bold ${
                       order.side === 'BUY'
                         ? 'bg-emerald-500/20 text-emerald-400 border border-emerald-500/30'
@@ -234,29 +244,29 @@ export const OrdersView: React.FC = () => {
                     </span>
                   </td>
 
-                  <td className="px-3.5 py-3 text-center text-slate-400 text-xs font-sans">
+                  <td className={`${cellPad} text-center text-slate-400 text-xs font-sans`}>
                     {order.type}
                   </td>
 
-                  <td className="px-3.5 py-3 text-right text-slate-200 font-bold">
+                  <td className={`${cellPad} text-right text-slate-200 font-bold`}>
                     {order.quantity}
                   </td>
 
-                  <td className="px-3.5 py-3 text-right text-slate-200">
+                  <td className={`${cellPad} text-right text-slate-200`}>
                     {typeof order.orderPrice === 'number'
                       ? `₹${order.orderPrice.toFixed(2)}`
                       : order.orderPrice}
                   </td>
 
-                  <td className="px-3.5 py-3 text-right text-slate-300">
+                  <td className={`${cellPad} text-right text-slate-300`}>
                     {order.executedQty}
                   </td>
 
-                  <td className="px-3.5 py-3 text-right text-slate-300">
+                  <td className={`${cellPad} text-right text-slate-300`}>
                     {order.avgPrice > 0 ? `₹${order.avgPrice.toFixed(2)}` : '—'}
                   </td>
 
-                  <td className="px-3.5 py-3 text-center font-sans">
+                  <td className={`${cellPad} text-center font-sans`}>
                     <span className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-semibold ${
                       order.status === 'Executed'
                         ? 'bg-emerald-500/15 text-emerald-400'
@@ -279,11 +289,11 @@ export const OrdersView: React.FC = () => {
                     </span>
                   </td>
 
-                  <td className="px-3.5 py-3 text-right text-slate-400 text-xs">
+                  <td className={`${cellPad} text-right text-slate-400 text-xs`}>
                     {order.created}
                   </td>
 
-                  <td className="px-3.5 py-3 text-center font-sans">
+                  <td className={`${cellPad} text-center font-sans`}>
                     {order.status === 'Open' || order.status === 'Pending' ? (
                       <button
                         onClick={() => handleCancelOrder(order.id)}
@@ -304,7 +314,7 @@ export const OrdersView: React.FC = () => {
         {/* Footer & Pagination */}
         <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 text-xs text-slate-400 pt-2">
           <div className="text-[11px]">
-            Showing {paginatedOrders.length} of {orders.length} orders
+            Showing {paginatedOrders.length} of {filteredOrders.length} orders
           </div>
 
           <div className="flex items-center gap-3">
@@ -333,7 +343,7 @@ export const OrdersView: React.FC = () => {
                 {page}
               </span>
               <button
-                disabled={page * pageSize >= orders.length}
+                disabled={page * pageSize >= filteredOrders.length}
                 onClick={() => setPage(p => p + 1)}
                 className="w-7 h-7 rounded border border-slate-800 bg-[#131b2e] flex items-center justify-center text-slate-400 disabled:opacity-40"
               >

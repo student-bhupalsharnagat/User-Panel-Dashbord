@@ -22,7 +22,7 @@ import { api } from '../../services/api';
 import { SettingsState } from '../../types';
 
 export const SettingsView: React.FC = () => {
-  const { showToast, currentUser, tenantBranding, isLiveMode } = useApp();
+  const { showToast, currentUser, tenantBranding, isLiveMode, isCompactMode, setIsCompactMode } = useApp();
 
   const [activeSection, setActiveSection] = useState<
     'profile' | 'security' | 'notifications' | 'tables' | 'support' | 'broker_config'
@@ -37,23 +37,34 @@ export const SettingsView: React.FC = () => {
     timezone: 'IST (UTC +05:30)',
     currency: 'INR - Indian Rupee',
     activityAlerts: true,
-    compactTableDensity: false,
+    compactTableDensity: isCompactMode,
     twoFactorAuth: true,
     emailNotifications: true,
     marginCallAlerts: true,
   });
 
+  const [initialSettings, setInitialSettings] = useState<SettingsState>(settings);
   const [isSaving, setIsSaving] = useState(false);
 
   useEffect(() => {
-    api.getSettings().then((s) => setSettings(s)).catch(() => {});
-  }, []);
+    api.getSettings().then((s) => {
+      setSettings(s);
+      setInitialSettings(s);
+      if (s.compactTableDensity !== undefined) {
+        setIsCompactMode(Boolean(s.compactTableDensity));
+      }
+    }).catch(() => {});
+  }, [setIsCompactMode]);
 
   const handleSave = async (e: React.FormEvent) => {
     e.preventDefault();
     setIsSaving(true);
     try {
       await api.updateSettings(settings);
+      setInitialSettings(settings);
+      if (settings.compactTableDensity !== undefined) {
+        setIsCompactMode(Boolean(settings.compactTableDensity));
+      }
       showToast('Settings saved successfully', 'success');
     } catch {
       showToast('Failed to save settings', 'error');
@@ -252,7 +263,11 @@ export const SettingsView: React.FC = () => {
                   <input
                     type="checkbox"
                     checked={settings.compactTableDensity}
-                    onChange={(e) => setSettings({ ...settings, compactTableDensity: e.target.checked })}
+                    onChange={(e) => {
+                      const checked = e.target.checked;
+                      setSettings({ ...settings, compactTableDensity: checked });
+                      setIsCompactMode(checked);
+                    }}
                     className="w-4 h-4 rounded text-indigo-600 focus:ring-indigo-500 border-slate-700 bg-slate-800 cursor-pointer"
                   />
                 </div>
@@ -262,7 +277,64 @@ export const SettingsView: React.FC = () => {
               <div className="flex justify-end gap-3 pt-4 border-t border-slate-800">
                 <button
                   type="button"
-                  onClick={() => showToast('Changes discarded', 'info')}
+                  onClick={() => {
+                    setSettings(initialSettings);
+                    if (initialSettings.compactTableDensity !== undefined) {
+                      setIsCompactMode(Boolean(initialSettings.compactTableDensity));
+                    }
+                    showToast('Changes discarded', 'info');
+                  }}
+                  className="px-4 py-2 rounded-lg bg-slate-800 hover:bg-slate-700 text-xs font-semibold text-slate-300 transition-colors"
+                >
+                  Cancel
+                </button>
+                <button
+                  type="submit"
+                  disabled={isSaving}
+                  className="px-5 py-2 rounded-lg bg-indigo-600 hover:bg-indigo-500 text-xs font-bold text-white transition-colors shadow-md shadow-indigo-900/30 disabled:opacity-50"
+                >
+                  {isSaving ? 'Saving...' : 'Save changes'}
+                </button>
+              </div>
+            </form>
+          )}
+
+          {activeSection === 'tables' && (
+            <form onSubmit={handleSave} className="space-y-6">
+              <div>
+                <h3 className="text-sm font-bold text-white">Table Preferences</h3>
+                <p className="text-xs text-slate-400 mt-0.5">Control row density across high-frequency tabular views.</p>
+              </div>
+
+              <div className="space-y-3">
+                <div className="flex items-center justify-between p-3.5 rounded-xl bg-slate-900/60 border border-slate-800">
+                  <div>
+                    <div className="text-xs font-semibold text-white">Compact table density</div>
+                    <div className="text-[11px] text-slate-400">Reduce cell padding and font height to show maximum data rows without vertical scroll</div>
+                  </div>
+                  <input
+                    type="checkbox"
+                    checked={settings.compactTableDensity}
+                    onChange={(e) => {
+                      const checked = e.target.checked;
+                      setSettings({ ...settings, compactTableDensity: checked });
+                      setIsCompactMode(checked);
+                    }}
+                    className="w-4 h-4 rounded text-indigo-600 focus:ring-indigo-500 border-slate-700 bg-slate-800 cursor-pointer"
+                  />
+                </div>
+              </div>
+
+              <div className="flex justify-end gap-3 pt-4 border-t border-slate-800">
+                <button
+                  type="button"
+                  onClick={() => {
+                    setSettings(initialSettings);
+                    if (initialSettings.compactTableDensity !== undefined) {
+                      setIsCompactMode(Boolean(initialSettings.compactTableDensity));
+                    }
+                    showToast('Changes discarded', 'info');
+                  }}
                   className="px-4 py-2 rounded-lg bg-slate-800 hover:bg-slate-700 text-xs font-semibold text-slate-300 transition-colors"
                 >
                   Cancel
@@ -331,7 +403,7 @@ export const SettingsView: React.FC = () => {
             </div>
           )}
 
-          {(activeSection === 'notifications' || activeSection === 'tables' || activeSection === 'support') && (
+          {(activeSection === 'notifications' || activeSection === 'support') && (
             <div className="py-8 text-center text-xs text-slate-400">
               <CheckCircle2 className="w-8 h-8 text-emerald-400 mx-auto mb-2" />
               <p className="font-semibold text-white">Configured and Active</p>

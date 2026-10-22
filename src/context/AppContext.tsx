@@ -37,7 +37,7 @@ interface AppContextType {
   login: (identifier: string, password: string) => Promise<any>;
   register: (formData: any) => Promise<any>;
   logout: () => Promise<void>;
-  switchRole: (role: string) => Promise<void>;
+  switchRole: (role?: string) => Promise<void>;
   tenantBranding: TenantBranding | null;
   updateBranding: (branding: Partial<TenantBranding>) => Promise<void>;
   
@@ -104,8 +104,9 @@ interface AppContextType {
   reportPreviewModal: {
     isOpen: boolean;
     report: ReportItem | null;
+    period?: string;
   };
-  openReportPreview: (report: ReportItem) => void;
+  openReportPreview: (report: ReportItem, period?: string) => void;
   closeReportPreview: () => void;
 
   isSupportModalOpen: boolean;
@@ -137,7 +138,19 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
   const isAuthenticated = Boolean(currentUser && getAuthToken());
   
   const [isLiveMode, setIsLiveMode] = useState<boolean>(true);
-  const [isCompactMode, setIsCompactMode] = useState<boolean>(false);
+  const [isCompactMode, setIsCompactModeState] = useState<boolean>(() => {
+    if (typeof window !== 'undefined' && window.localStorage) {
+      return localStorage.getItem('nextrade_compact_mode') === 'true';
+    }
+    return false;
+  });
+
+  const setIsCompactMode = useCallback((compact: boolean) => {
+    setIsCompactModeState(compact);
+    if (typeof window !== 'undefined' && window.localStorage) {
+      localStorage.setItem('nextrade_compact_mode', String(compact));
+    }
+  }, []);
   
   const [refreshTrigger, setRefreshTrigger] = useState<number>(0);
   const [isRealtimeConnected, setIsRealtimeConnected] = useState<boolean>(false);
@@ -182,6 +195,7 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
   const [reportPreviewModal, setReportPreviewModal] = useState<{
     isOpen: boolean;
     report: ReportItem | null;
+    period?: string;
   }>({ isOpen: false, report: null });
 
   const [isSupportModalOpen, setIsSupportModalOpen] = useState<boolean>(false);
@@ -232,6 +246,9 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
           }
         }
         if (data.tenant) setTenantBranding(data.tenant);
+        if (data.settings && data.settings.compactTableDensity !== undefined) {
+          setIsCompactMode(Boolean(data.settings.compactTableDensity));
+        }
         if (Array.isArray(data.instruments) && data.instruments.length > 0) {
           const ticksMap: Record<string, Partial<MarketInstrument>> = {};
           for (const inst of data.instruments) {
@@ -318,15 +335,18 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
   };
 
   // Switch role handler
-  const switchRole = async (role: string) => {
+  const switchRole = async (role?: string) => {
     try {
-      const res = await api.switchRole(role);
-      setCurrentUser(res.user);
-      if (typeof window !== 'undefined' && window.localStorage) {
-        localStorage.setItem('nextrade_auth_user', JSON.stringify(res.user));
+      const targetRole = role || (currentUser?.role === 'broker_admin' ? 'super_admin' : 'broker_admin');
+      const res = await api.switchRole(targetRole);
+      if (res && res.user) {
+        setCurrentUser(res.user);
+        if (typeof window !== 'undefined' && window.localStorage) {
+          localStorage.setItem('nextrade_auth_user', JSON.stringify(res.user));
+        }
+        triggerRefresh();
+        showToast(`Switched active workspace role to ${res.user.roleTitle || 'Administrator'}`, 'info');
       }
-      triggerRefresh();
-      showToast(`Switched active workspace role to ${res.user.roleTitle}`, 'info');
     } catch (err: any) {
       showToast(err.message || 'Failed to switch role', 'error');
     }
@@ -572,8 +592,8 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
     setSquareOffModal({ isOpen: false, position: null });
   };
 
-  const openReportPreview = (report: ReportItem) => {
-    setReportPreviewModal({ isOpen: true, report });
+  const openReportPreview = (report: ReportItem, period?: string) => {
+    setReportPreviewModal({ isOpen: true, report, period });
   };
 
   const closeReportPreview = () => {

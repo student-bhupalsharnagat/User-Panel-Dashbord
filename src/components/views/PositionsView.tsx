@@ -25,6 +25,7 @@ export const PositionsView: React.FC = () => {
     refreshTrigger,
     showToast,
     isLiveMode,
+    isCompactMode,
     latestTicks,
   } = useApp();
 
@@ -35,6 +36,10 @@ export const PositionsView: React.FC = () => {
   const [pageSize, setPageSize] = useState(10);
   const [page, setPage] = useState(1);
   const [loading, setLoading] = useState(true);
+
+  useEffect(() => {
+    setPage(1);
+  }, [searchQuery, productFilter]);
 
   useEffect(() => {
     setLoading(true);
@@ -76,6 +81,9 @@ export const PositionsView: React.FC = () => {
   });
 
   const paginatedPositions = filteredPositions.slice((page - 1) * pageSize, page * pageSize);
+
+  const cellPad = isCompactMode ? 'px-2.5 py-1.5' : 'px-3.5 py-3';
+  const headPad = isCompactMode ? 'px-2.5 py-2' : 'px-3.5 py-3';
 
   const handleExportCSV = () => {
     if (positions.length === 0) return;
@@ -231,20 +239,20 @@ export const PositionsView: React.FC = () => {
           <table className="w-full min-w-[850px] text-xs text-left">
             <thead className="bg-[#141d30] text-slate-400 uppercase font-bold text-[10px] tracking-wider border-b border-slate-800">
               <tr>
-                <th className="px-3.5 py-3">Client</th>
-                <th className="px-3.5 py-3">Instrument</th>
-                <th className="px-3.5 py-3">Exchange</th>
-                <th className="px-3.5 py-3 text-center">Product</th>
-                <th className="px-3.5 py-3 text-right">Buy Qty</th>
-                <th className="px-3.5 py-3 text-right">Sell Qty</th>
-                <th className="px-3.5 py-3 text-right">Net Qty</th>
-                <th className="px-3.5 py-3 text-right">Avg. Price</th>
-                <th className="px-3.5 py-3 text-right">Current Price</th>
-                <th className="px-3.5 py-3 text-right">Realised P&L</th>
-                <th className="px-3.5 py-3 text-right">Unrealised P&L</th>
-                <th className="px-3.5 py-3 text-right">Total P&L</th>
-                <th className="px-3.5 py-3 text-right">Margin Used</th>
-                <th className="px-3.5 py-3 text-center">Action</th>
+                <th className={headPad}>Client</th>
+                <th className={headPad}>Instrument</th>
+                <th className={headPad}>Exchange</th>
+                <th className={`${headPad} text-center`}>Product</th>
+                <th className={`${headPad} text-right`}>Buy Qty</th>
+                <th className={`${headPad} text-right`}>Sell Qty</th>
+                <th className={`${headPad} text-right`}>Net Qty</th>
+                <th className={`${headPad} text-right`}>Avg. Price</th>
+                <th className={`${headPad} text-right`}>Current Price</th>
+                <th className={`${headPad} text-right`}>Realised P&L</th>
+                <th className={`${headPad} text-right`}>Unrealised P&L</th>
+                <th className={`${headPad} text-right`}>Total P&L</th>
+                <th className={`${headPad} text-right`}>Margin Used</th>
+                <th className={`${headPad} text-center`}>Action</th>
               </tr>
             </thead>
             <tbody className="divide-y divide-slate-800/80 bg-slate-900/60 font-mono">
@@ -252,62 +260,62 @@ export const PositionsView: React.FC = () => {
                 const isPositiveTotal = pos.totalPnL >= 0;
                 return (
                   <tr key={pos.id} className="hover:bg-slate-800/60 transition-colors">
-                    <td className="px-3.5 py-3 font-sans text-xs">
+                    <td className={`${cellPad} font-sans text-xs`}>
                       <div className="font-semibold text-slate-200">{pos.clientName}</div>
                       <div className="text-[10px] text-slate-400">{pos.clientId}</div>
                     </td>
 
-                    <td className="px-3.5 py-3 font-bold text-white text-xs">
+                    <td className={`${cellPad} font-bold text-white text-xs`}>
                       {pos.instrument}
                     </td>
 
-                    <td className="px-3.5 py-3 text-slate-400 font-sans text-xs">
+                    <td className={`${cellPad} text-slate-400 font-sans text-xs`}>
                       {pos.exchange}
                     </td>
 
-                    <td className="px-3.5 py-3 text-center font-sans">
+                    <td className={`${cellPad} text-center font-sans`}>
                       <span className="px-1.5 py-0.5 rounded bg-slate-800 text-[10px] font-bold text-slate-300">
                         {pos.product}
                       </span>
                     </td>
 
-                    <td className="px-3.5 py-3 text-right text-slate-300">
+                    <td className={`${cellPad} text-right text-slate-300`}>
                       {pos.buyQty}
                     </td>
 
-                    <td className="px-3.5 py-3 text-right text-slate-300">
+                    <td className={`${cellPad} text-right text-slate-300`}>
                       {pos.sellQty}
                     </td>
 
-                    <td className={`px-3.5 py-3 text-right font-bold ${pos.netQty >= 0 ? 'text-emerald-400' : 'text-rose-400'}`}>
+                    <td className={`${cellPad} text-right font-bold ${pos.netQty >= 0 ? 'text-emerald-400' : 'text-rose-400'}`}>
                       {pos.netQty >= 0 ? '+' : ''}{pos.netQty}
                     </td>
 
-                    <td className="px-3.5 py-3 text-right text-slate-200">
+                    <td className={`${cellPad} text-right text-slate-200`}>
                       ₹{pos.avgPrice.toFixed(2)}
                     </td>
 
-                    <td className="px-3.5 py-3 text-right font-bold text-white">
+                    <td className={`${cellPad} text-right font-bold text-white`}>
                       ₹{pos.currentPrice.toFixed(2)}
                     </td>
 
-                    <td className={`px-3.5 py-3 text-right ${pos.realisedPnL >= 0 ? 'text-slate-300' : 'text-rose-400'}`}>
+                    <td className={`${cellPad} text-right ${pos.realisedPnL >= 0 ? 'text-slate-300' : 'text-rose-400'}`}>
                       {pos.realisedPnL !== 0 ? `₹${pos.realisedPnL.toLocaleString('en-IN')}` : '₹0'}
                     </td>
 
-                    <td className={`px-3.5 py-3 text-right font-medium ${pos.unrealisedPnL >= 0 ? 'text-emerald-400' : 'text-rose-400'}`}>
+                    <td className={`${cellPad} text-right font-medium ${pos.unrealisedPnL >= 0 ? 'text-emerald-400' : 'text-rose-400'}`}>
                       {pos.unrealisedPnL >= 0 ? '+' : ''}₹{pos.unrealisedPnL.toLocaleString('en-IN')}
                     </td>
 
-                    <td className={`px-3.5 py-3 text-right font-bold ${isPositiveTotal ? 'text-emerald-400' : 'text-rose-400'}`}>
+                    <td className={`${cellPad} text-right font-bold ${isPositiveTotal ? 'text-emerald-400' : 'text-rose-400'}`}>
                       {isPositiveTotal ? '+' : ''}₹{pos.totalPnL.toLocaleString('en-IN')}
                     </td>
 
-                    <td className="px-3.5 py-3 text-right text-slate-300">
+                    <td className={`${cellPad} text-right text-slate-300`}>
                       ₹{pos.marginUsed.toLocaleString('en-IN')}
                     </td>
 
-                    <td className="px-3.5 py-3 text-center font-sans">
+                    <td className={`${cellPad} text-center font-sans`}>
                       <button
                         onClick={() => openSquareOffModal(pos)}
                         className="px-2.5 py-1 bg-rose-600/20 hover:bg-rose-600 border border-rose-500/40 text-rose-300 hover:text-white rounded text-[11px] font-bold transition-all"

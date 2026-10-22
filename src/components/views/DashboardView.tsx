@@ -46,6 +46,86 @@ export const DashboardView: React.FC = () => {
   const [operationsQueue, setOperationsQueue] = useState<OperationsQueueItem[]>([]);
   const [hoveredTrendIndex, setHoveredTrendIndex] = useState<number | null>(null);
 
+  const trendPoints = React.useMemo(() => {
+    const baseCr = metrics?.clientTurnoverCr || 248.6;
+    if (timeRange === 'Today') {
+      const times = ['09:15', '10:30', '11:45', '13:00', '14:15', '15:30'];
+      const factors = [0.15, 0.35, 0.55, 0.72, 0.88, 1.0];
+      return times.map((t, idx) => {
+        const valCr = +(baseCr * factors[idx]).toFixed(1);
+        const y = 180 - Math.min(140, Math.round(factors[idx] * 130));
+        const x = 30 + idx * (640 / (times.length - 1));
+        return { label: t, val: `₹${valCr} Cr`, cx: x, cy: y };
+      });
+    } else if (timeRange === '7 Days') {
+      const days = ['Day -6', 'Day -5', 'Day -4', 'Day -3', 'Day -2', 'Yesterday', 'Today'];
+      const multipliers = [0.72, 0.85, 0.79, 1.1, 0.92, 1.24, 1.0];
+      return days.map((d, idx) => {
+        const valCr = +(baseCr * multipliers[idx]).toFixed(1);
+        const y = 180 - Math.min(140, Math.round((multipliers[idx] / 1.3) * 120));
+        const x = 30 + idx * (640 / (days.length - 1));
+        return { label: d, val: `₹${valCr} Cr`, cx: x, cy: y };
+      });
+    } else if (timeRange === '30 Days') {
+      const intervals = ['Wk 1', 'Wk 2', 'Wk 3', 'Wk 4', 'MTD'];
+      const multipliers = [3.8, 4.2, 3.9, 4.6, 5.1];
+      return intervals.map((intv, idx) => {
+        const valCr = +(multipliers[idx]).toFixed(1);
+        const y = 180 - Math.min(140, Math.round(((idx + 1) / 5) * 120));
+        const x = 30 + idx * (640 / (intervals.length - 1));
+        return { label: intv, val: `₹${valCr} Cr`, cx: x, cy: y };
+      });
+    } else {
+      const weeks = ['1-7th', '8-14th', '15-21st', '22-28th', 'Current'];
+      const multipliers = [0.65, 0.85, 1.05, 0.95, 1.15];
+      return weeks.map((w, idx) => {
+        const valCr = +(baseCr * multipliers[idx]).toFixed(1);
+        const y = 180 - Math.min(140, Math.round((multipliers[idx] / 1.3) * 120));
+        const x = 30 + idx * (640 / (weeks.length - 1));
+        return { label: w, val: `₹${valCr} Cr`, cx: x, cy: y };
+      });
+    }
+  }, [timeRange, metrics?.clientTurnoverCr]);
+
+  const svgPathD = React.useMemo(() => {
+    if (trendPoints.length === 0) return '';
+    return trendPoints.reduce((acc, pt, i) => (i === 0 ? `M ${pt.cx} ${pt.cy}` : `${acc} L ${pt.cx} ${pt.cy}`), '');
+  }, [trendPoints]);
+
+  const svgAreaD = React.useMemo(() => {
+    if (trendPoints.length === 0) return '';
+    const first = trendPoints[0];
+    const last = trendPoints[trendPoints.length - 1];
+    return `${svgPathD} L ${last.cx} 195 L ${first.cx} 195 Z`;
+  }, [svgPathD, trendPoints]);
+
+  const activityBars = React.useMemo(() => {
+    const baseDep = +(metrics?.marginUsedCr ? metrics.marginUsedCr * 0.6 : 4.8).toFixed(1);
+    const baseWdr = +(metrics?.marginUsedCr ? metrics.marginUsedCr * 0.28 : 2.1).toFixed(1);
+    if (timeRange === 'Today') {
+      return [
+        { day: '09-11', dep: 60, wdr: 25, depVal: `₹${(baseDep * 0.3).toFixed(1)} Cr`, wdrVal: `₹${(baseWdr * 0.2).toFixed(1)} Cr` },
+        { day: '11-13', dep: 90, wdr: 45, depVal: `₹${(baseDep * 0.5).toFixed(1)} Cr`, wdrVal: `₹${(baseWdr * 0.5).toFixed(1)} Cr` },
+        { day: '13-15', dep: 45, wdr: 30, depVal: `₹${(baseDep * 0.2).toFixed(1)} Cr`, wdrVal: `₹${(baseWdr * 0.3).toFixed(1)} Cr` },
+      ];
+    } else if (timeRange === '7 Days') {
+      return [
+        { day: 'Mon', dep: 68, wdr: 36, depVal: '₹3.4 Cr', wdrVal: '₹1.8 Cr' },
+        { day: 'Tue', dep: 82, wdr: 42, depVal: '₹4.1 Cr', wdrVal: '₹2.1 Cr' },
+        { day: 'Wed', dep: 58, wdr: 30, depVal: '₹2.9 Cr', wdrVal: '₹1.5 Cr' },
+        { day: 'Thu', dep: 104, wdr: 48, depVal: '₹5.2 Cr', wdrVal: '₹2.4 Cr' },
+        { day: 'Fri', dep: 96, wdr: 43, depVal: `₹${baseDep} Cr`, wdrVal: `₹${baseWdr} Cr` },
+      ];
+    } else {
+      return [
+        { day: 'Wk 1', dep: 70, wdr: 35, depVal: `₹${(baseDep * 1.8).toFixed(1)} Cr`, wdrVal: `₹${(baseWdr * 1.5).toFixed(1)} Cr` },
+        { day: 'Wk 2', dep: 85, wdr: 40, depVal: `₹${(baseDep * 2.2).toFixed(1)} Cr`, wdrVal: `₹${(baseWdr * 1.8).toFixed(1)} Cr` },
+        { day: 'Wk 3', dep: 65, wdr: 30, depVal: `₹${(baseDep * 1.9).toFixed(1)} Cr`, wdrVal: `₹${(baseWdr * 1.4).toFixed(1)} Cr` },
+        { day: 'Wk 4', dep: 95, wdr: 45, depVal: `₹${(baseDep * 2.5).toFixed(1)} Cr`, wdrVal: `₹${(baseWdr * 2.0).toFixed(1)} Cr` },
+      ];
+    }
+  }, [timeRange, metrics?.marginUsedCr]);
+
   useEffect(() => {
     api.getDashboardSummary()
       .then((res) => {
@@ -253,7 +333,7 @@ export const DashboardView: React.FC = () => {
             </div>
             <div className="flex items-center gap-1.5 text-xs text-indigo-400 font-mono">
               <span className="w-2 h-2 rounded-full bg-indigo-500" />
-              <span>₹248.6 Cr today</span>
+              <span>₹{metrics?.clientTurnoverCr || 248.6} Cr ({timeRange})</span>
             </div>
           </div>
 
@@ -283,13 +363,13 @@ export const DashboardView: React.FC = () => {
 
               {/* Area path */}
               <path
-                d="M 20 160 Q 120 140 220 170 T 420 120 T 580 90 T 680 110 L 680 195 L 20 195 Z"
+                d={svgAreaD}
                 fill="url(#turnoverGrad)"
               />
 
               {/* Stroke line */}
               <path
-                d="M 20 160 Q 120 140 220 170 T 420 120 T 580 90 T 680 110"
+                d={svgPathD}
                 fill="none"
                 stroke="#8b5cf6"
                 strokeWidth="2.5"
@@ -297,15 +377,7 @@ export const DashboardView: React.FC = () => {
               />
 
               {/* Data points */}
-              {[
-                { cx: 20, cy: 160, day: '16 Apr', val: '₹182.4 Cr' },
-                { cx: 130, cy: 142, day: '17 Apr', val: '₹215.1 Cr' },
-                { cx: 240, cy: 168, day: '18 Apr', val: '₹198.8 Cr' },
-                { cx: 350, cy: 132, day: '19 Apr', val: '₹278.4 Cr' },
-                { cx: 460, cy: 118, day: '20 Apr', val: '₹232.0 Cr' },
-                { cx: 570, cy: 92, day: '21 Apr', val: '₹310.6 Cr' },
-                { cx: 680, cy: 110, day: '22 Apr', val: '₹248.6 Cr' },
-              ].map((pt, i) => (
+              {trendPoints.map((pt, i) => (
                 <g key={i}>
                   <circle
                     cx={pt.cx}
@@ -349,13 +421,9 @@ export const DashboardView: React.FC = () => {
 
             {/* Bottom X-Axis labels */}
             <div className="flex justify-between text-[11px] text-slate-500 pt-2 font-mono">
-              <span>16 Apr</span>
-              <span>17 Apr</span>
-              <span>18 Apr</span>
-              <span>19 Apr</span>
-              <span>20 Apr</span>
-              <span>21 Apr</span>
-              <span>Today (22 Apr)</span>
+              {trendPoints.map((pt, i) => (
+                <span key={i}>{pt.label}</span>
+              ))}
             </div>
           </div>
         </div>
@@ -389,13 +457,7 @@ export const DashboardView: React.FC = () => {
 
             {/* Dual Bar Columns */}
             <div className="h-44 w-full flex items-end justify-between gap-3 pt-4 px-2">
-              {[
-                { day: 'Mon', dep: 68, wdr: 36, depVal: '₹3.4 Cr', wdrVal: '₹1.8 Cr' },
-                { day: 'Tue', dep: 82, wdr: 42, depVal: '₹4.1 Cr', wdrVal: '₹2.1 Cr' },
-                { day: 'Wed', dep: 58, wdr: 30, depVal: '₹2.9 Cr', wdrVal: '₹1.5 Cr' },
-                { day: 'Thu', dep: 104, wdr: 48, depVal: '₹5.2 Cr', wdrVal: '₹2.4 Cr' },
-                { day: 'Fri', dep: 96, wdr: 43, depVal: '₹4.82 Cr', wdrVal: '₹2.16 Cr' },
-              ].map((bar, i) => (
+              {activityBars.map((bar, i) => (
                 <div key={i} className="flex-1 flex flex-col items-center gap-1.5 h-full justify-end group">
                   <div className="w-full flex items-end justify-center gap-1 h-32">
                     <div
@@ -523,28 +585,54 @@ export const DashboardView: React.FC = () => {
               <span className="text-[11px] text-slate-400">Today across all positions</span>
             </div>
 
-            <div className="text-3xl font-extrabold font-mono text-emerald-400 tracking-tight my-2">
-              {metrics?.totalPnLFormatted || '+₹12,84,320'}
+            <div className={`text-3xl font-extrabold font-mono tracking-tight my-2 ${(metrics?.realisedPnL ?? 0) + (metrics?.unrealisedPnL ?? 0) >= 0 ? 'text-emerald-400' : 'text-rose-400'}`}>
+              {metrics?.totalPnLFormatted || '+₹0'}
             </div>
 
             <div className="space-y-3 mt-4 text-xs font-mono">
               <div>
                 <div className="flex justify-between text-slate-400 mb-1">
                   <span className="font-sans">Realised:</span>
-                  <span className="text-slate-200 font-bold">₹8.72 L</span>
+                  <span className={`font-bold ${(metrics?.realisedPnL ?? 0) >= 0 ? 'text-emerald-400' : 'text-rose-400'}`}>
+                    {metrics?.realisedPnL !== undefined
+                      ? `${metrics.realisedPnL >= 0 ? '+' : '-'}₹${Math.abs(metrics.realisedPnL).toLocaleString('en-IN')}`
+                      : '₹0'}
+                  </span>
                 </div>
                 <div className="w-full h-2 rounded-full bg-slate-800 overflow-hidden">
-                  <div className="h-full bg-emerald-500 rounded-full" style={{ width: '68%' }} />
+                  <div
+                    className="h-full bg-emerald-500 rounded-full"
+                    style={{
+                      width: `${
+                        Math.abs(metrics?.realisedPnL || 0) + Math.abs(metrics?.unrealisedPnL || 0) > 0
+                          ? Math.round((Math.abs(metrics?.realisedPnL || 0) / (Math.abs(metrics?.realisedPnL || 0) + Math.abs(metrics?.unrealisedPnL || 0))) * 100)
+                          : 50
+                      }%`
+                    }}
+                  />
                 </div>
               </div>
 
               <div>
                 <div className="flex justify-between text-slate-400 mb-1">
                   <span className="font-sans">Unrealised:</span>
-                  <span className="text-slate-200 font-bold">₹4.12 L</span>
+                  <span className={`font-bold ${(metrics?.unrealisedPnL ?? 0) >= 0 ? 'text-teal-400' : 'text-rose-400'}`}>
+                    {metrics?.unrealisedPnL !== undefined
+                      ? `${metrics.unrealisedPnL >= 0 ? '+' : '-'}₹${Math.abs(metrics.unrealisedPnL).toLocaleString('en-IN')}`
+                      : '₹0'}
+                  </span>
                 </div>
                 <div className="w-full h-2 rounded-full bg-slate-800 overflow-hidden">
-                  <div className="h-full bg-teal-400 rounded-full" style={{ width: '32%' }} />
+                  <div
+                    className="h-full bg-teal-400 rounded-full"
+                    style={{
+                      width: `${
+                        Math.abs(metrics?.realisedPnL || 0) + Math.abs(metrics?.unrealisedPnL || 0) > 0
+                          ? Math.round((Math.abs(metrics?.unrealisedPnL || 0) / (Math.abs(metrics?.realisedPnL || 0) + Math.abs(metrics?.unrealisedPnL || 0))) * 100)
+                          : 50
+                      }%`
+                    }}
+                  />
                 </div>
               </div>
             </div>

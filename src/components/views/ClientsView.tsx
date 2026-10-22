@@ -32,6 +32,7 @@ export const ClientsView: React.FC = () => {
     refreshTrigger,
     showToast,
     isLiveMode,
+    isCompactMode,
   } = useApp();
 
   const [clients, setClients] = useState<Client[]>([]);
@@ -42,6 +43,10 @@ export const ClientsView: React.FC = () => {
   const [pageSize, setPageSize] = useState(10);
   const [page, setPage] = useState(1);
   const [loading, setLoading] = useState(true);
+
+  useEffect(() => {
+    setPage(1);
+  }, [searchQuery, statusFilter, hideDemo, accountTypeTab]);
 
   useEffect(() => {
     if (clients.length === 0) {
@@ -67,6 +72,9 @@ export const ClientsView: React.FC = () => {
   const activeCount = clients.filter(c => c.status === 'Active').length;
   const inactiveCount = clients.filter(c => c.status !== 'Active').length;
   const paginatedClients = filteredClients.slice((page - 1) * pageSize, page * pageSize);
+
+  const cellPad = isCompactMode ? 'px-2.5 py-1.5' : 'px-3 py-3';
+  const headPad = isCompactMode ? 'px-2.5 py-2' : 'px-3 py-3';
 
   const handleExportCSV = () => {
     if (clients.length === 0) return;
@@ -276,16 +284,16 @@ export const ClientsView: React.FC = () => {
           <table className="w-full min-w-[800px] text-xs text-left">
             <thead className="bg-[#141d30] text-slate-400 uppercase font-bold text-[10px] tracking-wider border-b border-slate-800">
               <tr>
-                <th className="px-3 py-3 text-center">View / Actions</th>
-                <th className="px-3 py-3">Client ID</th>
-                <th className="px-3 py-3">Client Name</th>
-                <th className="px-3 py-3 text-center">Status</th>
-                <th className="px-3 py-3 text-right">Ledger Balance</th>
-                <th className="px-3 py-3 text-right">Open P&L</th>
-                <th className="px-3 py-3 text-right">Peak Ledger</th>
-                <th className="px-3 py-3 text-right">Margin Used</th>
-                <th className="px-3 py-3 text-right">Income</th>
-                <th className="px-3 py-3 text-right">Margin Available</th>
+                <th className={`${headPad} text-center`}>View / Actions</th>
+                <th className={headPad}>Client ID</th>
+                <th className={headPad}>Client Name</th>
+                <th className={`${headPad} text-center`}>Status</th>
+                <th className={`${headPad} text-right`}>Ledger Balance</th>
+                <th className={`${headPad} text-right`}>Open P&L</th>
+                <th className={`${headPad} text-right`}>Peak Ledger</th>
+                <th className={`${headPad} text-right`}>Margin Used</th>
+                <th className={`${headPad} text-right`}>Income</th>
+                <th className={`${headPad} text-right`}>Margin Available</th>
               </tr>
             </thead>
             <tbody className="divide-y divide-slate-800/80 bg-slate-900/60 font-mono">
@@ -316,7 +324,7 @@ export const ClientsView: React.FC = () => {
                     className="hover:bg-slate-800/60 transition-colors group cursor-pointer"
                     onClick={() => openClientDetail(client)}
                   >
-                    <td className="px-3 py-3 text-center" onClick={(e) => e.stopPropagation()}>
+                    <td className={`${cellPad} text-center`} onClick={(e) => e.stopPropagation()}>
                       <button
                         onClick={() => openClientDetail(client)}
                         className="p-1.5 rounded-lg bg-slate-800 hover:bg-indigo-600 text-slate-400 hover:text-white transition-colors"
@@ -326,7 +334,7 @@ export const ClientsView: React.FC = () => {
                       </button>
                     </td>
 
-                    <td className="px-3 py-3 font-sans">
+                    <td className={`${cellPad} font-sans`}>
                       <div className="flex items-center gap-1.5">
                         <span className="font-bold text-white text-xs">{client.id}</span>
                         <span className={`text-[9px] px-1 py-0.2 rounded font-semibold ${
@@ -337,11 +345,11 @@ export const ClientsView: React.FC = () => {
                       </div>
                     </td>
 
-                    <td className="px-3 py-3 font-sans text-xs font-semibold text-slate-200">
+                    <td className={`${cellPad} font-sans text-xs font-semibold text-slate-200`}>
                       {client.name}
                     </td>
 
-                    <td className="px-3 py-3 text-center font-sans">
+                    <td className={`${cellPad} text-center font-sans`}>
                       <span className={`px-2 py-0.5 rounded text-[10px] font-bold ${
                         client.status === 'Active'
                           ? 'bg-emerald-500/15 text-emerald-400 border border-emerald-500/30'
@@ -351,27 +359,27 @@ export const ClientsView: React.FC = () => {
                       </span>
                     </td>
 
-                    <td className="px-3 py-3 text-right font-bold text-white text-xs">
+                    <td className={`${cellPad} text-right font-bold text-white text-xs`}>
                       ₹{client.ledgerBalance.toLocaleString('en-IN')}
                     </td>
 
-                    <td className={`px-3 py-3 text-right font-medium ${isPositivePnL ? 'text-emerald-400' : 'text-rose-400'}`}>
+                    <td className={`${cellPad} text-right font-medium ${isPositivePnL ? 'text-emerald-400' : 'text-rose-400'}`}>
                       {isPositivePnL ? '+' : ''}₹{client.openPnL.toLocaleString('en-IN')}
                     </td>
 
-                    <td className="px-3 py-3 text-right text-slate-400">
+                    <td className={`${cellPad} text-right text-slate-400`}>
                       ₹{client.peakLedger.toLocaleString('en-IN')}
                     </td>
 
-                    <td className="px-3 py-3 text-right text-slate-300">
+                    <td className={`${cellPad} text-right text-slate-300`}>
                       ₹{client.marginUsed.toLocaleString('en-IN')}
                     </td>
 
-                    <td className="px-3 py-3 text-right text-slate-400">
+                    <td className={`${cellPad} text-right text-slate-400`}>
                       ₹{client.income.toLocaleString('en-IN')}
                     </td>
 
-                    <td className="px-3 py-3 text-right font-bold text-emerald-400">
+                    <td className={`${cellPad} text-right font-bold text-emerald-400`}>
                       ₹{client.marginAvailable.toLocaleString('en-IN')}
                     </td>
                   </tr>

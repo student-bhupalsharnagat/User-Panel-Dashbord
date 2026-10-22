@@ -20,6 +20,7 @@ import {
 import { useApp } from '../../context/AppContext';
 import { api } from '../../services/api';
 import { FundTransaction } from '../../types';
+import { matchesDateFilter } from '../../utils/dateUtils';
 
 export const FundsView: React.FC = () => {
   const {
@@ -27,6 +28,7 @@ export const FundsView: React.FC = () => {
     refreshTrigger,
     showToast,
     isLiveMode,
+    isCompactMode,
   } = useApp();
 
   const [transactions, setTransactions] = useState<FundTransaction[]>([]);
@@ -38,24 +40,32 @@ export const FundsView: React.FC = () => {
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
+    setPage(1);
+  }, [searchQuery, activeTab, timeRange]);
+
+  useEffect(() => {
     setLoading(true);
-    api.getFunds(activeTab === 'Deposits' ? 'Deposit' : 'Withdrawal')
+    api.getFunds(activeTab === 'Deposits' ? 'Deposit' : 'Withdrawal', timeRange)
       .then((data) => setTransactions(data))
       .catch((err) => console.error('Failed to load fund transactions:', err))
       .finally(() => setLoading(false));
-  }, [activeTab, refreshTrigger]);
+  }, [activeTab, timeRange, refreshTrigger]);
 
   const filteredTxns = transactions.filter((t) => {
     const q = searchQuery.toLowerCase();
-    return (
+    const matchesSearch = (
       t.id.toLowerCase().includes(q) ||
       t.clientName.toLowerCase().includes(q) ||
       t.clientId.toLowerCase().includes(q) ||
       t.referenceId.toLowerCase().includes(q)
     );
+    return matchesSearch && matchesDateFilter(t.requestDate, timeRange);
   });
 
   const paginatedTxns = filteredTxns.slice((page - 1) * pageSize, page * pageSize);
+
+  const cellPad = isCompactMode ? 'px-2.5 py-1.5' : 'px-3.5 py-3';
+  const headPad = isCompactMode ? 'px-2.5 py-2' : 'px-3.5 py-3';
 
   const handleExportCSV = () => {
     if (transactions.length === 0) return;
@@ -190,46 +200,46 @@ export const FundsView: React.FC = () => {
           <table className="w-full min-w-[800px] text-xs text-left">
             <thead className="bg-[#141d30] text-slate-400 uppercase font-bold text-[10px] tracking-wider border-b border-slate-800">
               <tr>
-                <th className="px-3.5 py-3">Transaction ID</th>
-                <th className="px-3.5 py-3">Client</th>
-                <th className="px-3.5 py-3 text-right">Amount</th>
-                <th className="px-3.5 py-3">Method</th>
-                <th className="px-3.5 py-3">Request Date</th>
-                <th className="px-3.5 py-3">Reference ID</th>
-                <th className="px-3.5 py-3 text-center">Status</th>
-                <th className="px-3.5 py-3">Verification</th>
-                <th className="px-3.5 py-3 text-center">Actions</th>
+                <th className={headPad}>Transaction ID</th>
+                <th className={headPad}>Client</th>
+                <th className={`${headPad} text-right`}>Amount</th>
+                <th className={headPad}>Method</th>
+                <th className={headPad}>Request Date</th>
+                <th className={headPad}>Reference ID</th>
+                <th className={`${headPad} text-center`}>Status</th>
+                <th className={headPad}>Verification</th>
+                <th className={`${headPad} text-center`}>Actions</th>
               </tr>
             </thead>
             <tbody className="divide-y divide-slate-800/80 bg-slate-900/60 font-mono">
               {paginatedTxns.map((txn) => (
                 <tr key={txn.id} className="hover:bg-slate-800/60 transition-colors">
-                  <td className="px-3.5 py-3 font-bold text-white text-xs">
+                  <td className={`${cellPad} font-bold text-white text-xs`}>
                     {txn.id}
                   </td>
 
-                  <td className="px-3.5 py-3 font-sans text-xs">
+                  <td className={`${cellPad} font-sans text-xs`}>
                     <div className="font-semibold text-slate-200">{txn.clientName}</div>
                     <div className="text-[10px] text-slate-400">{txn.clientId}</div>
                   </td>
 
-                  <td className="px-3.5 py-3 text-right font-bold text-emerald-400 text-xs">
+                  <td className={`${cellPad} text-right font-bold text-emerald-400 text-xs`}>
                     ₹{txn.amount.toLocaleString('en-IN')}
                   </td>
 
-                  <td className="px-3.5 py-3 font-sans text-slate-300 text-xs">
+                  <td className={`${cellPad} font-sans text-slate-300 text-xs`}>
                     {txn.method}
                   </td>
 
-                  <td className="px-3.5 py-3 text-slate-400 text-xs font-sans">
+                  <td className={`${cellPad} text-slate-400 text-xs font-sans`}>
                     {txn.requestDate}
                   </td>
 
-                  <td className="px-3.5 py-3 text-indigo-300 font-bold text-xs">
+                  <td className={`${cellPad} text-indigo-300 font-bold text-xs`}>
                     {txn.referenceId}
                   </td>
 
-                  <td className="px-3.5 py-3 text-center font-sans">
+                  <td className={`${cellPad} text-center font-sans`}>
                     <span className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-semibold ${
                       txn.status === 'Completed' || txn.status === 'Approved'
                         ? 'bg-emerald-500/15 text-emerald-400'
@@ -248,11 +258,11 @@ export const FundsView: React.FC = () => {
                     </span>
                   </td>
 
-                  <td className="px-3.5 py-3 font-sans text-slate-400 text-xs truncate max-w-[180px]">
+                  <td className={`${cellPad} font-sans text-slate-400 text-xs truncate max-w-[180px]`}>
                     {txn.verification}
                   </td>
 
-                  <td className="px-3.5 py-3 text-center font-sans">
+                  <td className={`${cellPad} text-center font-sans`}>
                     <div className="flex items-center justify-center gap-1.5">
                       <button
                         onClick={() => openFundActionModal(txn, 'approve')}

@@ -22,7 +22,7 @@ import { api } from '../../services/api';
 import { MarketInstrument } from '../../types';
 
 export const InstrumentsView: React.FC = () => {
-  const { refreshTrigger, showToast, triggerRefresh, isLiveMode } = useApp();
+  const { refreshTrigger, showToast, triggerRefresh, isLiveMode, isCompactMode } = useApp();
 
   const [instruments, setInstruments] = useState<MarketInstrument[]>([]);
   const [searchQuery, setSearchQuery] = useState('');
@@ -30,6 +30,10 @@ export const InstrumentsView: React.FC = () => {
   const [pageSize, setPageSize] = useState(10);
   const [page, setPage] = useState(1);
   const [loading, setLoading] = useState(true);
+
+  useEffect(() => {
+    setPage(1);
+  }, [searchQuery, exchangeFilter]);
 
   useEffect(() => {
     setLoading(true);
@@ -57,6 +61,9 @@ export const InstrumentsView: React.FC = () => {
   });
 
   const paginated = filteredInstruments.slice((page - 1) * pageSize, page * pageSize);
+
+  const cellPad = isCompactMode ? 'px-3 py-1.5' : 'px-4 py-3';
+  const headPad = isCompactMode ? 'px-3 py-2' : 'px-4 py-3';
 
   const handleExportCSV = () => {
     if (instruments.length === 0) return;
@@ -166,51 +173,51 @@ export const InstrumentsView: React.FC = () => {
           <table className="w-full min-w-[800px] text-xs text-left">
             <thead className="bg-[#141d30] text-slate-400 uppercase font-bold text-[10px] tracking-wider border-b border-slate-800">
               <tr>
-                <th className="px-4 py-3">Instrument Name</th>
-                <th className="px-4 py-3">Symbol</th>
-                <th className="px-4 py-3">Exchange</th>
-                <th className="px-4 py-3">Type</th>
-                <th className="px-4 py-3">Contract / Expiry</th>
-                <th className="px-4 py-3 text-right">Lot Size</th>
-                <th className="px-4 py-3 text-right">Tick Size</th>
-                <th className="px-4 py-3 text-center">Trading Status</th>
-                <th className="px-4 py-3 text-center">Permission Action</th>
+                <th className={headPad}>Instrument Name</th>
+                <th className={headPad}>Symbol</th>
+                <th className={headPad}>Exchange</th>
+                <th className={headPad}>Type</th>
+                <th className={headPad}>Contract / Expiry</th>
+                <th className={`${headPad} text-right`}>Lot Size</th>
+                <th className={`${headPad} text-right`}>Tick Size</th>
+                <th className={`${headPad} text-center`}>Trading Status</th>
+                <th className={`${headPad} text-center`}>Permission Action</th>
               </tr>
             </thead>
             <tbody className="divide-y divide-slate-800/80 bg-slate-900/60 font-mono">
               {paginated.map((inst) => (
                 <tr key={inst.symbol} className="hover:bg-slate-800/60 transition-colors">
-                  <td className="px-4 py-3 font-sans font-bold text-white text-xs">
+                  <td className={`${cellPad} font-sans font-bold text-white text-xs`}>
                     {inst.name}
                   </td>
 
-                  <td className="px-4 py-3 text-indigo-300 font-bold text-xs">
+                  <td className={`${cellPad} text-indigo-300 font-bold text-xs`}>
                     {inst.symbol}
                   </td>
 
-                  <td className="px-4 py-3 font-sans text-xs">
+                  <td className={`${cellPad} font-sans text-xs`}>
                     <span className="px-1.5 py-0.5 rounded bg-slate-800 text-[10px] font-semibold text-slate-300">
                       {inst.exchange}
                     </span>
                   </td>
 
-                  <td className="px-4 py-3 font-sans text-slate-400 text-xs">
+                  <td className={`${cellPad} font-sans text-slate-400 text-xs`}>
                     {inst.type}
                   </td>
 
-                  <td className="px-4 py-3 font-sans text-slate-300 text-xs">
+                  <td className={`${cellPad} font-sans text-slate-300 text-xs`}>
                     {inst.contractExpiry || 'EQ'}
                   </td>
 
-                  <td className="px-4 py-3 text-right text-slate-200">
+                  <td className={`${cellPad} text-right text-slate-200`}>
                     {inst.lotSize}
                   </td>
 
-                  <td className="px-4 py-3 text-right text-slate-400">
+                  <td className={`${cellPad} text-right text-slate-400`}>
                     {inst.tickSize.toFixed(2)}
                   </td>
 
-                  <td className="px-4 py-3 text-center font-sans">
+                  <td className={`${cellPad} text-center font-sans`}>
                     <span className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-semibold ${
                       inst.status === 'Enabled'
                         ? 'bg-emerald-500/15 text-emerald-400'
@@ -229,7 +236,7 @@ export const InstrumentsView: React.FC = () => {
                     </span>
                   </td>
 
-                  <td className="px-4 py-3 text-center font-sans">
+                  <td className={`${cellPad} text-center font-sans`}>
                     <button
                       onClick={() => handleToggleStatus(inst.symbol)}
                       className={`px-2.5 py-1 rounded text-[11px] font-semibold border transition-all cursor-pointer ${
