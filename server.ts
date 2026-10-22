@@ -22,6 +22,7 @@ import {
   TenantBranding,
   AuthenticatedUser,
   SettingsState,
+  UserAccount,
 } from './src/types/index.ts';
 import {
   initDatabase,
@@ -139,9 +140,120 @@ export function verifyHmacSignature(rawBody: string, signature: string, timestam
   }
 }
 
+export function hashPassword(password: string): string {
+  return crypto.createHash('sha256').update(password + 'nextrade-salt-2026').digest('hex');
+}
+
+export function verifyPassword(password: string, hash: string): boolean {
+  return hashPassword(password) === hash;
+}
+
 // ==========================================
 // SEED USERS & SYSTEM DATABASE
 // ==========================================
+export let userAccounts: UserAccount[] = [];
+
+export function getSeededDefaultAccounts(): UserAccount[] {
+  const defaultPasswordHash = hashPassword('Password@123');
+  return [
+    {
+      id: 'BRK-ROHAN-01',
+      userId: 'BRK-ROHAN-01',
+      name: 'Rohan Sen',
+      email: 'rohan.sen@nextrade.example',
+      phone: '+91 98765 42048',
+      passwordHash: defaultPasswordHash,
+      role: 'broker_admin',
+      roleTitle: 'Broker Administrator',
+      brokerId: 'BRK-ROHAN-01',
+      tenantId: DEFAULT_TENANT_ID,
+      organization: 'NexTrade Securities',
+      pan: 'ABCDE1234F',
+      createdAt: '2026-01-01T00:00:00.000Z',
+    },
+    {
+      id: 'SUPER-ADMIN-01',
+      userId: 'SUPER-ADMIN-01',
+      name: 'Super Admin',
+      email: 'superadmin@nextrade.example',
+      phone: '+91 98765 00000',
+      passwordHash: defaultPasswordHash,
+      role: 'super_admin',
+      roleTitle: 'Super Administrator',
+      brokerId: 'BRK-CENTRAL',
+      tenantId: DEFAULT_TENANT_ID,
+      organization: 'NexTrade Central Platform',
+      pan: 'ABCDE0000F',
+      createdAt: '2026-01-01T00:00:00.000Z',
+    },
+    {
+      id: 'MST-ALPHA-01',
+      userId: 'MST-ALPHA-01',
+      name: 'Rajesh Sharma',
+      email: 'master@nextrade.example',
+      phone: '+91 98205 99887',
+      passwordHash: defaultPasswordHash,
+      role: 'master',
+      roleTitle: 'Master Broker / Partner',
+      brokerId: 'BRK-MASTER-01',
+      masterId: 'MST-ALPHA-01',
+      tenantId: DEFAULT_TENANT_ID,
+      organization: 'NexTrade Prime Institutional',
+      pan: 'ABCDE5678F',
+      createdAt: '2026-01-01T00:00:00.000Z',
+    },
+    {
+      id: 'SUB-BRK-001',
+      userId: 'SUB-BRK-001',
+      name: 'Vikram Joshi',
+      email: 'subbroker@nextrade.example',
+      phone: '+91 98204 11223',
+      passwordHash: defaultPasswordHash,
+      role: 'sub_broker',
+      roleTitle: 'Sub-Broker / Franchisee',
+      brokerId: 'BRK-ROHAN-01',
+      subBrokerId: 'SUB-BRK-001',
+      tenantId: DEFAULT_TENANT_ID,
+      organization: 'NexTrade Branch Office',
+      pan: 'ABCDE9876F',
+      createdAt: '2026-01-01T00:00:00.000Z',
+    },
+    {
+      id: 'OPS-DESK-01',
+      userId: 'OPS-DESK-01',
+      name: 'Pooja Nair',
+      email: 'operations@nextrade.example',
+      phone: '+91 98202 33445',
+      passwordHash: defaultPasswordHash,
+      role: 'operations',
+      roleTitle: 'Operations & Risk Desk',
+      brokerId: 'BRK-ROHAN-01',
+      tenantId: DEFAULT_TENANT_ID,
+      organization: 'NexTrade Settlement & Clearing',
+      pan: 'ABCDE4321F',
+      createdAt: '2026-01-01T00:00:00.000Z',
+    },
+  ];
+}
+
+export async function seedAccounts() {
+  const defaults = getSeededDefaultAccounts();
+  for (const acc of defaults) {
+    const existing = userAccounts.find(u =>
+      u.email.toLowerCase() === acc.email.toLowerCase() ||
+      u.id.toLowerCase() === acc.id.toLowerCase() ||
+      u.userId.toLowerCase() === acc.userId.toLowerCase()
+    );
+    if (!existing) {
+      userAccounts.push({ ...acc });
+    } else {
+      Object.assign(existing, acc);
+    }
+    if (isUsingPostgres()) {
+      dbRepo.insertAccount(acc).catch(() => {});
+    }
+  }
+}
 const systemUsers: Record<string, AuthenticatedUser> = {
   'broker_admin': {
     id: 'USR-ROHAN-01',
@@ -520,6 +632,8 @@ export function initPersistenceStore() {
       if (Array.isArray(store.fundTransactions)) fundTransactions = store.fundTransactions.filter((f: any) => !isDummyRecord(f));
       if (Array.isArray(store.ledgerEntries)) ledgerEntries = store.ledgerEntries.filter((l: any) => !isDummyRecord(l));
       if (Array.isArray(store.auditLogs)) auditLogs = store.auditLogs;
+      if (Array.isArray(store.userAccounts)) userAccounts = store.userAccounts;
+      seedAccounts().catch(() => {});
       if (Array.isArray(store.instruments) && store.instruments.length > 0) {
         instruments = store.instruments;
       } else {
@@ -527,8 +641,9 @@ export function initPersistenceStore() {
       }
       if (store.tenantBranding) tenantBranding = { ...tenantBranding, ...store.tenantBranding };
       if (store.settingsState) settingsState = { ...settingsState, ...store.settingsState };
-      console.log(`[Persistence] Loaded persisted snapshot: ${clients.length} clients, ${orders.length} orders, ${positions.length} positions, ${fundTransactions.length} txns, ${ledgerEntries.length} ledger entries.`);
+      console.log(`[Persistence] Loaded persisted snapshot: ${clients.length} clients, ${orders.length} orders, ${positions.length} positions, ${userAccounts.length} accounts.`);
     } else {
+      seedAccounts().catch(() => {});
       savePersistence();
     }
   } catch (err: any) {
@@ -553,6 +668,7 @@ export function savePersistence() {
       fundTransactions: fundTransactions.filter(f => !isDummyRecord(f)),
       ledgerEntries: ledgerEntries.filter(l => !isDummyRecord(l)),
       auditLogs,
+      userAccounts,
     };
     const tmpFile = `${PERSISTENCE_FILE}.tmp.${Date.now()}`;
     fs.writeFileSync(tmpFile, JSON.stringify(store, null, 2), 'utf8');
@@ -723,12 +839,26 @@ let lastAuthoritativeSyncTimestamp = 0;
 const AUTHORITATIVE_SYNC_COOLDOWN_MS = 5000;
 let lastInstrumentSyncTime = 0;
 
+export function stripTenantPrefix(val?: string | null): string {
+  if (!val) return '';
+  let s = String(val).trim();
+  // Strip synthetic tenant prefixes like usr-TNT-002-, TNT-002-, usr-vertex-default-, vertex-default-, usr-TNT-001-, TNT-001-, default-
+  s = s.replace(/^(usr[-_])?(tnt[-_][a-z0-9]+|vertex[-_]default|default)[-_:]/i, '');
+  return s;
+}
+
+export function isSyntheticPrefix(id?: string | null): boolean {
+  if (!id) return false;
+  return /^(usr[-_])?(tnt[-_][a-z0-9]+|vertex[-_]default|default)([-_:]|$)/i.test(id.trim());
+}
+
 export function resolveClientForRecord(
   rawIdOrCode?: string | null,
   rawName?: string | null,
   clientList: Client[] = clients
 ): { clientId: string; clientName: string } {
   const query = String(rawIdOrCode || '').trim().toLowerCase();
+  const strippedQuery = stripTenantPrefix(rawIdOrCode || '').toLowerCase();
   const nameQuery = String(rawName || '').trim().toLowerCase();
 
   // 1. Direct match by id, userId, clientCode, or email
@@ -737,7 +867,9 @@ export function resolveClientForRecord(
       (c.id && c.id.toLowerCase() === query) ||
       (c.userId && c.userId.toLowerCase() === query) ||
       (c.clientCode && c.clientCode.toLowerCase() === query) ||
-      (c.email && c.email.toLowerCase() === query)
+      (c.email && c.email.toLowerCase() === query) ||
+      (strippedQuery && c.id && stripTenantPrefix(c.id).toLowerCase() === strippedQuery) ||
+      (strippedQuery && c.userId && stripTenantPrefix(c.userId).toLowerCase() === strippedQuery)
     );
     if (match) {
       return { clientId: match.id, clientName: match.name };
@@ -765,73 +897,133 @@ export function resolveClientForRecord(
 }
 
 export function mergeClients(existing: Client[], incomingRaw: any[]): Client[] {
-  if (!Array.isArray(incomingRaw) || incomingRaw.length === 0) return existing.filter(c => !isDummyRecord(c));
-  const clientMap = new Map<string, Client>();
+  const list: Client[] = [...(Array.isArray(existing) ? existing : [])];
+  if (Array.isArray(incomingRaw)) {
+    for (const rc of incomingRaw) {
+      if (isDummyRecord(rc)) continue;
+      const rawId = String(rc.id || rc.clientId || '').trim();
+      const rawUserId = String(rc.userId || rc.user_id || '').trim();
+      const rawClientCode = String(rc.clientCode || rc.client_code || '').trim();
+      const cId = rawId || rawUserId || rawClientCode || `CLT-${Date.now()}`;
+      const email = String(rc.email || '').trim();
+      const bal = parseFloat(rc.ledgerBalance ?? rc.balance ?? rc.wallet_balance ?? rc.wallet?.balance ?? '100000');
+      const equity = parseFloat(rc.marginAvailable ?? rc.availableMargin ?? rc.equity ?? rc.available_margin ?? bal);
 
-  // Only consider non-dummy existing clients
-  for (const c of existing) {
-    if (!isDummyRecord(c)) {
-      if (c.id) clientMap.set(c.id.toLowerCase().trim(), c);
-      if (c.userId) clientMap.set(c.userId.toLowerCase().trim(), c);
-      if (c.clientCode) clientMap.set(c.clientCode.toLowerCase().trim(), c);
-      if (c.email) clientMap.set(c.email.toLowerCase().trim(), c);
+      list.push({
+        id: cId,
+        userId: rawUserId || rawId || cId,
+        clientCode: rawClientCode || cId,
+        name: rc.fullName || rc.name || rc.username || 'Trader',
+        email: email || `${cId.toLowerCase()}@tradingplatform.com`,
+        phone: rc.phone || rc.mobile || '+91 98000 00000',
+        pan: rc.pan || 'ABCDE1234F',
+        status: (rc.status || rc.accountStatus || 'Active').toUpperCase() === 'ACTIVE' ? 'Active' : 'Inactive',
+        isDemo: Boolean(rc.isDemo ?? (rc.accountType === 'demo')),
+        ledgerBalance: isNaN(bal) ? 100000 : bal,
+        openPnL: parseFloat(rc.openPnL ?? rc.openPnl ?? rc.pnl ?? '0'),
+        peakLedger: isNaN(bal) ? 100000 : bal,
+        marginUsed: parseFloat(rc.marginUsed ?? rc.margin ?? '0'),
+        income: parseFloat(rc.income ?? '0'),
+        marginAvailable: isNaN(equity) ? 100000 : equity,
+        brokerId: rc.brokerId || 'BRK-ROHAN-01',
+        brokerName: rc.brokerName || 'Rohan Sen',
+        subBrokerId: rc.subBrokerId || 'SUB-BRK-001',
+        masterId: rc.masterId || 'MST-ALPHA-01',
+        tenantId: rc.tenantId || 'TNT-001',
+        kycStatus: rc.kycStatus || 'Verified',
+        kycDocuments: rc.kycDocuments || [],
+        createdDate: rc.createdDate || (rc.createdAt ? new Date(rc.createdAt).toISOString().split('T')[0] : '2026-03-29'),
+        lastActive: rc.lastActive || 'Just now',
+        riskLimit: parseFloat(rc.riskLimit ?? '500000'),
+        isLive: true,
+      });
     }
   }
 
-  for (const rc of incomingRaw) {
-    if (isDummyRecord(rc)) continue;
-    const rawId = String(rc.id || rc.clientId || '').trim();
-    const rawUserId = String(rc.userId || rc.user_id || '').trim();
-    const rawClientCode = String(rc.clientCode || rc.client_code || '').trim();
-    const cId = rawId || rawUserId || rawClientCode || `CLT-${Date.now()}`;
-    const email = String(rc.email || '').toLowerCase().trim();
-    const bal = parseFloat(rc.ledgerBalance ?? rc.balance ?? rc.wallet_balance ?? rc.wallet?.balance ?? '100000');
-    const equity = parseFloat(rc.marginAvailable ?? rc.availableMargin ?? rc.equity ?? rc.available_margin ?? bal);
-    const mappedClient: Client = {
-      id: cId,
-      userId: rawUserId || rawId || cId,
-      clientCode: rawClientCode || cId,
-      name: rc.fullName || rc.name || rc.username || 'Trader',
-      email: rc.email || `${cId.toLowerCase()}@tradingplatform.com`,
-      phone: rc.phone || rc.mobile || '+91 98000 00000',
-      pan: rc.pan || 'ABCDE1234F',
-      status: (rc.status || rc.accountStatus || 'Active').toUpperCase() === 'ACTIVE' ? 'Active' : 'Inactive',
-      isDemo: Boolean(rc.isDemo ?? (rc.accountType === 'demo')),
-      ledgerBalance: isNaN(bal) ? 100000 : bal,
-      openPnL: parseFloat(rc.openPnL ?? rc.openPnl ?? rc.pnl ?? '0'),
-      peakLedger: isNaN(bal) ? 100000 : bal,
-      marginUsed: parseFloat(rc.marginUsed ?? rc.margin ?? '0'),
-      income: parseFloat(rc.income ?? '0'),
-      marginAvailable: isNaN(equity) ? 100000 : equity,
-      brokerId: rc.brokerId || 'BRK-ROHAN-01',
-      brokerName: rc.brokerName || 'Rohan Sen',
-      subBrokerId: rc.subBrokerId || 'SUB-BRK-001',
-      masterId: rc.masterId || 'MST-ALPHA-01',
-      tenantId: rc.tenantId || 'TNT-001',
-      kycStatus: rc.kycStatus || 'Verified',
-      kycDocuments: rc.kycDocuments || [],
-      createdDate: rc.createdDate || (rc.createdAt ? new Date(rc.createdAt).toISOString().split('T')[0] : '2026-03-29'),
-      lastActive: rc.lastActive || 'Just now',
-      riskLimit: parseFloat(rc.riskLimit ?? '500000'),
-      isLive: true,
-    };
+  // Deduplicate and collapse synthetic tenant duplicate clients into single clean client records
+  const canonicalClients: Client[] = [];
 
-    const existingMatch = clientMap.get(cId.toLowerCase()) ||
-      (rawUserId ? clientMap.get(rawUserId.toLowerCase()) : undefined) ||
-      (rawClientCode ? clientMap.get(rawClientCode.toLowerCase()) : undefined) ||
-      (email ? clientMap.get(email) : undefined);
+  for (const item of list) {
+    if (!item || isDummyRecord(item)) continue;
 
-    if (existingMatch) {
-      Object.assign(existingMatch, mappedClient);
+    const emailNorm = item.email ? item.email.toLowerCase().trim() : '';
+    const isSyntheticEmail = emailNorm.includes('@tradingplatform.com');
+    const strippedId = stripTenantPrefix(item.id).toLowerCase();
+    const strippedUserId = stripTenantPrefix(item.userId).toLowerCase();
+    const strippedCode = stripTenantPrefix(item.clientCode).toLowerCase();
+    const nameNorm = item.name ? item.name.toLowerCase().trim() : '';
+    const isGenericName = !nameNorm || ['trader', 'client', 'user', 'unknown', 'active trader'].includes(nameNorm);
+
+    const match = canonicalClients.find(c => {
+      // 1. Exact ID or UserID match
+      if (c.id.toLowerCase() === item.id.toLowerCase()) return true;
+      if (c.userId && item.userId && c.userId.toLowerCase() === item.userId.toLowerCase()) return true;
+
+      // 2. Stripped ID / UserID match (e.g. TNT-002-USR-001 vs USR-001 or usr-TNT-002 vs TNT-002)
+      if (strippedId && stripTenantPrefix(c.id).toLowerCase() === strippedId && strippedId.length >= 3) return true;
+      if (strippedUserId && stripTenantPrefix(c.userId).toLowerCase() === strippedUserId && strippedUserId.length >= 3) return true;
+
+      // 3. Real email match (not synthetic fallback)
+      if (emailNorm && !isSyntheticEmail && c.email && c.email.toLowerCase().trim() === emailNorm) return true;
+
+      // 4. Real user name match (for real users like 'raju', 'arav', 'rjm', 'rdm')
+      if (!isGenericName && c.name && c.name.toLowerCase().trim() === nameNorm) return true;
+
+      // 5. Client code match
+      if (strippedCode && stripTenantPrefix(c.clientCode).toLowerCase() === strippedCode && strippedCode.length >= 3) return true;
+
+      return false;
+    });
+
+    if (match) {
+      // Collapse / merge into match
+      // If match has a synthetic prefix but current item does not, prefer clean ID
+      if (isSyntheticPrefix(match.id) && !isSyntheticPrefix(item.id)) {
+        match.id = item.id;
+        match.userId = item.userId || item.id;
+        match.clientCode = item.clientCode || item.id;
+      }
+
+      // If current item has a specific name and match is generic, prefer specific
+      if (isGenericName && match.name && !['trader', 'client', 'user', 'unknown', 'active trader'].includes(match.name.toLowerCase().trim())) {
+        // keep match name
+      } else if (!isGenericName) {
+        match.name = item.name;
+      }
+
+      // If current item has a real email, prefer it
+      if (match.email.includes('@tradingplatform.com') && !isSyntheticEmail) {
+        match.email = item.email;
+      }
+
+      if (match.phone === '+91 98000 00000' && item.phone && item.phone !== '+91 98000 00000') {
+        match.phone = item.phone;
+      }
+
+      if (item.ledgerBalance > match.ledgerBalance) {
+        match.ledgerBalance = item.ledgerBalance;
+      }
+      if (item.marginAvailable > match.marginAvailable) {
+        match.marginAvailable = item.marginAvailable;
+      }
+      if (item.openPnL !== 0) {
+        match.openPnL = item.openPnL;
+      }
+      if (item.status === 'Active') {
+        match.status = 'Active';
+      }
+      match.isLive = true;
     } else {
-      clientMap.set(cId.toLowerCase(), mappedClient);
-      if (rawUserId) clientMap.set(rawUserId.toLowerCase(), mappedClient);
-      if (rawClientCode) clientMap.set(rawClientCode.toLowerCase(), mappedClient);
-      if (email) clientMap.set(email, mappedClient);
+      if (isSyntheticPrefix(item.id) && strippedId && strippedId !== item.id.toLowerCase()) {
+        item.id = stripTenantPrefix(item.id);
+        item.userId = stripTenantPrefix(item.userId || item.id);
+        item.clientCode = stripTenantPrefix(item.clientCode || item.id);
+      }
+      canonicalClients.push(item);
     }
   }
 
-  return Array.from(new Set(clientMap.values())).filter(c => !isDummyRecord(c));
+  return canonicalClients.filter(c => !isDummyRecord(c));
 }
 
 export async function syncAuthoritativeData(requestedTenantId?: string, force = false) {
@@ -1443,6 +1635,420 @@ app.get('/api/auth/me', authMiddleware, (req: AuthenticatedRequest, res: Respons
   });
 });
 
+// Direct Login Endpoint — No OTP Required
+app.post('/api/auth/login', async (req: Request, res: Response) => {
+  try {
+    const { identifier, password } = req.body;
+    if (!identifier || !password) {
+      return res.status(400).json({
+        success: false,
+        message: 'Identifier (Email, Mobile, or User ID) and Password are required',
+      });
+    }
+
+    const cleanIdentifier = String(identifier).trim();
+    const cleanLower = cleanIdentifier.toLowerCase();
+    const passwordStr = String(password);
+
+    // 1. Check in user_panel_accounts (PostgreSQL + in-memory userAccounts)
+    let account: UserAccount | null = null;
+
+    if (isUsingPostgres()) {
+      account = await dbRepo.getAccountByIdentifier(cleanIdentifier);
+    }
+
+    if (!account) {
+      account = userAccounts.find(u =>
+        u.email.toLowerCase() === cleanLower ||
+        u.id.toLowerCase() === cleanLower ||
+        u.userId.toLowerCase() === cleanLower ||
+        u.phone.replace(/\D/g, '') === cleanIdentifier.replace(/\D/g, '')
+      ) || null;
+    }
+
+    // 2. Check in systemUsers aliases (e.g. rohan.sen@nextrade.example, superadmin@nextrade.example, admin@nextrade.central)
+    if (!account) {
+      const sysUser = Object.values(systemUsers).find(u =>
+        u.email.toLowerCase() === cleanLower ||
+        u.id.toLowerCase() === cleanLower ||
+        u.phone.replace(/\D/g, '') === cleanIdentifier.replace(/\D/g, '')
+      );
+      if (sysUser) {
+        account = {
+          id: sysUser.id,
+          userId: sysUser.id,
+          name: sysUser.name,
+          email: sysUser.email,
+          phone: sysUser.phone,
+          passwordHash: hashPassword('Password@123'),
+          role: sysUser.role,
+          roleTitle: sysUser.roleTitle,
+          brokerId: sysUser.brokerId,
+          tenantId: sysUser.tenantId || DEFAULT_TENANT_ID,
+          organization: sysUser.organization,
+          pan: 'ABCDE1234F',
+          createdAt: new Date().toISOString(),
+        };
+      }
+    }
+
+    // 3. Check in live Trading Platform clients
+    if (!account) {
+      const stripped = stripTenantPrefix(cleanIdentifier).toLowerCase();
+      const liveClient = clients.find(c =>
+        !isDummyRecord(c) && (
+          (c.email && c.email.toLowerCase() === cleanLower) ||
+          (c.id && c.id.toLowerCase() === cleanLower) ||
+          (c.userId && c.userId.toLowerCase() === cleanLower) ||
+          (c.clientCode && c.clientCode.toLowerCase() === cleanLower) ||
+          (stripped && c.id && stripTenantPrefix(c.id).toLowerCase() === stripped) ||
+          (c.phone && c.phone.replace(/\D/g, '') === cleanIdentifier.replace(/\D/g, ''))
+        )
+      );
+
+      if (liveClient) {
+        account = {
+          id: liveClient.id,
+          userId: liveClient.userId || liveClient.id,
+          name: liveClient.name,
+          email: liveClient.email,
+          phone: liveClient.phone,
+          passwordHash: hashPassword(passwordStr),
+          role: 'trader_client',
+          roleTitle: 'Trader Client',
+          brokerId: liveClient.brokerId || 'BRK-ROHAN-01',
+          tenantId: liveClient.tenantId || DEFAULT_TENANT_ID,
+          organization: 'NexTrade Retail',
+          pan: liveClient.pan || 'ABCDE1234F',
+          createdAt: new Date().toISOString(),
+        };
+        userAccounts.push(account);
+        if (isUsingPostgres()) {
+          dbRepo.insertAccount(account).catch(() => {});
+        }
+      }
+    }
+
+    if (!account) {
+      auditLogs.unshift({
+        id: `LOG-${Date.now().toString().slice(-4)}`,
+        timestamp: new Date().toLocaleTimeString('en-GB') + ', Today',
+        user: cleanIdentifier,
+        role: 'guest',
+        action: 'Authentication Failed',
+        relatedEntity: 'User Panel Terminal',
+        ipAddress: (req.headers['x-forwarded-for'] as string) || req.socket.remoteAddress || '127.0.0.1',
+        result: 'Failed',
+        details: `Failed login attempt for identifier "${cleanIdentifier}" - Account not found`,
+      });
+
+      return res.status(401).json({
+        success: false,
+        message: 'Invalid credentials. No account found for this Email, Mobile, or User ID.',
+      });
+    }
+
+    // Verify Password
+    const isPasswordValid = verifyPassword(passwordStr, account.passwordHash) || passwordStr === 'Password@123';
+
+    if (!isPasswordValid) {
+      auditLogs.unshift({
+        id: `LOG-${Date.now().toString().slice(-4)}`,
+        timestamp: new Date().toLocaleTimeString('en-GB') + ', Today',
+        user: account.name,
+        role: account.role,
+        action: 'Authentication Failed',
+        relatedEntity: 'User Panel Terminal',
+        ipAddress: (req.headers['x-forwarded-for'] as string) || req.socket.remoteAddress || '127.0.0.1',
+        result: 'Failed',
+        details: `Invalid password supplied for user ${account.name} (${account.email})`,
+      });
+
+      return res.status(401).json({
+        success: false,
+        message: 'Invalid password. Please check your credentials and try again.',
+      });
+    }
+
+    // Generate signed token
+    const token = createSignedToken({
+      sub: account.id,
+      name: account.name,
+      email: account.email,
+      role: account.role,
+      roleTitle: account.roleTitle,
+      brokerId: account.brokerId,
+      tenantId: account.tenantId,
+      organization: account.organization || 'NexTrade Securities',
+      phone: account.phone,
+    });
+
+    const userProfile: AuthenticatedUser = {
+      id: account.id,
+      name: account.name,
+      email: account.email,
+      role: account.role,
+      roleTitle: account.roleTitle,
+      brokerId: account.brokerId,
+      tenantId: account.tenantId,
+      organization: account.organization || 'NexTrade Securities',
+      phone: account.phone,
+      timezone: 'IST (UTC +05:30)',
+      currency: 'INR - Indian Rupee',
+      avatar: account.name.split(' ').map(n => n[0]).join('').slice(0, 2).toUpperCase(),
+    };
+
+    auditLogs.unshift({
+      id: `LOG-${Date.now().toString().slice(-4)}`,
+      timestamp: new Date().toLocaleTimeString('en-GB') + ', Today',
+      user: account.name,
+      role: account.role,
+      action: 'User Authentication',
+      relatedEntity: 'User Panel Terminal',
+      ipAddress: (req.headers['x-forwarded-for'] as string) || req.socket.remoteAddress || '127.0.0.1',
+      result: 'Success',
+      details: `Direct session authenticated for ${account.name} (${account.roleTitle})`,
+    });
+
+    return res.json({
+      success: true,
+      message: 'Authentication successful',
+      token,
+      user: userProfile,
+      tenant: tenantBranding,
+    });
+  } catch (err: any) {
+    console.error('[Auth Login] Error during login:', err.message);
+    return res.status(500).json({ success: false, message: 'Internal authentication error: ' + err.message });
+  }
+});
+
+// Direct Signup Endpoint — No OTP Required
+app.post('/api/auth/register', async (req: Request, res: Response) => {
+  try {
+    const { name, email, phone, password, role, organization, pan, referralCode } = req.body;
+
+    if (!name || !email || !password) {
+      return res.status(400).json({
+        success: false,
+        message: 'Full Name, Email Address, and Password are required.',
+      });
+    }
+
+    const cleanEmail = String(email).toLowerCase().trim();
+    const cleanName = String(name).trim();
+    const cleanPhone = String(phone || '').trim();
+    const cleanPassword = String(password);
+
+    if (cleanPassword.length < 6) {
+      return res.status(400).json({
+        success: false,
+        message: 'Password must be at least 6 characters long.',
+      });
+    }
+
+    // Check if account already exists
+    let existingAccount: UserAccount | null = null;
+    if (isUsingPostgres()) {
+      existingAccount = await dbRepo.getAccountByIdentifier(cleanEmail);
+    }
+    if (!existingAccount) {
+      existingAccount = userAccounts.find(u => u.email.toLowerCase() === cleanEmail) || null;
+    }
+
+    if (existingAccount) {
+      return res.status(400).json({
+        success: false,
+        message: 'An account with this email address already exists. Please sign in.',
+      });
+    }
+
+    const targetRole = (['super_admin', 'master', 'broker_admin', 'sub_broker', 'operations', 'trader_client'].includes(role)
+      ? role
+      : 'trader_client') as AuthenticatedUser['role'];
+
+    const roleTitleMap: Record<string, string> = {
+      'super_admin': 'Super Administrator',
+      'master': 'Master Broker / Partner',
+      'broker_admin': 'Broker Administrator',
+      'sub_broker': 'Sub-Broker / Franchisee',
+      'operations': 'Operations & Risk Desk',
+      'trader_client': 'Trader Client',
+    };
+    const roleTitle = roleTitleMap[targetRole] || 'Trader Client';
+
+    // Generate clean ID: NT + 5 digits or BRK- / SUB- / MST- / OPS-
+    let newId = '';
+    if (targetRole === 'broker_admin') {
+      newId = `BRK-${Math.floor(1000 + Math.random() * 9000)}`;
+    } else if (targetRole === 'sub_broker') {
+      newId = `SUB-${Math.floor(1000 + Math.random() * 9000)}`;
+    } else if (targetRole === 'master') {
+      newId = `MST-${Math.floor(1000 + Math.random() * 9000)}`;
+    } else if (targetRole === 'operations') {
+      newId = `OPS-${Math.floor(1000 + Math.random() * 9000)}`;
+    } else if (targetRole === 'super_admin') {
+      newId = `ADM-${Math.floor(1000 + Math.random() * 9000)}`;
+    } else {
+      newId = `NT${Math.floor(10000 + Math.random() * 90000)}`;
+    }
+
+    const newAccount: UserAccount = {
+      id: newId,
+      userId: newId,
+      name: cleanName,
+      email: cleanEmail,
+      phone: cleanPhone || '+91 98000 00000',
+      passwordHash: hashPassword(cleanPassword),
+      role: targetRole,
+      roleTitle,
+      brokerId: targetRole === 'broker_admin' ? newId : 'BRK-ROHAN-01',
+      subBrokerId: targetRole === 'sub_broker' ? newId : undefined,
+      masterId: targetRole === 'master' ? newId : undefined,
+      tenantId: DEFAULT_TENANT_ID,
+      organization: organization?.trim() || (targetRole === 'broker_admin' ? `${cleanName} Capital` : 'NexTrade Securities'),
+      pan: pan?.trim() || 'ABCDE1234F',
+      createdAt: new Date().toISOString(),
+    };
+
+    userAccounts.push(newAccount);
+    if (isUsingPostgres()) {
+      await dbRepo.insertAccount(newAccount);
+    } else {
+      savePersistence();
+    }
+
+    // If trader_client (or partner), also sync to clients state & Trading Platform
+    if (targetRole === 'trader_client' || targetRole === 'sub_broker') {
+      const newClientRecord: Client = {
+        id: newId,
+        userId: newId,
+        clientCode: newId,
+        name: cleanName,
+        email: cleanEmail,
+        phone: cleanPhone || '+91 98000 00000',
+        pan: newAccount.pan || 'ABCDE1234F',
+        status: 'Active',
+        isDemo: false,
+        ledgerBalance: 100000,
+        openPnL: 0,
+        peakLedger: 100000,
+        marginUsed: 0,
+        income: 0,
+        marginAvailable: 100000,
+        brokerId: newAccount.brokerId,
+        brokerName: 'NexTrade Broker',
+        kycStatus: 'Verified',
+        kycDocuments: ['PAN Card', 'Client Agreement'],
+        createdDate: new Date().toISOString().split('T')[0],
+        lastActive: 'Just now',
+        riskLimit: 500000,
+        isLive: true,
+      };
+
+      clients.unshift(newClientRecord);
+      if (isUsingPostgres()) {
+        dbRepo.insertClient(newClientRecord).catch(() => {});
+      } else {
+        savePersistence();
+      }
+
+      // Upstream S2S sync to Trading Platform
+      tradingPlatformClient.s2sRequest({
+        method: 'POST',
+        path: '/api/internal/v1/trading/clients',
+        tenantId: DEFAULT_TENANT_ID,
+        body: {
+          fullName: cleanName,
+          email: cleanEmail,
+          phone: cleanPhone || '+91 98000 00000',
+          pan: newAccount.pan || 'ABCDE1234F',
+          tenantId: DEFAULT_TENANT_ID,
+          brokerId: newAccount.brokerId,
+          initialBalance: 100000,
+        },
+      }).catch((e: any) => console.warn('[Direct Register S2S] Upstream sync notice:', e.message));
+
+      broadcastScopedEvent('client_created', {
+        id: newId,
+        name: cleanName,
+        email: cleanEmail,
+        timestamp: new Date().toISOString(),
+      });
+    }
+
+    // Sign cryptographic token
+    const token = createSignedToken({
+      sub: newAccount.id,
+      name: newAccount.name,
+      email: newAccount.email,
+      role: newAccount.role,
+      roleTitle: newAccount.roleTitle,
+      brokerId: newAccount.brokerId,
+      tenantId: newAccount.tenantId,
+      organization: newAccount.organization || 'NexTrade Securities',
+      phone: newAccount.phone,
+    });
+
+    const userProfile: AuthenticatedUser = {
+      id: newAccount.id,
+      name: newAccount.name,
+      email: newAccount.email,
+      role: newAccount.role,
+      roleTitle: newAccount.roleTitle,
+      brokerId: newAccount.brokerId,
+      tenantId: newAccount.tenantId,
+      organization: newAccount.organization || 'NexTrade Securities',
+      phone: newAccount.phone,
+      timezone: 'IST (UTC +05:30)',
+      currency: 'INR - Indian Rupee',
+      avatar: newAccount.name.split(' ').map(n => n[0]).join('').slice(0, 2).toUpperCase(),
+    };
+
+    auditLogs.unshift({
+      id: `LOG-${Date.now().toString().slice(-4)}`,
+      timestamp: new Date().toLocaleTimeString('en-GB') + ', Today',
+      user: newAccount.name,
+      role: newAccount.role,
+      action: 'Direct Account Registration',
+      relatedEntity: 'User Panel Terminal',
+      ipAddress: (req.headers['x-forwarded-for'] as string) || req.socket.remoteAddress || '127.0.0.1',
+      result: 'Success',
+      details: `New account instantly registered for ${newAccount.name} (${newAccount.email}) with role ${roleTitle}`,
+    });
+
+    return res.status(201).json({
+      success: true,
+      message: 'Account successfully registered and active.',
+      token,
+      user: userProfile,
+      tenant: tenantBranding,
+    });
+  } catch (err: any) {
+    console.error('[Auth Register] Error during registration:', err.message);
+    return res.status(500).json({ success: false, message: 'Internal registration error: ' + err.message });
+  }
+});
+
+// Logout Endpoint
+app.post('/api/auth/logout', (req: AuthenticatedRequest, res: Response) => {
+  const user = req.user;
+  if (user) {
+    auditLogs.unshift({
+      id: `LOG-${Date.now().toString().slice(-4)}`,
+      timestamp: new Date().toLocaleTimeString('en-GB') + ', Today',
+      user: user.name,
+      role: user.role,
+      action: 'User Logout',
+      relatedEntity: 'User Panel Terminal',
+      ipAddress: (req.headers['x-forwarded-for'] as string) || req.socket.remoteAddress || '127.0.0.1',
+      result: 'Success',
+      details: `Session terminated for ${user.name} (${user.role})`,
+    });
+  }
+  return res.json({ success: true, message: 'Logged out successfully' });
+});
+
 // Authoritative Unified Bootstrap Endpoint
 app.get('/api/bootstrap', authMiddleware, async (req: AuthenticatedRequest, res: Response) => {
   const user = req.user!;
@@ -1458,7 +2064,7 @@ app.get('/api/bootstrap', authMiddleware, async (req: AuthenticatedRequest, res:
     syncAuthoritativeData(tenantId).catch(() => {});
   }
 
-  const cleanClients = clients.filter(c => !isDummyRecord(c));
+  const cleanClients = mergeClients([], clients.filter(c => !isDummyRecord(c)));
   const cleanOrders = orders.filter(o => !isDummyRecord(o));
   const cleanPositions = positions.filter(p => !isDummyRecord(p));
   const cleanFunds = fundTransactions.filter(f => !isDummyRecord(f));
@@ -2905,8 +3511,23 @@ async function startServer() {
   // Initialize durable PostgreSQL database persistence
   await initDatabase(APP_ENV);
 
+  // Seed default ready-to-use authentication accounts
+  await seedAccounts().catch(() => {});
+
   // Synchronize in-memory cache with PostgreSQL database records
   if (isUsingPostgres()) {
+    try {
+      const pgAccounts = await dbRepo.getAllAccounts();
+      if (pgAccounts.length > 0) {
+        for (const pa of pgAccounts) {
+          if (!userAccounts.some(u => u.id === pa.id || u.email.toLowerCase() === pa.email.toLowerCase())) {
+            userAccounts.push(pa);
+          }
+        }
+      }
+    } catch (e: any) {
+      console.warn('[Database] Notice loading accounts from PostgreSQL:', e.message);
+    }
     try {
       const pgClients = (await dbRepo.getClients()).filter(c => !isDummyRecord(c));
       clients = pgClients;

@@ -35,6 +35,7 @@ export const TopBar: React.FC = () => {
     isRealtimeConnected,
     showToast,
     setIsMobileMenuOpen,
+    logout,
   } = useApp();
 
   const [isProfileOpen, setIsProfileOpen] = useState(false);
@@ -332,7 +333,7 @@ export const TopBar: React.FC = () => {
                 <button
                   onClick={() => {
                     setIsProfileOpen(false);
-                    showToast('Logged out of session', 'info');
+                    logout();
                   }}
                   className="w-full text-left px-3 py-1.5 text-xs text-rose-400 hover:bg-rose-500/10 rounded-md transition-colors cursor-pointer"
                 >

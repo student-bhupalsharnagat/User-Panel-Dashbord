@@ -35,9 +35,19 @@ import { SquareOffModal } from './components/modals/SquareOffModal';
 import { ReportPreviewModal } from './components/modals/ReportPreviewModal';
 import { SupportTicketModal } from './components/modals/SupportTicketModal';
 import { ToastContainer } from './components/modals/ToastContainer';
+import { AuthView } from './components/auth/AuthView';
 
 const MainLayout: React.FC = () => {
-  const { activeTab } = useApp();
+  const { isAuthenticated, activeTab } = useApp();
+
+  if (!isAuthenticated) {
+    return (
+      <div className="min-h-screen bg-[#070b14] text-slate-100 font-sans">
+        <AuthView />
+        <ToastContainer />
+      </div>
+    );
+  }
 
   const renderActiveView = () => {
     switch (activeTab) {

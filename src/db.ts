@@ -16,6 +16,7 @@ import {
   TenantBranding,
   SettingsState,
   LedgerEntry,
+  UserAccount,
 } from './types/index.ts';
 
 const __filename = fileURLToPath(import.meta.url);
@@ -316,6 +317,10 @@ export async function dropForeignKeyConstraints(client: any): Promise<void> {
 
 export async function widenColumnsToText(client: any): Promise<void> {
   const tableColumnMap: Record<string, string[]> = {
+    user_panel_accounts: [
+      'id', 'user_id', 'name', 'email', 'phone', 'password_hash', 'role',
+      'role_title', 'broker_id', 'sub_broker_id', 'master_id', 'tenant_id', 'organization', 'pan'
+    ],
     user_panel_clients: [
       'id', 'name', 'email', 'phone', 'pan', 'status', 'broker_id',
       'broker_name', 'kyc_status', 'created_date', 'last_active', 'tags'
@@ -689,8 +694,44 @@ async function runMigrations(pool: Pool) {
       console.log('[Database Migration] Migration 4 successfully committed.');
     }
 
+    // Migration 5: User Accounts Table for Direct Login & Registration (No OTP)
+    if (!appliedVersions.has(5)) {
+      console.log('[Database Migration] Running Migration 5: User Accounts Table...');
+      await client.query(`
+        CREATE TABLE IF NOT EXISTS user_panel_accounts (
+          id TEXT PRIMARY KEY,
+          user_id TEXT,
+          name TEXT NOT NULL,
+          email TEXT NOT NULL,
+          phone TEXT,
+          password_hash TEXT NOT NULL,
+          role TEXT NOT NULL DEFAULT 'trader_client',
+          role_title TEXT,
+          broker_id TEXT,
+          sub_broker_id TEXT,
+          master_id TEXT,
+          tenant_id TEXT,
+          organization TEXT,
+          pan TEXT,
+          created_at TIMESTAMPTZ DEFAULT NOW(),
+          updated_at TIMESTAMPTZ DEFAULT NOW()
+        );
+        CREATE UNIQUE INDEX IF NOT EXISTS idx_up_accounts_email ON user_panel_accounts(LOWER(email));
+        CREATE INDEX IF NOT EXISTS idx_up_accounts_user_id ON user_panel_accounts(user_id);
+        CREATE INDEX IF NOT EXISTS idx_up_accounts_phone ON user_panel_accounts(phone);
+        CREATE INDEX IF NOT EXISTS idx_up_accounts_role ON user_panel_accounts(role);
+      `);
+      try {
+        await client.query(
+          'INSERT INTO user_panel_schema_migrations (version, name) VALUES (5, $1) ON CONFLICT (version) DO NOTHING',
+          ['Direct login and registration accounts schema']
+        );
+      } catch {}
+      console.log('[Database Migration] Migration 5 successfully committed.');
+    }
+
     // Guarantee created_at columns exist unconditionally on primary tables
-    const coreTables = ['user_panel_clients', 'user_panel_positions', 'user_panel_orders', 'user_panel_fund_transactions', 'user_panel_ledger_entries'];
+    const coreTables = ['user_panel_accounts', 'user_panel_clients', 'user_panel_positions', 'user_panel_orders', 'user_panel_fund_transactions', 'user_panel_ledger_entries'];
     for (const tbl of coreTables) {
       try {
         await client.query(`ALTER TABLE "${tbl}" ADD COLUMN IF NOT EXISTS created_at TIMESTAMPTZ DEFAULT NOW()`);
@@ -838,8 +879,13 @@ export const dbRepo = {
         INSERT INTO user_panel_clients (
           id, name, email, phone, pan, status, is_demo, ledger_balance, open_pnl,
           peak_ledger, margin_used, income, margin_available, broker_id, broker_name,
-          kyc_status, kyc_documents, created_date, last_active, risk_limit, updated_at, created_at
-        ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, NOW(), NOW())
+          kyc_status, kyc_documents, created_date, last_active, risk_limit,
+          user_id, client_code, updated_at, created_at
+        ) VALUES (
+          $1, $2, $3, $4, $5, $6, $7, $8, $9, $10,
+          $11, $12, $13, $14, $15, $16, $17, $18, $19, $20,
+          $21, $22, NOW(), NOW()
+        )
         ON CONFLICT (id) DO UPDATE SET
           name = EXCLUDED.name,
           email = EXCLUDED.email,
@@ -854,7 +900,7 @@ export const dbRepo = {
         client.id, client.name, client.email, client.phone, client.pan, client.status,
         client.isDemo, client.ledgerBalance, client.openPnL, client.peakLedger,
         client.marginUsed, client.income, client.marginAvailable, client.brokerId,
-        client.brokerName, client.kycStatus, JSON.stringify(client.kycDocuments),
+        client.brokerName, client.kycStatus, JSON.stringify(client.kycDocuments || []),
         client.createdDate, client.lastActive, client.riskLimit, client.userId || client.id, client.clientCode || client.id
       ]);
     } catch (e: any) {
@@ -1249,5 +1295,119 @@ export const dbRepo = {
       log.id, log.timestamp, log.user, log.role, log.action,
       log.relatedEntity, log.ipAddress, log.result, log.details
     ]);
+  },
+
+  // User Accounts (Direct Login & Signup Authentication)
+  async insertAccount(account: UserAccount): Promise<void> {
+    if (!pgPool || !isPostgresReady) return;
+    try {
+      await pgPool.query(`
+        INSERT INTO user_panel_accounts (
+          id, user_id, name, email, phone, password_hash, role, role_title,
+          broker_id, sub_broker_id, master_id, tenant_id, organization, pan, created_at, updated_at
+        ) VALUES (
+          $1, $2, $3, $4, $5, $6, $7, $8,
+          $9, $10, $11, $12, $13, $14, NOW(), NOW()
+        )
+        ON CONFLICT (id) DO UPDATE SET
+          name = EXCLUDED.name,
+          email = EXCLUDED.email,
+          phone = EXCLUDED.phone,
+          password_hash = EXCLUDED.password_hash,
+          role = EXCLUDED.role,
+          role_title = EXCLUDED.role_title,
+          broker_id = EXCLUDED.broker_id,
+          sub_broker_id = EXCLUDED.sub_broker_id,
+          master_id = EXCLUDED.master_id,
+          tenant_id = EXCLUDED.tenant_id,
+          organization = EXCLUDED.organization,
+          pan = EXCLUDED.pan,
+          updated_at = NOW();
+      `, [
+        account.id,
+        account.userId || account.id,
+        account.name,
+        account.email,
+        account.phone || '',
+        account.passwordHash,
+        account.role,
+        account.roleTitle || '',
+        account.brokerId || 'BRK-ROHAN-01',
+        account.subBrokerId || null,
+        account.masterId || null,
+        account.tenantId || 'TNT-001',
+        account.organization || '',
+        account.pan || '',
+      ]);
+    } catch (e: any) {
+      console.warn('[Database dbRepo.insertAccount] notice:', e.message);
+    }
+  },
+
+  async getAccountByIdentifier(identifier: string): Promise<UserAccount | null> {
+    if (!pgPool || !isPostgresReady) return null;
+    try {
+      const clean = identifier.trim().toLowerCase();
+      const res = await pgPool.query(`
+        SELECT * FROM user_panel_accounts
+        WHERE LOWER(email) = $1
+           OR LOWER(id) = $1
+           OR LOWER(user_id) = $1
+           OR phone = $2
+        LIMIT 1
+      `, [clean, identifier.trim()]);
+      if (res.rows.length === 0) return null;
+      const r = res.rows[0];
+      return {
+        id: r.id,
+        userId: r.user_id || r.id,
+        name: r.name,
+        email: r.email,
+        phone: r.phone || '',
+        passwordHash: r.password_hash,
+        role: r.role,
+        roleTitle: r.role_title || '',
+        brokerId: r.broker_id || 'BRK-ROHAN-01',
+        subBrokerId: r.sub_broker_id || undefined,
+        masterId: r.master_id || undefined,
+        tenantId: r.tenant_id || 'TNT-001',
+        organization: r.organization || '',
+        pan: r.pan || '',
+        createdAt: r.created_at ? new Date(r.created_at).toISOString() : new Date().toISOString(),
+      };
+    } catch (e: any) {
+      console.warn('[Database dbRepo.getAccountByIdentifier] notice:', e.message);
+      return null;
+    }
+  },
+
+  async getAccountById(id: string): Promise<UserAccount | null> {
+    return this.getAccountByIdentifier(id);
+  },
+
+  async getAllAccounts(): Promise<UserAccount[]> {
+    if (!pgPool || !isPostgresReady) return [];
+    try {
+      const res = await pgPool.query('SELECT * FROM user_panel_accounts ORDER BY created_at ASC');
+      return res.rows.map(r => ({
+        id: r.id,
+        userId: r.user_id || r.id,
+        name: r.name,
+        email: r.email,
+        phone: r.phone || '',
+        passwordHash: r.password_hash,
+        role: r.role,
+        roleTitle: r.role_title || '',
+        brokerId: r.broker_id || 'BRK-ROHAN-01',
+        subBrokerId: r.sub_broker_id || undefined,
+        masterId: r.master_id || undefined,
+        tenantId: r.tenant_id || 'TNT-001',
+        organization: r.organization || '',
+        pan: r.pan || '',
+        createdAt: r.created_at ? new Date(r.created_at).toISOString() : new Date().toISOString(),
+      }));
+    } catch {
+      return [];
+    }
   },
 };

@@ -279,3 +279,28 @@ export type NavigationTab =
   | 'reports'
   | 'instruments'
   | 'settings';
+
+export interface UserAccount {
+  id: string;
+  userId: string;
+  name: string;
+  email: string;
+  phone: string;
+  passwordHash: string;
+  role: UserRole;
+  roleTitle: string;
+  brokerId: string;
+  subBrokerId?: string;
+  masterId?: string;
+  tenantId: string;
+  organization?: string;
+  pan?: string;
+  createdAt?: string;
+}
+
+export interface AuthResponse {
+  success: boolean;
+  message?: string;
+  token?: string;
+  user?: AuthenticatedUser;
+}

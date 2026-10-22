@@ -56,12 +56,25 @@ let currentAuthToken = '';
 
 export function setAuthToken(token: string) {
   currentAuthToken = token;
+  if (typeof window !== 'undefined' && window.localStorage) {
+    if (token) {
+      localStorage.setItem('nextrade_auth_token', token);
+      localStorage.setItem('token', token);
+    } else {
+      localStorage.removeItem('nextrade_auth_token');
+      localStorage.removeItem('token');
+      localStorage.removeItem('nextrade_auth_user');
+      localStorage.removeItem('admin_token');
+      localStorage.removeItem('broker_token');
+    }
+  }
 }
 
 export function getAuthToken(): string {
   if (currentAuthToken) return currentAuthToken;
   if (typeof window !== 'undefined' && window.localStorage) {
     return (
+      localStorage.getItem('nextrade_auth_token') ||
       localStorage.getItem('token') ||
       localStorage.getItem('admin_token') ||
       localStorage.getItem('broker_token') ||
@@ -158,6 +171,53 @@ function normalizeClients(data: any): Client[] {
 
 export const api = {
   // Auth & Roles
+  async login(identifier: string, password: string): Promise<{ success: boolean; user: AuthenticatedUser; token: string; tenant?: TenantBranding }> {
+    const res = await fetch(resolveApiUrl('/api/auth/login'), {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ identifier, password }),
+    });
+    const data = await res.json();
+    if (!res.ok || !data.success) {
+      throw new Error(data.message || 'Login failed. Please check your credentials.');
+    }
+    if (data.token) {
+      setAuthToken(data.token);
+    }
+    return data;
+  },
+
+  async register(formData: {
+    name: string;
+    email: string;
+    phone?: string;
+    password: string;
+    role?: string;
+    organization?: string;
+    pan?: string;
+  }): Promise<{ success: boolean; user: AuthenticatedUser; token: string; tenant?: TenantBranding }> {
+    const res = await fetch(resolveApiUrl('/api/auth/register'), {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(formData),
+    });
+    const data = await res.json();
+    if (!res.ok || !data.success) {
+      throw new Error(data.message || 'Registration failed. Please try again.');
+    }
+    if (data.token) {
+      setAuthToken(data.token);
+    }
+    return data;
+  },
+
+  async logout(): Promise<void> {
+    try {
+      await authenticatedFetch('/api/auth/logout', { method: 'POST' });
+    } catch {}
+    setAuthToken('');
+  },
+
   async getMe(): Promise<{ user: AuthenticatedUser; tenant: TenantBranding; token: string }> {
     const res = await authenticatedFetch('/api/auth/me');
     if (!res.ok && res.status === 401) {

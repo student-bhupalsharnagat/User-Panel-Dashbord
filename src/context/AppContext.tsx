@@ -17,7 +17,7 @@ import {
   SettingsState,
   TenantBranding,
 } from '../types';
-import { api, getAuthToken, resolveApiUrl } from '../services/api';
+import { api, getAuthToken, setAuthToken, resolveApiUrl } from '../services/api';
 
 export interface ToastItem {
   id: string;
@@ -31,8 +31,12 @@ interface AppContextType {
   activeTab: NavigationTab;
   setActiveTab: (tab: NavigationTab) => void;
   
-  // User & Tenant
+  // User & Tenant & Auth
   currentUser: AuthenticatedUser | null;
+  isAuthenticated: boolean;
+  login: (identifier: string, password: string) => Promise<any>;
+  register: (formData: any) => Promise<any>;
+  logout: () => Promise<void>;
   switchRole: (role: string) => Promise<void>;
   tenantBranding: TenantBranding | null;
   updateBranding: (branding: Partial<TenantBranding>) => Promise<void>;
@@ -117,8 +121,20 @@ const AppContext = createContext<AppContextType | undefined>(undefined);
 
 export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => {
   const [activeTab, setActiveTab] = useState<NavigationTab>('dashboard');
-  const [currentUser, setCurrentUser] = useState<AuthenticatedUser | null>(null);
+  const [currentUser, setCurrentUser] = useState<AuthenticatedUser | null>(() => {
+    if (typeof window !== 'undefined' && window.localStorage) {
+      try {
+        const saved = localStorage.getItem('nextrade_auth_user');
+        const token = getAuthToken();
+        if (saved && token) {
+          return JSON.parse(saved);
+        }
+      } catch {}
+    }
+    return null;
+  });
   const [tenantBranding, setTenantBranding] = useState<TenantBranding | null>(null);
+  const isAuthenticated = Boolean(currentUser && getAuthToken());
   
   const [isLiveMode, setIsLiveMode] = useState<boolean>(true);
   const [isCompactMode, setIsCompactMode] = useState<boolean>(false);
@@ -202,9 +218,19 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
 
   // Fetch Authoritative Bootstrap Feed (User, Tenant, Instruments) on mount
   useEffect(() => {
+    const token = getAuthToken();
+    if (!token && !currentUser) {
+      return;
+    }
+
     api.getBootstrap()
       .then((data) => {
-        if (data.user) setCurrentUser(data.user);
+        if (data.user) {
+          setCurrentUser(data.user);
+          if (typeof window !== 'undefined' && window.localStorage) {
+            localStorage.setItem('nextrade_auth_user', JSON.stringify(data.user));
+          }
+        }
         if (data.tenant) setTenantBranding(data.tenant);
         if (Array.isArray(data.instruments) && data.instruments.length > 0) {
           const ticksMap: Record<string, Partial<MarketInstrument>> = {};
@@ -228,16 +254,77 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
           .then(({ user, tenant }) => {
             setCurrentUser(user);
             setTenantBranding(tenant);
+            if (typeof window !== 'undefined' && window.localStorage) {
+              localStorage.setItem('nextrade_auth_user', JSON.stringify(user));
+            }
           })
-          .catch((e) => console.error('Failed to fetch user:', e));
+          .catch((e) => {
+            console.error('Failed to fetch user:', e);
+            if (e.message && e.message.includes('Unauthorized')) {
+              setCurrentUser(null);
+              setAuthToken('');
+            }
+          });
       });
   }, []);
+
+  // Direct login handler
+  const login = async (identifier: string, password: string) => {
+    const res = await api.login(identifier, password);
+    setCurrentUser(res.user);
+    if (res.tenant) setTenantBranding(res.tenant);
+    if (typeof window !== 'undefined' && window.localStorage) {
+      localStorage.setItem('nextrade_auth_user', JSON.stringify(res.user));
+    }
+    showToast(`Welcome back, ${res.user.name}`, 'success');
+    triggerRefresh();
+    api.getBootstrap().then((data) => {
+      if (data.tenant) setTenantBranding(data.tenant);
+    }).catch(() => {});
+    return res;
+  };
+
+  // Direct signup handler
+  const register = async (formData: any) => {
+    const res = await api.register(formData);
+    setCurrentUser(res.user);
+    if (res.tenant) setTenantBranding(res.tenant);
+    if (typeof window !== 'undefined' && window.localStorage) {
+      localStorage.setItem('nextrade_auth_user', JSON.stringify(res.user));
+    }
+    showToast(`Account created! Welcome to NexTrade, ${res.user.name}`, 'success');
+    triggerRefresh();
+    api.getBootstrap().then((data) => {
+      if (data.tenant) setTenantBranding(data.tenant);
+    }).catch(() => {});
+    return res;
+  };
+
+  // Logout handler
+  const logout = async () => {
+    try {
+      await api.logout();
+    } catch {}
+    setCurrentUser(null);
+    setAuthToken('');
+    if (typeof window !== 'undefined' && window.localStorage) {
+      localStorage.removeItem('nextrade_auth_user');
+      localStorage.removeItem('nextrade_auth_token');
+      localStorage.removeItem('token');
+      localStorage.removeItem('admin_token');
+      localStorage.removeItem('broker_token');
+    }
+    showToast('Logged out of session', 'info');
+  };
 
   // Switch role handler
   const switchRole = async (role: string) => {
     try {
       const res = await api.switchRole(role);
       setCurrentUser(res.user);
+      if (typeof window !== 'undefined' && window.localStorage) {
+        localStorage.setItem('nextrade_auth_user', JSON.stringify(res.user));
+      }
       triggerRefresh();
       showToast(`Switched active workspace role to ${res.user.roleTitle}`, 'info');
     } catch (err: any) {
@@ -499,6 +586,10 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
         activeTab,
         setActiveTab: handleSetActiveTab,
         currentUser,
+        isAuthenticated,
+        login,
+        register,
+        logout,
         switchRole,
         tenantBranding,
         updateBranding,

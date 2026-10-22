@@ -34,6 +34,7 @@ export const Sidebar: React.FC = () => {
     tenantBranding,
     setIsSupportModalOpen,
     switchRole,
+    logout,
     isRealtimeConnected,
     isMobileMenuOpen,
     setIsMobileMenuOpen,
@@ -200,10 +201,24 @@ export const Sidebar: React.FC = () => {
             title="Switch role between Broker Admin and Central Super Admin"
           >
             <div className="flex items-center gap-3 min-w-0">
-              <LogOut className="w-4 h-4 text-slate-500 group-hover:text-amber-400 transition-colors shrink-0" />
+              <Activity className="w-4 h-4 text-slate-500 group-hover:text-amber-400 transition-colors shrink-0" />
               <span className="truncate">Role Switch</span>
             </div>
             <ChevronRight className="w-3.5 h-3.5 text-slate-600 group-hover:text-slate-400 shrink-0" />
+          </button>
+
+          <button
+            onClick={() => {
+              setIsMobileMenuOpen(false);
+              logout();
+            }}
+            className="w-full flex items-center justify-between px-3 py-2 rounded-lg text-xs text-rose-400 hover:text-rose-300 hover:bg-rose-500/10 transition-colors group cursor-pointer"
+            title="Sign out of current terminal session"
+          >
+            <div className="flex items-center gap-3 min-w-0">
+              <LogOut className="w-4 h-4 text-rose-400/80 group-hover:text-rose-300 transition-colors shrink-0" />
+              <span className="truncate">Sign Out</span>
+            </div>
           </button>
         </div>
       </aside>
