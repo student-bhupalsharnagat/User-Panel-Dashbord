@@ -139,6 +139,13 @@ export const DashboardView: React.FC = () => {
       });
   }, [refreshTrigger]);
 
+  // Single source for every client count on this page so cards, ribbon and donut always agree
+  const totalClients = metrics?.totalClients ?? 0;
+  const activeClients = metrics?.activeClients ?? 0;
+  const inactiveClients = metrics?.inactiveClients ?? Math.max(0, totalClients - activeClients);
+  const newToday = metrics?.newToday ?? 0;
+  const activeRatioPct = totalClients > 0 ? +((activeClients / totalClients) * 100).toFixed(1) : 0;
+
   const handleExportSummary = () => {
     if (!metrics) return;
     const summaryData = [
@@ -223,7 +230,7 @@ export const DashboardView: React.FC = () => {
             </div>
           </div>
           <div className="text-2xl font-bold font-mono text-white tracking-tight">
-            {metrics ? metrics.totalClients.toLocaleString('en-IN') : '2,486'}
+            {metrics ? metrics.totalClients.toLocaleString('en-IN') : '0'}
           </div>
           <div className="text-[11px] text-emerald-400 font-medium mt-1 flex items-center gap-1">
             <ArrowUpRight className="w-3.5 h-3.5" />
@@ -240,10 +247,10 @@ export const DashboardView: React.FC = () => {
             </div>
           </div>
           <div className="text-2xl font-bold font-mono text-white tracking-tight">
-            {metrics ? metrics.activeClients.toLocaleString('en-IN') : '2,142'}
+            {metrics ? metrics.activeClients.toLocaleString('en-IN') : '0'}
           </div>
           <div className="text-[11px] text-slate-400 mt-1">
-            {metrics?.activeClientsRatio || 86.1}% on book
+            {activeRatioPct}% on book
           </div>
         </div>
 
@@ -286,11 +293,11 @@ export const DashboardView: React.FC = () => {
       <div className="p-2 sm:p-3 rounded-xl bg-[#111827] border border-[#1e293b] grid grid-cols-2 sm:grid-cols-3 md:grid-cols-5 lg:grid-cols-9 gap-2 text-center">
         <div className="p-2 rounded-lg bg-slate-900/60 border border-slate-800/40">
           <div className="text-[10px] font-semibold text-slate-400 uppercase tracking-wider truncate">Inactive</div>
-          <div className="text-xs font-bold font-mono text-slate-200 mt-0.5">{metrics?.inactiveClients || 344}</div>
+          <div className="text-xs font-bold font-mono text-slate-200 mt-0.5">{inactiveClients}</div>
         </div>
         <div className="p-2 rounded-lg bg-slate-900/60 border border-slate-800/40">
           <div className="text-[10px] font-semibold text-slate-400 uppercase tracking-wider truncate">New today</div>
-          <div className="text-xs font-bold font-mono text-slate-200 mt-0.5">{metrics?.newToday || 28}</div>
+          <div className="text-xs font-bold font-mono text-slate-200 mt-0.5">{newToday}</div>
         </div>
         <div className="p-2 rounded-lg bg-slate-900/60 border border-slate-800/40">
           <div className="text-[10px] font-semibold text-slate-400 uppercase tracking-wider truncate">Margin used</div>
@@ -506,12 +513,12 @@ export const DashboardView: React.FC = () => {
                   stroke="#06b6d4"
                   strokeWidth="12"
                   strokeDasharray="238.76"
-                  strokeDashoffset={238.76 * (1 - 0.86)}
+                  strokeDashoffset={238.76 * (1 - activeRatioPct / 100)}
                   strokeLinecap="round"
                 />
               </svg>
               <div className="absolute inset-0 flex flex-col items-center justify-center">
-                <span className="text-xl font-bold font-mono text-white">86%</span>
+                <span className="text-xl font-bold font-mono text-white">{Math.round(activeRatioPct)}%</span>
                 <span className="text-[9px] uppercase tracking-wider text-slate-400">Active</span>
               </div>
             </div>
@@ -521,17 +528,17 @@ export const DashboardView: React.FC = () => {
               <div className="flex items-center gap-2">
                 <span className="w-2 h-2 rounded-full bg-cyan-400 shrink-0" />
                 <span className="text-slate-400">Active</span>
-                <span className="font-mono font-semibold text-white ml-auto">2,142</span>
+                <span className="font-mono font-semibold text-white ml-auto">{activeClients.toLocaleString('en-IN')}</span>
               </div>
               <div className="flex items-center gap-2">
                 <span className="w-2 h-2 rounded-full bg-slate-600 shrink-0" />
                 <span className="text-slate-400">Inactive</span>
-                <span className="font-mono font-semibold text-slate-300 ml-auto">344</span>
+                <span className="font-mono font-semibold text-slate-300 ml-auto">{inactiveClients.toLocaleString('en-IN')}</span>
               </div>
               <div className="flex items-center gap-2">
                 <span className="w-2 h-2 rounded-full bg-indigo-400 shrink-0" />
                 <span className="text-slate-400">New</span>
-                <span className="font-mono font-semibold text-slate-300 ml-auto">182</span>
+                <span className="font-mono font-semibold text-slate-300 ml-auto">{newToday.toLocaleString('en-IN')}</span>
               </div>
             </div>
           </div>

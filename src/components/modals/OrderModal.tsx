@@ -9,6 +9,11 @@ import { useApp } from '../../context/AppContext';
 import { api } from '../../services/api';
 import { Client, MarketInstrument } from '../../types';
 
+export function roundToTick(val: number, tickSize: number = 0.05): number {
+  if (!tickSize || tickSize <= 0) tickSize = 0.05;
+  return Number((Math.round(val / tickSize) * tickSize).toFixed(2));
+}
+
 export const OrderModal: React.FC = () => {
   const { orderModalState, closeOrderModal, showToast, triggerRefresh } = useApp();
   
@@ -32,14 +37,12 @@ export const OrderModal: React.FC = () => {
         if (cls && cls.length > 0) {
           setSelectedClientId(cls[0].id);
         }
-        if (orderModalState.instrument) {
-          setSelectedSymbol(orderModalState.instrument.symbol);
-          setPrice(orderModalState.instrument.lastPrice);
-          setQuantity(orderModalState.instrument.lotSize || 100);
-        } else if (insts.length > 0) {
-          setSelectedSymbol(insts[0].symbol);
-          setPrice(insts[0].lastPrice);
-          setQuantity(insts[0].lotSize || 100);
+        const inst = orderModalState.instrument || (insts.length > 0 ? insts[0] : null);
+        if (inst) {
+          setSelectedSymbol(inst.symbol);
+          const tick = inst.tickSize || 0.05;
+          setPrice(roundToTick(inst.lastPrice, tick));
+          setQuantity(inst.lotSize || 1);
         }
         if (orderModalState.defaultSide) {
           setSide(orderModalState.defaultSide);
@@ -63,28 +66,21 @@ export const OrderModal: React.FC = () => {
     e.preventDefault();
     if (!currentInst) return;
 
-    if (isNaN(numQty) || numQty <= 0) {
-      showToast('Please enter a valid positive quantity', 'error');
-      return;
-    }
-
     const lotSize = currentInst.lotSize || 1;
-    if (numQty % lotSize !== 0) {
-      showToast(`Quantity (${numQty}) must be a multiple of lot size (${lotSize})`, 'error');
+    const finalQty = numQty <= 0 ? lotSize : numQty;
+    if (finalQty % lotSize !== 0) {
+      showToast(`Quantity (${finalQty}) must be a multiple of lot size (${lotSize})`, 'error');
       return;
     }
 
+    let finalPrice = numPrice;
     if (orderType !== 'MARKET') {
       if (isNaN(numPrice) || numPrice <= 0) {
         showToast('Order price must be greater than ₹0', 'error');
         return;
       }
       const tickSize = currentInst.tickSize || 0.05;
-      const tickRemainder = Math.abs(Math.round(numPrice * 100) % Math.round(tickSize * 100));
-      if (tickRemainder > 0.001 && tickRemainder < Math.round(tickSize * 100) - 0.001) {
-        showToast(`Price ₹${numPrice} must be a valid multiple of tick size ₹${tickSize}`, 'error');
-        return;
-      }
+      finalPrice = roundToTick(numPrice, tickSize);
     }
 
     setIsSubmitting(true);
@@ -94,12 +90,12 @@ export const OrderModal: React.FC = () => {
         instrument: currentInst.symbol,
         side,
         type: orderType,
-        quantity: numQty,
-        orderPrice: orderType === 'MARKET' ? 'Market' : numPrice,
+        quantity: finalQty,
+        orderPrice: orderType === 'MARKET' ? 'Market' : finalPrice,
         product,
       });
 
-      showToast(`${side} order for ${numQty} ${currentInst.symbol} submitted successfully`, 'success');
+      showToast(`${side} order for ${finalQty} ${currentInst.symbol} submitted successfully`, 'success');
       triggerRefresh();
       closeOrderModal();
     } catch (err: any) {
@@ -110,7 +106,7 @@ export const OrderModal: React.FC = () => {
   };
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center p-3 sm:p-4 bg-black/75 backdrop-blur-sm animate-in fade-in duration-150">
+    <div className="fixed inset-0 z-[100] flex items-center justify-center p-3 sm:p-4 bg-black/75 backdrop-blur-sm animate-in fade-in duration-150">
       <div className="bg-[#111827] border border-[#1e293b] rounded-2xl max-w-md w-full shadow-2xl overflow-hidden text-slate-200 max-h-[92vh] flex flex-col">
         {/* Header with Side Tabs */}
         <div className="p-3.5 sm:p-4 border-b border-slate-800 flex items-center justify-between shrink-0">
@@ -158,7 +154,11 @@ export const OrderModal: React.FC = () => {
               onChange={(e) => {
                 setSelectedSymbol(e.target.value);
                 const inst = instruments.find((i) => i.symbol === e.target.value);
-                if (inst) setPrice(inst.lastPrice);
+                if (inst) {
+                  const tick = inst.tickSize || 0.05;
+                  setPrice(roundToTick(inst.lastPrice, tick));
+                  setQuantity(inst.lotSize || 1);
+                }
               }}
               className="w-full bg-[#131b2e] border border-slate-700/80 rounded-lg px-3 py-2 text-xs text-white focus:outline-none focus:border-indigo-500"
             >

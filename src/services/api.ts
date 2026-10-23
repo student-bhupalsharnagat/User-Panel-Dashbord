@@ -135,12 +135,31 @@ function normalizeClients(data: any): Client[] {
     list = data.items;
   }
 
-  return list.map((item: any) => ({
-    id: String(item.id || item._id || item.clientId || item.userId || item.clientCode || `CLI-${Math.random().toString(36).slice(2, 7).toUpperCase()}`),
-    name: String(item.name || item.fullName || item.username || 'Unnamed Client'),
-    email: String(item.email || ''),
-    phone: String(item.phone || item.mobile || ''),
-    pan: String(item.pan || 'N/A'),
+  return list.map((item: any) => {
+    const id = String(item.id || item._id || item.clientId || item.userId || item.clientCode || `CLI-${Math.random().toString(36).slice(2, 7).toUpperCase()}`);
+    let email = String(item.email || '').trim();
+    email = email.replace(/^(usr[-_])?(tnt[-_][a-z0-9]+|vertex[-_]default|default)[-_:]/i, '');
+    if (email.includes('@tradingplatform.com')) {
+      const username = email.split('@')[0].replace(/^(usr[-_])?(tnt[-_][a-z0-9]+|vertex[-_]default|default)[-_:]/i, '');
+      email = `${username || id.toLowerCase()}@client.com`;
+    }
+    if (!email) {
+      email = `${id.toLowerCase()}@client.com`;
+    }
+
+    let phone = String(item.phone || item.mobile || '').trim();
+    if (!phone || phone === '9999999999' || phone === '+91 98000 00000' || phone === '9800000000' || phone.includes('00000')) {
+      phone = '+91 9876543210';
+    } else if (!phone.startsWith('+91') && /^\d{10}$/.test(phone)) {
+      phone = `+91 ${phone}`;
+    }
+
+    return {
+      id,
+      name: String(item.name || item.fullName || item.username || 'Unnamed Client'),
+      email,
+      phone,
+      pan: String(item.pan || 'N/A'),
     status: (item.status === 'Active' || item.status === 'Inactive' || item.status === 'Suspended')
       ? item.status
       : (item.isActive === false ? 'Inactive' : 'Active'),
@@ -166,7 +185,8 @@ function normalizeClients(data: any): Client[] {
     lastActive: String(item.lastActive || item.updatedAt || 'Just now'),
     riskLimit: Number(item.riskLimit ?? 500000),
     isLive: item.isLive !== undefined ? Boolean(item.isLive) : true,
-  }));
+  };
+  });
 }
 
 export const api = {
@@ -473,7 +493,7 @@ export const api = {
   async getAuditLogs(): Promise<AuditLog[]> {
     const res = await authenticatedFetch('/api/audit-logs');
     const data = await res.json();
-    return data.logs;
+    return data.logs || data.auditLogs || data.actionLogs || [];
   },
 
   // Reports

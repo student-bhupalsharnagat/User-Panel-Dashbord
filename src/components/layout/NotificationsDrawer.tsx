@@ -13,6 +13,7 @@ export const NotificationsDrawer: React.FC = () => {
     setIsNotificationsOpen,
     setActiveTab,
     openFundActionModal,
+    setOrdersFilter,
   } = useApp();
 
   if (!isNotificationsOpen) return null;
@@ -41,6 +42,7 @@ export const NotificationsDrawer: React.FC = () => {
       type: 'success' as const,
       time: '38 mins ago',
       actionTab: 'orders',
+      filter: { query: 'ORD-98421', status: 'All' },
     },
     {
       id: 'notif-4',
@@ -49,6 +51,7 @@ export const NotificationsDrawer: React.FC = () => {
       type: 'warning' as const,
       time: '1 hour ago',
       actionTab: 'orders',
+      filter: { query: 'ORD-98416', status: 'Rejected' },
     },
   ];
 
@@ -86,6 +89,9 @@ export const NotificationsDrawer: React.FC = () => {
                     <button
                       onClick={() => {
                         setIsNotificationsOpen(false);
+                        if (n.filter && setOrdersFilter) {
+                          setOrdersFilter(n.filter);
+                        }
                         setActiveTab(n.actionTab as any);
                       }}
                       className="text-[10px] text-indigo-400 hover:text-indigo-300 font-semibold flex items-center gap-0.5"

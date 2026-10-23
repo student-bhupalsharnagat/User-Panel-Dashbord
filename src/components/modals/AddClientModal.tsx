@@ -15,7 +15,7 @@ export const AddClientModal: React.FC = () => {
   const [email, setEmail] = useState('');
   const [phone, setPhone] = useState('');
   const [pan, setPan] = useState('');
-  const [initialMargin, setInitialMargin] = useState(250000);
+  const [initialMargin, setInitialMargin] = useState<number | string>(250000);
   const [isDemo, setIsDemo] = useState(false);
   const [isSubmitting, setIsSubmitting] = useState(false);
 
@@ -34,6 +34,8 @@ export const AddClientModal: React.FC = () => {
       return;
     }
 
+    const parsedMargin = initialMargin === '' ? 0 : Math.max(0, Number(initialMargin) || 0);
+
     setIsSubmitting(true);
     try {
       const newClient = await api.createClient({
@@ -41,7 +43,8 @@ export const AddClientModal: React.FC = () => {
         email,
         phone,
         pan: pan || 'ABCDE1234F',
-        initialMargin: Number(initialMargin),
+        initialMargin: parsedMargin,
+        ledgerBalance: parsedMargin,
         isDemo,
       });
 
@@ -60,7 +63,7 @@ export const AddClientModal: React.FC = () => {
   };
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center p-3 sm:p-4 bg-black/75 backdrop-blur-sm animate-in fade-in duration-150">
+    <div className="fixed inset-0 z-[100] flex items-center justify-center p-3 sm:p-4 bg-black/75 backdrop-blur-sm animate-in fade-in duration-150">
       <div className="bg-[#111827] border border-[#1e293b] rounded-2xl max-w-md w-full shadow-2xl overflow-hidden text-slate-200 max-h-[92vh] flex flex-col">
         <div className="p-3.5 sm:p-4 border-b border-slate-800 flex items-center justify-between shrink-0">
           <div className="flex items-center gap-2.5">
@@ -149,7 +152,7 @@ export const AddClientModal: React.FC = () => {
                 min="0"
                 step="10000"
                 value={initialMargin}
-                onChange={(e) => setInitialMargin(parseInt(e.target.value) || 0)}
+                onChange={(e) => setInitialMargin(e.target.value === '' ? '' : Math.max(0, parseInt(e.target.value, 10) || 0))}
                 className="w-full bg-[#131b2e] border border-slate-700/80 rounded-lg px-3 py-2 text-xs font-mono text-white focus:outline-none focus:border-indigo-500"
               />
             </div>

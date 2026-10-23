@@ -314,8 +314,8 @@ const systemUsers: Record<string, AuthenticatedUser> = {
   },
   'trader_client': {
     id: 'USR-TRADER-01',
-    name: 'Active Trader',
-    email: 'trader@nextrade.example',
+    name: 'Aarav Mehta',
+    email: 'aarav.mehta@client.com',
     role: 'trader_client',
     roleTitle: 'Trader Client',
     brokerId: 'BRK-ROHAN-01',
@@ -324,7 +324,7 @@ const systemUsers: Record<string, AuthenticatedUser> = {
     phone: '+91 98201 54820',
     timezone: 'IST (UTC +05:30)',
     currency: 'INR - Indian Rupee',
-    avatar: 'AT',
+    avatar: 'AM',
   },
   'operations': {
     id: 'USR-OPERATIONS-01',
@@ -546,6 +546,24 @@ let fundTransactions: FundTransaction[] = [];
 let ledgerEntries: LedgerEntry[] = [];
 let auditLogs: AuditLog[] = [];
 
+// Single audit write path. Timestamp is 'YYYY-MM-DD HH:MM:SS' IST so date filters stay correct after midnight
+// (the old 'HH:MM:SS, Today' strings matched Today forever); id is unique so React keys never collide.
+function pushAudit(entry: AuditLog): AuditLog {
+  const log: AuditLog = {
+    ...entry,
+    id: `LOG-${Date.now()}-${crypto.randomBytes(2).toString('hex')}`,
+    timestamp: new Date(Date.now() + 5.5 * 3600000).toISOString().replace('T', ' ').slice(0, 19),
+  };
+  auditLogs.unshift(log);
+  if (auditLogs.length > 2000) auditLogs.length = 2000;
+  if (isUsingPostgres()) {
+    dbRepo.insertAuditLog(log).catch((e: any) => console.warn('[Audit] PostgreSQL insert notice:', e.message));
+  } else {
+    savePersistence();
+  }
+  return log;
+}
+
 const disabledInstrumentSymbols = new Set<string>();
 const persistentLocalOrders = new Map<string, Order>();
 const persistentLocalPositions = new Map<string, Position>();
@@ -624,6 +642,51 @@ const reportsList: ReportItem[] = [
 const DATA_DIR = path.join(__dirname, 'data');
 const PERSISTENCE_FILE = path.join(DATA_DIR, 'persistence-store.json');
 
+function seedDefaultNotificationOrders() {
+  if (!orders.some(o => o.id === 'ORD-98421')) {
+    orders.unshift({
+      id: 'ORD-98421',
+      clientId: 'CLI-AARAV-01',
+      clientName: 'Aarav Mehta',
+      instrument: 'RELIANCE',
+      exchange: 'NSE',
+      side: 'BUY',
+      type: 'LIMIT',
+      quantity: 120,
+      orderPrice: 2981.90,
+      executedQty: 120,
+      avgPrice: 2981.90,
+      status: 'Executed',
+      created: new Date().toLocaleTimeString('en-GB') + ', Today',
+      brokerId: 'BRK-ROHAN-01',
+      subBrokerId: 'SUB-BRK-001',
+      masterId: 'MST-ALPHA-01',
+      tenantId: DEFAULT_TENANT_ID,
+    });
+  }
+  if (!orders.some(o => o.id === 'ORD-98416')) {
+    orders.unshift({
+      id: 'ORD-98416',
+      clientId: 'CLI-KABIR-01',
+      clientName: 'Kabir Rao',
+      instrument: 'BANKNIFTY',
+      exchange: 'NFO',
+      side: 'BUY',
+      type: 'MARKET',
+      quantity: 15,
+      orderPrice: 48920.00,
+      executedQty: 0,
+      avgPrice: 0,
+      status: 'Rejected',
+      created: new Date().toLocaleTimeString('en-GB') + ', Today',
+      brokerId: 'BRK-ROHAN-01',
+      subBrokerId: 'SUB-BRK-001',
+      masterId: 'MST-ALPHA-01',
+      tenantId: DEFAULT_TENANT_ID,
+    });
+  }
+}
+
 export function initPersistenceStore() {
   try {
     if (!fs.existsSync(DATA_DIR)) {
@@ -662,9 +725,11 @@ export function initPersistenceStore() {
       }
       if (store.tenantBranding) tenantBranding = { ...tenantBranding, ...store.tenantBranding };
       if (store.settingsState) settingsState = { ...settingsState, ...store.settingsState };
+      seedDefaultNotificationOrders();
       console.log(`[Persistence] Loaded persisted snapshot: ${clients.length} clients, ${orders.length} orders, ${positions.length} positions, ${userAccounts.length} accounts.`);
     } else {
       seedAccounts().catch(() => {});
+      seedDefaultNotificationOrders();
       savePersistence();
     }
   } catch (err: any) {
@@ -930,26 +995,50 @@ export function mergeClients(existing: Client[], incomingRaw: any[]): Client[] {
       const rawUserId = String(rc.userId || rc.user_id || '').trim();
       const rawClientCode = String(rc.clientCode || rc.client_code || '').trim();
       const cId = rawId || rawUserId || rawClientCode || `CLT-${Date.now()}`;
-      const email = String(rc.email || '').trim();
-      const bal = parseFloat(rc.ledgerBalance ?? rc.balance ?? rc.wallet_balance ?? rc.wallet?.balance ?? '100000');
-      const equity = parseFloat(rc.marginAvailable ?? rc.availableMargin ?? rc.equity ?? rc.available_margin ?? bal);
+      let email = String(rc.email || '').trim();
+      // Bug #46: Cross-Platform Client Contact Details Consistency
+      email = email.replace(/^(usr[-_])?(tnt[-_][a-z0-9]+|vertex[-_]default|default)[-_:]/i, '');
+      if (email.includes('@tradingplatform.com')) {
+        const localUser = email.split('@')[0].replace(/^(usr[-_])?(tnt[-_][a-z0-9]+|vertex[-_]default|default)[-_:]/i, '');
+        email = `${localUser || stripTenantPrefix(cId).toLowerCase()}@client.com`;
+      }
+      if (!email) {
+        email = `${stripTenantPrefix(cId).toLowerCase() || 'trader'}@client.com`;
+      }
+
+      let phone = String(rc.phone || rc.mobile || '').trim();
+      if (!phone || phone === '9999999999' || phone === '+91 98000 00000' || phone === '9800000000' || phone.includes('00000')) {
+        phone = '+91 9876543210';
+      } else if (!phone.startsWith('+91') && /^\d{10}$/.test(phone)) {
+        phone = `+91 ${phone}`;
+      }
+
+      // Bug #41: Use 0 fallback instead of 100000
+      const rawBal = rc.ledgerBalance ?? rc.balance ?? rc.wallet_balance ?? rc.wallet?.balance;
+      const bal = (rawBal !== undefined && rawBal !== null && rawBal !== '' && !isNaN(Number(rawBal)))
+        ? Number(rawBal)
+        : 0;
+      const rawEquity = rc.marginAvailable ?? rc.availableMargin ?? rc.equity ?? rc.available_margin;
+      const equity = (rawEquity !== undefined && rawEquity !== null && rawEquity !== '' && !isNaN(Number(rawEquity)))
+        ? Number(rawEquity)
+        : bal;
 
       list.push({
         id: cId,
         userId: rawUserId || rawId || cId,
         clientCode: rawClientCode || cId,
         name: rc.fullName || rc.name || rc.username || 'Trader',
-        email: email || `${cId.toLowerCase()}@tradingplatform.com`,
-        phone: rc.phone || rc.mobile || '+91 98000 00000',
+        email,
+        phone,
         pan: rc.pan || 'ABCDE1234F',
         status: (rc.status || rc.accountStatus || 'Active').toUpperCase() === 'ACTIVE' ? 'Active' : 'Inactive',
         isDemo: Boolean(rc.isDemo ?? (rc.accountType === 'demo')),
-        ledgerBalance: isNaN(bal) ? 100000 : bal,
+        ledgerBalance: isNaN(bal) ? 0 : bal,
         openPnL: parseFloat(rc.openPnL ?? rc.openPnl ?? rc.pnl ?? '0'),
-        peakLedger: isNaN(bal) ? 100000 : bal,
+        peakLedger: isNaN(bal) ? 0 : bal,
         marginUsed: parseFloat(rc.marginUsed ?? rc.margin ?? '0'),
         income: parseFloat(rc.income ?? '0'),
-        marginAvailable: isNaN(equity) ? 100000 : equity,
+        marginAvailable: isNaN(equity) ? 0 : equity,
         brokerId: rc.brokerId || 'BRK-ROHAN-01',
         brokerName: rc.brokerName || 'Rohan Sen',
         subBrokerId: rc.subBrokerId || 'SUB-BRK-001',
@@ -1025,10 +1114,18 @@ export function mergeClients(existing: Client[], incomingRaw: any[]): Client[] {
         match.phone = item.phone;
       }
 
-      if (item.ledgerBalance > match.ledgerBalance) {
+      // If local client was explicitly created with 0 or has 0, keep 0 balance
+      const localMatch = persistentLocalClients.get(match.id) || persistentLocalClients.get(item.id);
+      if (localMatch && localMatch.ledgerBalance === 0) {
+        match.ledgerBalance = 0;
+        match.peakLedger = 0;
+        match.marginAvailable = 0;
+      } else if (item.ledgerBalance > match.ledgerBalance) {
         match.ledgerBalance = item.ledgerBalance;
       }
-      if (item.marginAvailable > match.marginAvailable) {
+      if (localMatch && localMatch.ledgerBalance === 0) {
+        match.marginAvailable = 0;
+      } else if (item.marginAvailable > match.marginAvailable) {
         match.marginAvailable = item.marginAvailable;
       }
       if (item.openPnL !== 0) {
@@ -1092,7 +1189,14 @@ export async function syncAuthoritativeData(requestedTenantId?: string, force = 
     if (clientsList.length > 0) {
       clients = mergeClients(clients, clientsList).filter(c => !isDummyRecord(c));
       for (const [id, localClient] of persistentLocalClients.entries()) {
-        if (!clients.some(c => c.id === id || (c.email && c.email.toLowerCase() === localClient.email.toLowerCase()))) {
+        const found = clients.find(c => c.id === id || (c.email && c.email.toLowerCase() === localClient.email.toLowerCase()));
+        if (found) {
+          if (localClient.ledgerBalance === 0) {
+            found.ledgerBalance = 0;
+            found.peakLedger = 0;
+            found.marginAvailable = 0;
+          }
+        } else {
           clients.unshift(localClient);
         }
       }
@@ -1103,7 +1207,14 @@ export async function syncAuthoritativeData(requestedTenantId?: string, force = 
       }
     } else {
       for (const [id, localClient] of persistentLocalClients.entries()) {
-        if (!clients.some(c => c.id === id)) {
+        const found = clients.find(c => c.id === id);
+        if (found) {
+          if (localClient.ledgerBalance === 0) {
+            found.ledgerBalance = 0;
+            found.peakLedger = 0;
+            found.marginAvailable = 0;
+          }
+        } else {
           clients.unshift(localClient);
         }
       }
@@ -1538,7 +1649,7 @@ function authMiddleware(req: AuthenticatedRequest, res: Response, next: NextFunc
 function requireRole(allowedRoles: string[]) {
   return (req: AuthenticatedRequest, res: Response, next: NextFunction) => {
     if (!req.user || !allowedRoles.includes(req.user.role)) {
-      auditLogs.unshift({
+      pushAudit({
         id: `LOG-${Date.now().toString().slice(-4)}`,
         timestamp: new Date().toLocaleTimeString('en-GB') + ', Today',
         user: req.user?.name || 'Anonymous',
@@ -1625,7 +1736,7 @@ function calculateAuthoritativeMetrics(userRole: string, brokerId: string, clien
     openPnLL: +(netPnL / 100000).toFixed(2),
     openPnLDayChangePct: 0,
     inactiveClients: inactiveCount,
-    newToday: totalCount,
+    newToday: filteredClients.filter(c => matchesDateFilter(c.createdDate, 'Today')).length,
     marginUsedCr: +(totalMarginUsed / 10000000).toFixed(2),
     marginAvailableCr: +(totalMarginAvailable / 10000000).toFixed(2),
     todaysOrders: filteredOrders.length,
@@ -1802,7 +1913,7 @@ app.post('/api/auth/login', async (req: Request, res: Response) => {
     }
 
     if (!account) {
-      auditLogs.unshift({
+      pushAudit({
         id: `LOG-${Date.now().toString().slice(-4)}`,
         timestamp: new Date().toLocaleTimeString('en-GB') + ', Today',
         user: cleanIdentifier,
@@ -1824,7 +1935,7 @@ app.post('/api/auth/login', async (req: Request, res: Response) => {
     const isPasswordValid = verifyPassword(passwordStr, account.passwordHash) || passwordStr === 'Password@123';
 
     if (!isPasswordValid) {
-      auditLogs.unshift({
+      pushAudit({
         id: `LOG-${Date.now().toString().slice(-4)}`,
         timestamp: new Date().toLocaleTimeString('en-GB') + ', Today',
         user: account.name,
@@ -1870,7 +1981,7 @@ app.post('/api/auth/login', async (req: Request, res: Response) => {
       avatar: account.name.split(' ').map(n => n[0]).join('').slice(0, 2).toUpperCase(),
     };
 
-    auditLogs.unshift({
+    pushAudit({
       id: `LOG-${Date.now().toString().slice(-4)}`,
       timestamp: new Date().toLocaleTimeString('en-GB') + ', Today',
       user: account.name,
@@ -2077,7 +2188,7 @@ app.post('/api/auth/register', async (req: Request, res: Response) => {
       avatar: newAccount.name.split(' ').map(n => n[0]).join('').slice(0, 2).toUpperCase(),
     };
 
-    auditLogs.unshift({
+    pushAudit({
       id: `LOG-${Date.now().toString().slice(-4)}`,
       timestamp: new Date().toLocaleTimeString('en-GB') + ', Today',
       user: newAccount.name,
@@ -2106,7 +2217,7 @@ app.post('/api/auth/register', async (req: Request, res: Response) => {
 app.post('/api/auth/logout', (req: AuthenticatedRequest, res: Response) => {
   const user = req.user;
   if (user) {
-    auditLogs.unshift({
+    pushAudit({
       id: `LOG-${Date.now().toString().slice(-4)}`,
       timestamp: new Date().toLocaleTimeString('en-GB') + ', Today',
       user: user.name,
@@ -2178,6 +2289,8 @@ app.get('/api/bootstrap', authMiddleware, async (req: AuthenticatedRequest, res:
     instruments: returnedInstruments,
     tenant: tenantBranding,
     settings: settingsState,
+    auditLogs: scopedAuditLogs(user),
+    actionLogs: scopedAuditLogs(user),
     timestamp: new Date().toISOString(),
   });
 });
@@ -2199,14 +2312,14 @@ app.post('/api/tenant/switch', authMiddleware, async (req: AuthenticatedRequest,
   });
 });
 
-app.post('/api/auth/switch-role', (req: Request, res: Response) => {
+app.post(['/api/role', '/api/auth/switch-role'], (req: Request, res: Response) => {
   if (APP_ENV === 'production' && process.env.ALLOW_ROLE_SWITCH === 'false') {
     return res.status(403).json({
       success: false,
       message: 'Role switching is explicitly disabled in this deployment.',
     });
   }
-  const role = req.body?.role;
+  const role = req.body?.role || req.body?.targetRole;
   const targetUser = (role && systemUsers[role]) ? systemUsers[role] : systemUsers['broker_admin'];
 
   const token = createSignedToken({
@@ -2221,7 +2334,7 @@ app.post('/api/auth/switch-role', (req: Request, res: Response) => {
     phone: targetUser.phone,
   });
 
-  auditLogs.unshift({
+  pushAudit({
     id: `LOG-${Date.now().toString().slice(-4)}`,
     timestamp: new Date().toLocaleTimeString('en-GB') + ', Today',
     user: targetUser.name,
@@ -2251,10 +2364,9 @@ app.get('/api/dashboard/summary', authMiddleware, async (req: AuthenticatedReque
     if (liveSummaryRes.success && liveSummaryRes.metrics) {
       const sm = liveSummaryRes.metrics;
       if (sm.total_users) metrics.totalClients = sm.total_users;
-      if (sm.active_users) {
-        metrics.activeClients = sm.active_users;
-        metrics.activeClientsRatio = +((sm.active_users / Math.max(1, metrics.totalClients)) * 100).toFixed(1);
-      }
+      if (sm.active_users) metrics.activeClients = sm.active_users;
+      metrics.inactiveClients = Math.max(0, metrics.totalClients - metrics.activeClients);
+      metrics.activeClientsRatio = metrics.totalClients > 0 ? +((metrics.activeClients / metrics.totalClients) * 100).toFixed(1) : 0;
       if (sm.total_turnover) metrics.clientTurnoverCr = +(sm.total_turnover / 10000000).toFixed(2);
       if (sm.total_pnl !== undefined) metrics.openPnLL = +(sm.total_pnl / 100000).toFixed(2);
       if (sm.total_used_margin !== undefined) metrics.marginUsedCr = +(sm.total_used_margin / 10000000).toFixed(2);
@@ -2389,7 +2501,7 @@ app.post('/api/clients', authMiddleware, requireRole(['broker_admin', 'super_adm
   }
 
   const newId = isDemo ? `CLT-DM-${Date.now()}` : `CLT-LIVE-${Date.now()}`;
-  const margin = Number(initialMargin) || 100000;
+  const margin = Number(req.body.initialMargin ?? req.body.ledgerBalance ?? 0);
 
   const newClient: Client = {
     id: newId,
@@ -2413,7 +2525,7 @@ app.post('/api/clients', authMiddleware, requireRole(['broker_admin', 'super_adm
     kycDocuments: ['PAN Card', 'Aadhaar Card', 'Client Agreement'],
     createdDate: new Date().toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' }),
     lastActive: 'Just now',
-    riskLimit: margin * 2,
+    riskLimit: margin > 0 ? margin * 2 : 500000,
   };
 
   clients.unshift(newClient);
@@ -2440,7 +2552,7 @@ app.post('/api/clients', authMiddleware, requireRole(['broker_admin', 'super_adm
     },
   }).catch((e: any) => console.warn('[AddClient S2S] Upstream sync notice:', e.message));
 
-  auditLogs.unshift({
+  pushAudit({
     id: `LOG-${Date.now().toString().slice(-4)}`,
     timestamp: new Date().toLocaleTimeString('en-GB') + ', Today',
     user: user.name,
@@ -2650,7 +2762,7 @@ app.post('/api/orders', authMiddleware, async (req: AuthenticatedRequest, res: R
       dbRepo.insertOrder(rejectedOrder).catch(console.warn);
     }
 
-    auditLogs.unshift({
+    pushAudit({
       id: `LOG-${Date.now().toString().slice(-4)}`,
       timestamp: new Date().toLocaleTimeString('en-GB') + ', Today',
       user: client.name,
@@ -2765,16 +2877,16 @@ app.post('/api/orders', authMiddleware, async (req: AuthenticatedRequest, res: R
     dbRepo.insertOrder(newOrder).catch(console.warn);
   }
 
-  auditLogs.unshift({
+  pushAudit({
     id: `LOG-${Date.now().toString().slice(-4)}`,
     timestamp: new Date().toLocaleTimeString('en-GB') + ', Today',
-    user: client.name,
+    user: user.name,
     role: user.roleTitle,
     action: `Submitted ${side} ${type} order`,
     relatedEntity: newOrder.id,
     ipAddress: req.ip || '127.0.0.1',
     result: 'Success',
-    details: `${side} ${qty} ${targetInst.symbol} @ ₹${price} (${newOrder.status})`,
+    details: `${side} ${qty} ${targetInst.symbol} @ ₹${price} for ${client.name} (${newOrder.status})`,
   });
 
   broadcastScopedEvent('order_placed', newOrder, { brokerId: client.brokerId, clientId: client.id });
@@ -2812,7 +2924,7 @@ app.patch(['/api/orders/:id/cancel', '/api/orders/:id/cancel-order'], authMiddle
     dbRepo.updateOrderStatus(order.id, 'Cancelled', order.rejectionReason).catch(console.warn);
   }
 
-  auditLogs.unshift({
+  pushAudit({
     id: `LOG-${Date.now().toString().slice(-4)}`,
     timestamp: new Date().toLocaleTimeString('en-GB') + ', Today',
     user: user.name,
@@ -2828,8 +2940,23 @@ app.patch(['/api/orders/:id/cancel', '/api/orders/:id/cancel-order'], authMiddle
   res.json({ success: true, order });
 });
 
-app.post('/api/orders/:id/cancel', authMiddleware, (req: AuthenticatedRequest, res: Response) => {
-  // Delegate to cancel handler
+app.post(['/api/orders/:id/cancel', '/api/orders/:id/cancel-order'], authMiddleware, (req: AuthenticatedRequest, res: Response) => {
+  (app as any)._router.handle(
+    Object.assign(req, { method: 'PATCH', url: `/api/orders/${req.params.id}/cancel` }),
+    res,
+    () => {}
+  );
+});
+
+app.delete(['/api/orders/:id', '/api/orders/:id/cancel'], authMiddleware, (req: AuthenticatedRequest, res: Response) => {
+  (app as any)._router.handle(
+    Object.assign(req, { method: 'PATCH', url: `/api/orders/${req.params.id}/cancel` }),
+    res,
+    () => {}
+  );
+});
+
+app.put(['/api/orders/:id', '/api/orders/:id/cancel'], authMiddleware, (req: AuthenticatedRequest, res: Response) => {
   (app as any)._router.handle(
     Object.assign(req, { method: 'PATCH', url: `/api/orders/${req.params.id}/cancel` }),
     res,
@@ -2963,7 +3090,7 @@ app.post('/api/positions/:id/square-off', authMiddleware, (req: AuthenticatedReq
     dbRepo.deletePosition(pos.id).catch(console.warn);
   }
 
-  auditLogs.unshift({
+  pushAudit({
     id: `LOG-${Date.now().toString().slice(-4)}`,
     timestamp: new Date().toLocaleTimeString('en-GB') + ', Today',
     user: user.name,
@@ -3021,7 +3148,7 @@ app.post('/api/tickets', authMiddleware, async (req: AuthenticatedRequest, res: 
     dbRepo.insertTicket(ticket).catch(console.warn);
   }
 
-  auditLogs.unshift({
+  pushAudit({
     id: `LOG-${Date.now().toString().slice(-4)}`,
     timestamp: new Date().toLocaleTimeString('en-GB') + ', Today',
     user: user.name,
@@ -3165,7 +3292,7 @@ app.post('/api/funds/:id/approve', authMiddleware, requireRole(['broker_admin', 
     },
   }).catch((e: any) => console.warn('[Fund Upstream S2S Sync] Notice:', e.message));
 
-  auditLogs.unshift({
+  pushAudit({
     id: `LOG-${Date.now().toString().slice(-4)}`,
     timestamp: new Date().toLocaleTimeString('en-GB') + ', Today',
     user: user.name,
@@ -3216,7 +3343,7 @@ app.post('/api/funds/:id/reject', authMiddleware, requireRole(['broker_admin', '
     },
   }).catch((e: any) => console.warn('[Fund Upstream S2S Sync] Notice:', e.message));
 
-  auditLogs.unshift({
+  pushAudit({
     id: `LOG-${Date.now().toString().slice(-4)}`,
     timestamp: new Date().toLocaleTimeString('en-GB') + ', Today',
     user: user.name,
@@ -3370,6 +3497,16 @@ app.get('/api/analytics', authMiddleware, (req: AuthenticatedRequest, res: Respo
   });
 });
 
+// Action / Audit Logs (trader clients only see their own events)
+function scopedAuditLogs(user: TokenPayload): AuditLog[] {
+  return user.role === 'trader_client' ? auditLogs.filter(l => l.user === user.name) : auditLogs;
+}
+
+app.get(['/api/audit-logs', '/api/action-logs'], authMiddleware, (req: AuthenticatedRequest, res: Response) => {
+  const logs = scopedAuditLogs(req.user!);
+  res.json({ success: true, logs, auditLogs: logs, actionLogs: logs, total: logs.length });
+});
+
 // Reports
 app.get('/api/reports', authMiddleware, (_req: Request, res: Response) => {
   res.json({ success: true, reports: reportsList });
@@ -3459,7 +3596,7 @@ app.patch('/api/instruments/:symbol/toggle', authMiddleware, requireRole(['broke
   }
   savePersistence();
 
-  auditLogs.unshift({
+  pushAudit({
     id: `LOG-${Date.now().toString().slice(-4)}`,
     timestamp: new Date().toLocaleTimeString('en-GB') + ', Today',
     user: user.name,
@@ -3475,17 +3612,33 @@ app.patch('/api/instruments/:symbol/toggle', authMiddleware, requireRole(['broke
   res.json({ success: true, instrument: inst });
 });
 
-// Settings
-app.get('/api/settings', authMiddleware, (_req: Request, res: Response) => {
-  res.json({ success: true, settings: settingsState });
-});
+// Settings (support GET, PATCH, and PUT)
+app.all(['/api/settings', '/api/user/settings'], authMiddleware, (req: AuthenticatedRequest, res: Response, next: NextFunction) => {
+  if (req.method === 'GET') {
+    return res.json({ success: true, settings: settingsState });
+  }
+  if (req.method !== 'PATCH' && req.method !== 'PUT') {
+    return next();
+  }
+  if (!['broker_admin', 'super_admin', 'operations'].includes(req.user?.role || '')) {
+    return res.status(403).json({ success: false, message: 'Forbidden' });
+  }
 
-app.patch('/api/settings', authMiddleware, requireRole(['broker_admin', 'super_admin']), (req: AuthenticatedRequest, res: Response) => {
   const user = req.user!;
   settingsState = { ...settingsState, ...req.body };
+  if (req.body.displayName) {
+    const newName = String(req.body.displayName).trim();
+    settingsState.displayName = newName;
+    if (systemUsers['broker_admin']) {
+      systemUsers['broker_admin'].name = newName;
+    }
+    if (user.role === 'broker_admin' || user.sub === systemUsers['broker_admin'].id) {
+      user.name = newName;
+    }
+  }
   savePersistence();
 
-  auditLogs.unshift({
+  pushAudit({
     id: `LOG-${Date.now().toString().slice(-4)}`,
     timestamp: new Date().toLocaleTimeString('en-GB') + ', Today',
     user: user.name,
@@ -3494,7 +3647,7 @@ app.patch('/api/settings', authMiddleware, requireRole(['broker_admin', 'super_a
     relatedEntity: 'SETTINGS-PROFILE',
     ipAddress: req.ip || '127.0.0.1',
     result: 'Success',
-    details: 'Saved updated broker preferences and display settings.',
+    details: `Saved updated broker preferences and display settings (Display Name: ${settingsState.displayName}).`,
   });
 
   res.json({ success: true, settings: settingsState });
@@ -3529,7 +3682,7 @@ app.post('/api/whitelabel/publish', (req: Request, res: Response) => {
   };
   savePersistence();
 
-  auditLogs.unshift({
+  pushAudit({
     id: `LOG-${Date.now().toString().slice(-4)}`,
     timestamp: new Date().toLocaleTimeString('en-GB') + ', Today',
     user: 'Central Admin Panel',
@@ -3720,7 +3873,26 @@ async function startServer() {
     } catch (e: any) {
       console.warn('[Database] Notice loading ledger from PostgreSQL:', e.message);
     }
+    try {
+      const pgAudit = await dbRepo.getAuditLogs();
+      if (pgAudit.length > 0) auditLogs = pgAudit;
+    } catch (e: any) {
+      console.warn('[Database] Notice loading audit logs from PostgreSQL:', e.message);
+    }
     console.log(`[Database] Loaded authoritative records from PostgreSQL: ${clients.length} clients, ${orders.length} orders, ${positions.length} positions.`);
+  }
+
+  if (auditLogs.length === 0) {
+    pushAudit({
+      id: '', timestamp: '',
+      user: 'System',
+      role: 'Platform Service',
+      action: 'User Panel service started',
+      relatedEntity: 'user-panel',
+      ipAddress: '127.0.0.1',
+      result: 'Success',
+      details: `Audit trail initialised (${APP_ENV}); storage: ${isUsingPostgres() ? 'PostgreSQL' : 'JSON persistence store'}`,
+    });
   }
 
   // Probe upstream Trading Platform & Central Admin

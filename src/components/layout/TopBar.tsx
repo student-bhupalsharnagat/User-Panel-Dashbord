@@ -23,6 +23,7 @@ export const TopBar: React.FC = () => {
   const {
     activeTab,
     currentUser,
+    settings,
     switchRole,
     isSearchOpen,
     setIsSearchOpen,
@@ -189,14 +190,18 @@ export const TopBar: React.FC = () => {
           >
             <div className="text-right hidden sm:block">
               <div className="text-xs font-semibold text-slate-200 leading-tight">
-                {currentUser?.name || 'Rohan Sen'}
+                {currentUser?.name || settings?.displayName || 'Rohan Sen'}
               </div>
               <div className="text-[10px] text-slate-400 leading-tight">
                 {currentUser?.roleTitle || 'Broker Admin'}
               </div>
             </div>
-            <div className="w-7 h-7 sm:w-8 sm:h-8 rounded-md bg-indigo-600/30 border border-indigo-500/40 text-indigo-300 font-bold flex items-center justify-center text-xs shrink-0">
-              {currentUser?.avatar || 'RS'}
+            <div className="w-7 h-7 sm:w-8 sm:h-8 rounded-md bg-indigo-600/30 border border-indigo-500/40 text-indigo-300 font-bold flex items-center justify-center text-xs shrink-0 overflow-hidden">
+              {settings?.profileImage ? (
+                <img src={settings.profileImage} alt="Avatar" className="w-full h-full object-cover" />
+              ) : (
+                currentUser?.avatar || 'RS'
+              )}
             </div>
             <ChevronDown className="w-3.5 h-3.5 text-slate-500 mr-1 hidden sm:block" />
           </button>
@@ -205,7 +210,7 @@ export const TopBar: React.FC = () => {
           {isProfileOpen && (
             <div className="absolute right-0 mt-2 w-64 max-w-[calc(100vw-24px)] rounded-xl bg-[#131b2e] border border-[#1e2a42] shadow-2xl shadow-black/80 py-2 z-50 animate-in fade-in zoom-in-95 duration-100">
               <div className="px-4 py-2.5 border-b border-slate-800">
-                <div className="text-xs font-semibold text-white">{currentUser?.name}</div>
+                <div className="text-xs font-semibold text-white">{currentUser?.name || settings?.displayName || 'Rohan Sen'}</div>
                 <div className="text-[11px] text-slate-400 truncate">{currentUser?.email}</div>
                 <div className="mt-1 flex items-center gap-1.5">
                   <span className="w-1.5 h-1.5 rounded-full bg-emerald-400" />

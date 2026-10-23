@@ -41,6 +41,14 @@ interface AppContextType {
   tenantBranding: TenantBranding | null;
   updateBranding: (branding: Partial<TenantBranding>) => Promise<void>;
   
+  // Settings & Profile
+  settings: SettingsState | null;
+  updateUserSettings: (newSettings: Partial<SettingsState>) => void;
+
+  // Filter for Orders navigation
+  ordersFilter: { status?: string; query?: string } | null;
+  setOrdersFilter: (filter: { status?: string; query?: string } | null) => void;
+  
   // Data Modes
   isLiveMode: boolean;
   setIsLiveMode: (live: boolean) => void;
@@ -135,6 +143,23 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
     return null;
   });
   const [tenantBranding, setTenantBranding] = useState<TenantBranding | null>(null);
+  const [settings, setSettings] = useState<SettingsState | null>(null);
+  const [ordersFilter, setOrdersFilter] = useState<{ status?: string; query?: string } | null>(null);
+
+  const updateUserSettings = useCallback((newSettings: Partial<SettingsState>) => {
+    setSettings((prev) => (prev ? { ...prev, ...newSettings } : (newSettings as SettingsState)));
+    if (newSettings.displayName) {
+      setCurrentUser((prev) => {
+        if (!prev) return prev;
+        const updated = { ...prev, name: newSettings.displayName! };
+        if (typeof window !== 'undefined' && window.localStorage) {
+          localStorage.setItem('nextrade_auth_user', JSON.stringify(updated));
+        }
+        return updated;
+      });
+    }
+  }, []);
+
   const isAuthenticated = Boolean(currentUser && getAuthToken());
   
   const [isLiveMode, setIsLiveMode] = useState<boolean>(true);
@@ -246,8 +271,14 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
           }
         }
         if (data.tenant) setTenantBranding(data.tenant);
-        if (data.settings && data.settings.compactTableDensity !== undefined) {
-          setIsCompactMode(Boolean(data.settings.compactTableDensity));
+        if (data.settings) {
+          setSettings(data.settings);
+          if (data.settings.compactTableDensity !== undefined) {
+            setIsCompactMode(Boolean(data.settings.compactTableDensity));
+          }
+          if (data.settings.displayName && data.user) {
+            data.user.name = data.settings.displayName;
+          }
         }
         if (Array.isArray(data.instruments) && data.instruments.length > 0) {
           const ticksMap: Record<string, Partial<MarketInstrument>> = {};
@@ -345,7 +376,12 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
           localStorage.setItem('nextrade_auth_user', JSON.stringify(res.user));
         }
         triggerRefresh();
-        showToast(`Switched active workspace role to ${res.user.roleTitle || 'Administrator'}`, 'info');
+        const roleMsg = targetRole === 'trader_client'
+          ? 'Switched active role to Trader Client (Aarav Mehta)'
+          : targetRole === 'super_admin'
+            ? 'Switched role to Central Super Admin'
+            : `Switched active workspace role to ${res.user.roleTitle || 'Administrator'}`;
+        showToast(roleMsg, 'info');
       }
     } catch (err: any) {
       showToast(err.message || 'Failed to switch role', 'error');
@@ -613,6 +649,10 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
         switchRole,
         tenantBranding,
         updateBranding,
+        settings,
+        updateUserSettings,
+        ordersFilter,
+        setOrdersFilter,
         isLiveMode,
         setIsLiveMode,
         isCompactMode,

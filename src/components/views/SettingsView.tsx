@@ -22,11 +22,13 @@ import { api } from '../../services/api';
 import { SettingsState } from '../../types';
 
 export const SettingsView: React.FC = () => {
-  const { showToast, currentUser, tenantBranding, isLiveMode, isCompactMode, setIsCompactMode } = useApp();
+  const { showToast, currentUser, tenantBranding, isLiveMode, isCompactMode, setIsCompactMode, updateUserSettings } = useApp();
 
   const [activeSection, setActiveSection] = useState<
     'profile' | 'security' | 'notifications' | 'tables' | 'support' | 'broker_config'
   >('profile');
+
+  const fileInputRef = React.useRef<HTMLInputElement | null>(null);
 
   const [settings, setSettings] = useState<SettingsState>({
     profileImage: '',
@@ -56,6 +58,24 @@ export const SettingsView: React.FC = () => {
     }).catch(() => {});
   }, [setIsCompactMode]);
 
+  const handleImageUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    if (file.size > 2 * 1024 * 1024) {
+      showToast('Image file must be under 2MB', 'error');
+      return;
+    }
+    const reader = new FileReader();
+    reader.onload = (event) => {
+      const dataUrl = event.target?.result as string;
+      if (dataUrl) {
+        setSettings((prev) => ({ ...prev, profileImage: dataUrl }));
+        showToast('Profile image updated', 'success');
+      }
+    };
+    reader.readAsDataURL(file);
+  };
+
   const handleSave = async (e: React.FormEvent) => {
     e.preventDefault();
     setIsSaving(true);
@@ -65,6 +85,7 @@ export const SettingsView: React.FC = () => {
       if (settings.compactTableDensity !== undefined) {
         setIsCompactMode(Boolean(settings.compactTableDensity));
       }
+      updateUserSettings(settings);
       showToast('Settings saved successfully', 'success');
     } catch {
       showToast('Failed to save settings', 'error');
@@ -142,8 +163,12 @@ export const SettingsView: React.FC = () => {
               {/* Profile Image Section */}
               <div className="p-4 rounded-xl bg-slate-900/80 border border-slate-800 flex items-center justify-between">
                 <div className="flex items-center gap-4">
-                  <div className="w-14 h-14 rounded-xl bg-indigo-600/30 border border-indigo-500/40 text-indigo-300 font-bold flex items-center justify-center text-lg shadow-inner">
-                    {currentUser?.avatar || 'RS'}
+                  <div className="w-14 h-14 rounded-xl bg-indigo-600/30 border border-indigo-500/40 text-indigo-300 font-bold flex items-center justify-center text-lg shadow-inner overflow-hidden">
+                    {settings.profileImage ? (
+                      <img src={settings.profileImage} alt="Profile" className="w-full h-full object-cover" />
+                    ) : (
+                      currentUser?.avatar || 'RS'
+                    )}
                   </div>
                   <div>
                     <div className="text-xs font-semibold text-white">Profile image</div>
@@ -151,10 +176,17 @@ export const SettingsView: React.FC = () => {
                   </div>
                 </div>
 
+                <input
+                  type="file"
+                  ref={fileInputRef}
+                  accept="image/png,image/jpeg,image/webp"
+                  className="hidden"
+                  onChange={handleImageUpload}
+                />
                 <button
                   type="button"
-                  onClick={() => showToast('Image upload ready', 'info')}
-                  className="px-3 py-1.5 rounded-lg bg-[#131b2e] border border-[#1e2a42] hover:bg-slate-800 text-xs font-medium text-slate-200 transition-colors"
+                  onClick={() => fileInputRef.current?.click()}
+                  className="px-3 py-1.5 rounded-lg bg-[#131b2e] border border-[#1e2a42] hover:bg-slate-800 text-xs font-medium text-slate-200 transition-colors cursor-pointer"
                 >
                   Change image
                 </button>

@@ -31,6 +31,7 @@ export const Sidebar: React.FC = () => {
     activeTab,
     setActiveTab,
     currentUser,
+    settings,
     tenantBranding,
     setIsSupportModalOpen,
     switchRole,
@@ -71,7 +72,9 @@ export const Sidebar: React.FC = () => {
   };
 
   const handleRoleSwitch = () => {
-    const nextRole = currentUser?.role === 'broker_admin' ? 'super_admin' : 'broker_admin';
+    const nextRole = currentUser?.role === 'broker_admin'
+      ? 'super_admin'
+      : (currentUser?.role === 'super_admin' ? 'trader_client' : 'broker_admin');
     switchRole(nextRole);
     setIsMobileMenuOpen(false);
   };
@@ -134,12 +137,16 @@ export const Sidebar: React.FC = () => {
 
         {/* User / Broker Identity Card */}
         <div className="p-3 mx-3 mt-3 rounded-xl bg-[#131b2e] border border-[#1e2a42] flex items-center gap-3">
-          <div className="w-9 h-9 rounded-lg bg-indigo-600/30 border border-indigo-500/40 text-indigo-300 font-bold flex items-center justify-center text-xs shrink-0">
-            {currentUser?.avatar || 'RS'}
+          <div className="w-9 h-9 rounded-lg bg-indigo-600/30 border border-indigo-500/40 text-indigo-300 font-bold flex items-center justify-center text-xs shrink-0 overflow-hidden">
+            {settings?.profileImage ? (
+              <img src={settings.profileImage} alt="Avatar" className="w-full h-full object-cover" />
+            ) : (
+              currentUser?.avatar || 'RS'
+            )}
           </div>
           <div className="min-w-0 flex-1">
             <div className="text-xs font-semibold text-slate-100 truncate">
-              {currentUser?.name || 'Rohan Sen'}
+              {currentUser?.name || settings?.displayName || 'Rohan Sen'}
             </div>
             <div className="text-[11px] text-slate-400 truncate flex items-center gap-1">
               <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 inline-block shrink-0" />

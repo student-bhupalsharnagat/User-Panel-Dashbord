@@ -490,7 +490,24 @@ export class TradingPlatformClient extends EventEmitter {
         if (!c || isDummyRecord(c)) continue;
         const key = String(c.id || c.userId || c.user_id || c.clientCode || c.client_code || '').trim().toLowerCase();
         if (key && !clientMap.has(key)) {
-          clientMap.set(key, c);
+          let email = String(c.email || '').trim();
+          email = email.replace(/^(usr[-_])?(tnt[-_][a-z0-9]+|vertex[-_]default|default)[-_:]/i, '');
+          if (email.includes('@tradingplatform.com')) {
+            const username = email.split('@')[0].replace(/^(usr[-_])?(tnt[-_][a-z0-9]+|vertex[-_]default|default)[-_:]/i, '');
+            email = `${username || key}@client.com`;
+          }
+          if (!email) {
+            email = `${key}@client.com`;
+          }
+
+          let phone = String(c.phone || c.mobile || '').trim();
+          if (!phone || phone === '9999999999' || phone === '+91 98000 00000' || phone === '9800000000' || phone.includes('00000')) {
+            phone = '+91 9876543210';
+          } else if (!phone.startsWith('+91') && /^\d{10}$/.test(phone)) {
+            phone = `+91 ${phone}`;
+          }
+
+          clientMap.set(key, { ...c, email, phone });
         }
       }
     };

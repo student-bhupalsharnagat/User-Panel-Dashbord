@@ -271,13 +271,21 @@ export const MarketWatchView: React.FC = () => {
                     <td className={`${cellPad} text-center font-sans`}>
                       <div className="flex items-center justify-center gap-1.5">
                         <button
-                          onClick={() => openOrderModal(inst, 'BUY')}
+                          onClick={() => {
+                            const tick = inst.tickSize || 0.05;
+                            const roundedPrice = Number((Math.round(inst.lastPrice / tick) * tick).toFixed(2));
+                            openOrderModal({ ...inst, lastPrice: roundedPrice }, 'BUY');
+                          }}
                           className="px-2.5 py-1 bg-emerald-600/30 hover:bg-emerald-600 border border-emerald-500/40 text-emerald-300 hover:text-white rounded text-[11px] font-bold transition-all"
                         >
                           BUY
                         </button>
                         <button
-                          onClick={() => openOrderModal(inst, 'SELL')}
+                          onClick={() => {
+                            const tick = inst.tickSize || 0.05;
+                            const roundedPrice = Number((Math.round(inst.lastPrice / tick) * tick).toFixed(2));
+                            openOrderModal({ ...inst, lastPrice: roundedPrice }, 'SELL');
+                          }}
                           className="px-2.5 py-1 bg-rose-600/30 hover:bg-rose-600 border border-rose-500/40 text-rose-300 hover:text-white rounded text-[11px] font-bold transition-all"
                         >
                           SELL

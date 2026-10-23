@@ -29,6 +29,8 @@ export const OrdersView: React.FC = () => {
     triggerRefresh,
     isLiveMode,
     isCompactMode,
+    ordersFilter,
+    setOrdersFilter,
   } = useApp();
 
   const [orders, setOrders] = useState<Order[]>([]);
@@ -38,6 +40,16 @@ export const OrdersView: React.FC = () => {
   const [pageSize, setPageSize] = useState(10);
   const [page, setPage] = useState(1);
   const [loading, setLoading] = useState(true);
+
+  // Consume any target ordersFilter set from Notifications
+  useEffect(() => {
+    if (ordersFilter) {
+      if (ordersFilter.status) setActiveStatusTab(ordersFilter.status);
+      if (ordersFilter.query) setSearchQuery(ordersFilter.query);
+      setTimeRange('All Time');
+      setOrdersFilter(null);
+    }
+  }, [ordersFilter, setOrdersFilter]);
 
   useEffect(() => {
     setPage(1);

@@ -51,7 +51,7 @@ export const ClientDetailView: React.FC = () => {
   const client = clientData || selectedClientForDetail;
 
   return (
-    <div className="fixed inset-0 z-50 flex justify-end bg-black/60 backdrop-blur-xs animate-in fade-in duration-150">
+    <div className="fixed inset-0 z-40 flex justify-end bg-black/60 backdrop-blur-xs animate-in fade-in duration-150">
       <div className="w-full max-w-2xl bg-[#0f172a] border-l border-[#1e293b] h-full shadow-2xl flex flex-col text-slate-200">
         {/* Drawer Header */}
         <div className="p-3.5 sm:p-5 border-b border-slate-800 flex flex-wrap sm:flex-nowrap items-center justify-between gap-3">

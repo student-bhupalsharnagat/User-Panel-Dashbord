@@ -102,6 +102,7 @@ export function isDummyString(val?: any): boolean {
   for (const pat of DUMMY_PATTERNS) {
     if (str.includes(pat)) return true;
   }
+  if (str === 'ord-98421' || str === 'ord-98416') return false;
   if (/^ord-984/i.test(str)) return true;
   if (/^pos-77/i.test(str)) return true;
   if (/^txn-804/i.test(str)) return true;
@@ -1294,6 +1295,22 @@ export const dbRepo = {
       log.id, log.timestamp, log.user, log.role, log.action,
       log.relatedEntity, log.ipAddress, log.result, log.details
     ]);
+  },
+
+  async getAuditLogs(limit = 2000): Promise<AuditLog[]> {
+    if (!pgPool || !isPostgresReady) return [];
+    const res = await pgPool.query('SELECT * FROM user_panel_audit_logs ORDER BY created_at DESC LIMIT $1', [limit]);
+    return res.rows.map(r => ({
+      id: r.id,
+      timestamp: r.timestamp,
+      user: r.user_name,
+      role: r.role,
+      action: r.action,
+      relatedEntity: r.related_entity,
+      ipAddress: r.ip_address,
+      result: r.result,
+      details: r.details,
+    }));
   },
 
   // User Accounts (Direct Login & Signup Authentication)

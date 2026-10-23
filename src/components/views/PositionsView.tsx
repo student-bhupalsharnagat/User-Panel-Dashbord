@@ -115,6 +115,20 @@ export const PositionsView: React.FC = () => {
     showToast('Exported Open Positions to CSV', 'success');
   };
 
+  // Derived KPI sums ensuring Net P&L always includes Realised P&L
+  const computedRealised = positions.reduce((acc, p) => acc + (p.realisedPnL || 0), 0);
+  const computedUnrealised = positions.reduce((acc, p) => acc + (p.unrealisedPnL || 0), 0);
+
+  const totalRealisedVal = summary?.totalRealisedPnLL != null
+    ? Number(summary.totalRealisedPnLL)
+    : (positions.length > 0 ? +(computedRealised / 100000).toFixed(2) : 10.59);
+
+  const totalUnrealisedVal = summary?.unrealisedPnLL != null
+    ? Number(summary.unrealisedPnLL)
+    : (positions.length > 0 ? +(computedUnrealised / 100000).toFixed(2) : 3.89);
+
+  const netPnLVal = +(totalRealisedVal + totalUnrealisedVal).toFixed(2);
+
   return (
     <div className="p-3.5 sm:p-5 lg:p-6 space-y-4 sm:space-y-6 max-w-[1600px] mx-auto text-slate-100">
       {/* Header */}
@@ -157,26 +171,26 @@ export const PositionsView: React.FC = () => {
       <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
         <div className="p-4 rounded-xl bg-[#111827] border border-[#1e293b]">
           <div className="text-xs font-semibold text-slate-400 mb-2">Total realised P&L</div>
-          <div className="text-2xl font-bold font-mono text-emerald-400 tracking-tight">
-            +₹{summary?.totalRealisedPnLL || '10.59'} L
+          <div className={`text-2xl font-bold font-mono tracking-tight ${totalRealisedVal >= 0 ? 'text-emerald-400' : 'text-rose-400'}`}>
+            {totalRealisedVal >= 0 ? '+' : ''}₹{totalRealisedVal.toFixed(2)} L
           </div>
           <div className="text-[11px] text-slate-400 mt-1">Booked profit across accounts</div>
         </div>
 
         <div className="p-4 rounded-xl bg-[#111827] border border-[#1e293b]">
           <div className="text-xs font-semibold text-slate-400 mb-2">Unrealised P&L</div>
-          <div className="text-2xl font-bold font-mono text-emerald-400 tracking-tight">
-            +₹{summary?.unrealisedPnLL || '3.89'} L
+          <div className={`text-2xl font-bold font-mono tracking-tight ${totalUnrealisedVal >= 0 ? 'text-emerald-400' : 'text-rose-400'}`}>
+            {totalUnrealisedVal >= 0 ? '+' : ''}₹{totalUnrealisedVal.toFixed(2)} L
           </div>
           <div className="text-[11px] text-slate-400 mt-1">Live MTM floating value</div>
         </div>
 
         <div className="p-4 rounded-xl bg-[#111827] border border-[#1e293b]">
           <div className="text-xs font-semibold text-slate-400 mb-2">Net P&L</div>
-          <div className="text-2xl font-bold font-mono text-emerald-400 tracking-tight">
-            +₹{summary?.netPnLL || '14.48'} L
+          <div className={`text-2xl font-bold font-mono tracking-tight ${netPnLVal >= 0 ? 'text-emerald-400' : 'text-rose-400'}`}>
+            {netPnLVal >= 0 ? '+' : ''}₹{netPnLVal.toFixed(2)} L
           </div>
-          <div className="text-[11px] text-slate-400 mt-1">Net portfolio profit</div>
+          <div className="text-[11px] text-slate-400 mt-1">Net portfolio profit (Realised + Unrealised)</div>
         </div>
 
         <div className="p-4 rounded-xl bg-[#111827] border border-[#1e293b]">

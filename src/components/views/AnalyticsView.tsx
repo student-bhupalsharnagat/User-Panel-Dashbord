@@ -95,8 +95,40 @@ export const AnalyticsView: React.FC = () => {
   }, [commissionList]);
 
   const handleExportDashboard = () => {
-    window.print();
-    showToast('Exporting dashboard analysis snapshot...', 'info');
+    const kpis = [
+      ['Metric', 'Value', 'Change / Context'],
+      ['Monthly Turnover (Cr)', `₹${analytics?.monthlyTurnoverCr ?? 742.8} Cr`, `+${analytics?.turnoverChangePct ?? 12.6}% vs last month`],
+      ['Commission Earned (L)', `₹${analytics?.commissionEarnedL ?? 28.4} L`, `+${analytics?.commissionChangePct ?? 8.3}% vs last month`],
+      ['Order Execution Rate', `${analytics?.orderExecutionRate ?? 98.4}%`, `+${analytics?.executionImprovementPct ?? 0.8}% efficiency`],
+      ['Net P&L (L)', `₹${analytics?.netPnLL ?? 34.2} L`, `+${analytics?.netPnLChangePct ?? 14.2}% on period`],
+      ['Active Clients', `${analytics?.activeCount ?? 2142}`, ''],
+      ['Inactive Clients', `${analytics?.inactiveCount ?? 344}`, ''],
+      ['Executed Orders', `${analytics?.orderBreakdown?.executed ?? 1420}`, ''],
+      ['Open Orders', `${analytics?.orderBreakdown?.open ?? 184}`, ''],
+      ['Rejected Orders', `${analytics?.orderBreakdown?.rejected ?? 42}`, ''],
+      ['Cancelled Orders', `${analytics?.orderBreakdown?.cancelled ?? 18}`, ''],
+    ];
+    const trendRows = trendList.map((t: any) => [`Turnover ${t.day}`, `₹${t.volumeCr} Cr`, '']);
+    const commissionRows = commissionList.map((c: any) => [`Commission ${c.day}`, `₹${c.netL} L`, '']);
+
+    const allRows = [
+      ...kpis,
+      ['', '', ''],
+      ['Turnover Trend Points', '', ''],
+      ...trendRows,
+      ['', '', ''],
+      ['Commission Earnings Points', '', ''],
+      ...commissionRows,
+    ];
+    const csvContent = 'data:text/csv;charset=utf-8,' + allRows.map(r => r.map(c => `"${c}"`).join(',')).join('\n');
+    const encodedUri = encodeURI(csvContent);
+    const link = document.createElement('a');
+    link.setAttribute('href', encodedUri);
+    link.setAttribute('download', 'analytics-dashboard-export.csv');
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+    showToast('Analytics dashboard exported successfully', 'success');
   };
 
   return (
