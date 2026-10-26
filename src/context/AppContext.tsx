@@ -264,22 +264,21 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
 
     api.getBootstrap()
       .then((data) => {
-        if (data.user) {
-          setCurrentUser(data.user);
-          if (typeof window !== 'undefined' && window.localStorage) {
-            localStorage.setItem('nextrade_auth_user', JSON.stringify(data.user));
-          }
-        }
-        if (data.tenant) setTenantBranding(data.tenant);
         if (data.settings) {
           setSettings(data.settings);
           if (data.settings.compactTableDensity !== undefined) {
             setIsCompactMode(Boolean(data.settings.compactTableDensity));
           }
-          if (data.settings.displayName && data.user) {
-            data.user.name = data.settings.displayName;
+        }
+        if (data.user) {
+          const finalName = data.settings?.displayName || data.user.name;
+          const userWithUpdatedName = { ...data.user, name: finalName };
+          setCurrentUser(userWithUpdatedName);
+          if (typeof window !== 'undefined' && window.localStorage) {
+            localStorage.setItem('nextrade_auth_user', JSON.stringify(userWithUpdatedName));
           }
         }
+        if (data.tenant) setTenantBranding(data.tenant);
         if (Array.isArray(data.instruments) && data.instruments.length > 0) {
           const ticksMap: Record<string, Partial<MarketInstrument>> = {};
           for (const inst of data.instruments) {
@@ -368,7 +367,7 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
   // Switch role handler
   const switchRole = async (role?: string) => {
     try {
-      const targetRole = role || (currentUser?.role === 'broker_admin' ? 'super_admin' : 'broker_admin');
+      const targetRole = role || (currentUser?.role === 'broker_admin' ? 'sub_broker' : (currentUser?.role === 'sub_broker' ? 'super_admin' : 'broker_admin'));
       const res = await api.switchRole(targetRole);
       if (res && res.user) {
         setCurrentUser(res.user);
@@ -376,11 +375,16 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
           localStorage.setItem('nextrade_auth_user', JSON.stringify(res.user));
         }
         triggerRefresh();
+        api.getBootstrap().then((bData) => {
+          if (bData.settings) setSettings(bData.settings);
+        }).catch(() => {});
         const roleMsg = targetRole === 'trader_client'
           ? 'Switched active role to Trader Client (Aarav Mehta)'
           : targetRole === 'super_admin'
             ? 'Switched role to Central Super Admin'
-            : `Switched active workspace role to ${res.user.roleTitle || 'Administrator'}`;
+            : targetRole === 'sub_broker'
+              ? 'Switched role to Sub-Broker'
+              : `Switched active workspace role to ${res.user.roleTitle || 'Administrator'}`;
         showToast(roleMsg, 'info');
       }
     } catch (err: any) {

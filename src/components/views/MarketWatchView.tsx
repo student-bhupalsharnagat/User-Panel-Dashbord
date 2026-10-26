@@ -273,7 +273,8 @@ export const MarketWatchView: React.FC = () => {
                         <button
                           onClick={() => {
                             const tick = inst.tickSize || 0.05;
-                            const roundedPrice = Number((Math.round(inst.lastPrice / tick) * tick).toFixed(2));
+                            const factor = Math.round(1 / tick) || 20;
+                            const roundedPrice = Number((Math.round(inst.lastPrice * factor) / factor).toFixed(2));
                             openOrderModal({ ...inst, lastPrice: roundedPrice }, 'BUY');
                           }}
                           className="px-2.5 py-1 bg-emerald-600/30 hover:bg-emerald-600 border border-emerald-500/40 text-emerald-300 hover:text-white rounded text-[11px] font-bold transition-all"
@@ -283,7 +284,8 @@ export const MarketWatchView: React.FC = () => {
                         <button
                           onClick={() => {
                             const tick = inst.tickSize || 0.05;
-                            const roundedPrice = Number((Math.round(inst.lastPrice / tick) * tick).toFixed(2));
+                            const factor = Math.round(1 / tick) || 20;
+                            const roundedPrice = Number((Math.round(inst.lastPrice * factor) / factor).toFixed(2));
                             openOrderModal({ ...inst, lastPrice: roundedPrice }, 'SELL');
                           }}
                           className="px-2.5 py-1 bg-rose-600/30 hover:bg-rose-600 border border-rose-500/40 text-rose-300 hover:text-white rounded text-[11px] font-bold transition-all"

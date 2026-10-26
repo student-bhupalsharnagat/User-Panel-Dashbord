@@ -176,20 +176,20 @@ export const SettingsView: React.FC = () => {
                   </div>
                 </div>
 
-                <input
-                  type="file"
-                  ref={fileInputRef}
-                  accept="image/png,image/jpeg,image/webp"
-                  className="hidden"
-                  onChange={handleImageUpload}
-                />
-                <button
-                  type="button"
-                  onClick={() => fileInputRef.current?.click()}
-                  className="px-3 py-1.5 rounded-lg bg-[#131b2e] border border-[#1e2a42] hover:bg-slate-800 text-xs font-medium text-slate-200 transition-colors cursor-pointer"
+                <label
+                  htmlFor="profile-image-upload"
+                  className="px-3 py-1.5 rounded-lg bg-[#131b2e] border border-[#1e2a42] hover:bg-slate-800 text-xs font-medium text-slate-200 transition-colors cursor-pointer inline-flex items-center"
                 >
+                  <input
+                    id="profile-image-upload"
+                    type="file"
+                    ref={fileInputRef}
+                    accept="image/png,image/jpeg,image/webp"
+                    className="sr-only"
+                    onChange={handleImageUpload}
+                  />
                   Change image
-                </button>
+                </label>
               </div>
 
               {/* Inputs */}

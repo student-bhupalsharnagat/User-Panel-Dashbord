@@ -71,7 +71,6 @@ export const DUMMY_CLIENT_NAMES = [
 export const DUMMY_PATTERNS = [
   '@test.example',
   '@demo.example',
-  '@example.com',
   'audit.trader',
   'persist audit',
   'vtx999',

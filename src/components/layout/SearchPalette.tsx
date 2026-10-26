@@ -53,11 +53,17 @@ export const SearchPalette: React.FC = () => {
     i.name.toLowerCase().includes(query.toLowerCase())
   ).slice(0, 4);
 
-  const filteredClients = clients.filter(c =>
-    c.name.toLowerCase().includes(query.toLowerCase()) ||
-    c.id.toLowerCase().includes(query.toLowerCase()) ||
-    c.email.toLowerCase().includes(query.toLowerCase())
-  ).slice(0, 4);
+  const filteredClients = clients.filter(c => {
+    const q = query.toLowerCase();
+    return (
+      c.name.toLowerCase().includes(q) ||
+      c.id.toLowerCase().includes(q) ||
+      c.email.toLowerCase().includes(q) ||
+      (c.phone && c.phone.includes(q)) ||
+      (c.pan && c.pan.toLowerCase().includes(q)) ||
+      (c.clientCode && c.clientCode.toLowerCase().includes(q))
+    );
+  }).slice(0, 4);
 
   const filteredOrders = orders.filter(o =>
     o.id.toLowerCase().includes(query.toLowerCase()) ||

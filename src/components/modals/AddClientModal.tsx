@@ -15,7 +15,7 @@ export const AddClientModal: React.FC = () => {
   const [email, setEmail] = useState('');
   const [phone, setPhone] = useState('');
   const [pan, setPan] = useState('');
-  const [initialMargin, setInitialMargin] = useState<number | string>(250000);
+  const [initialMargin, setInitialMargin] = useState<number | string>(0);
   const [isDemo, setIsDemo] = useState(false);
   const [isSubmitting, setIsSubmitting] = useState(false);
 
@@ -29,12 +29,19 @@ export const AddClientModal: React.FC = () => {
     }
 
     const digitsOnly = phone.replace(/\D/g, '');
-    if (digitsOnly.length < 10 || digitsOnly.length > 15) {
-      showToast('Please enter a valid 10-digit mobile number', 'error');
+    const validDigits = digitsOnly.length === 12 && digitsOnly.startsWith('91') ? digitsOnly.slice(2) : digitsOnly;
+    if (validDigits.length !== 10 || !/^[6-9]/.test(validDigits)) {
+      showToast('Please enter a valid 10-digit mobile number starting with 6-9', 'error');
       return;
     }
 
-    const parsedMargin = initialMargin === '' ? 0 : Math.max(0, Number(initialMargin) || 0);
+    const panClean = (pan || '').trim().toUpperCase();
+    if (panClean && !/^[A-Z]{5}[0-9]{4}[A-Z]{1}$/.test(panClean)) {
+      showToast('Invalid PAN format. Must be 5 letters, 4 numbers, 1 letter (e.g. ABCDE1234F)', 'error');
+      return;
+    }
+
+    const parsedMargin = initialMargin === '' || initialMargin === null ? 0 : Math.max(0, parseFloat(String(initialMargin)) || 0);
 
     setIsSubmitting(true);
     try {
@@ -42,7 +49,7 @@ export const AddClientModal: React.FC = () => {
         name,
         email,
         phone,
-        pan: pan || 'ABCDE1234F',
+        pan: panClean || 'ABCDE1234F',
         initialMargin: parsedMargin,
         ledgerBalance: parsedMargin,
         isDemo,
@@ -55,6 +62,7 @@ export const AddClientModal: React.FC = () => {
       setEmail('');
       setPhone('');
       setPan('');
+      setInitialMargin(0);
     } catch (err: any) {
       showToast(err.message || 'Failed to onboard client', 'error');
     } finally {
@@ -150,9 +158,9 @@ export const AddClientModal: React.FC = () => {
               <input
                 type="number"
                 min="0"
-                step="10000"
+                step="any"
                 value={initialMargin}
-                onChange={(e) => setInitialMargin(e.target.value === '' ? '' : Math.max(0, parseInt(e.target.value, 10) || 0))}
+                onChange={(e) => setInitialMargin(e.target.value)}
                 className="w-full bg-[#131b2e] border border-slate-700/80 rounded-lg px-3 py-2 text-xs font-mono text-white focus:outline-none focus:border-indigo-500"
               />
             </div>

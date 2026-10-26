@@ -72,9 +72,12 @@ export const Sidebar: React.FC = () => {
   };
 
   const handleRoleSwitch = () => {
-    const nextRole = currentUser?.role === 'broker_admin'
-      ? 'super_admin'
-      : (currentUser?.role === 'super_admin' ? 'trader_client' : 'broker_admin');
+    const current = currentUser?.role || 'broker_admin';
+    let nextRole = 'broker_admin';
+    if (current === 'broker_admin') nextRole = 'sub_broker';
+    else if (current === 'sub_broker') nextRole = 'super_admin';
+    else if (current === 'super_admin') nextRole = 'broker_admin';
+    else nextRole = 'broker_admin';
     switchRole(nextRole);
     setIsMobileMenuOpen(false);
   };
@@ -146,7 +149,7 @@ export const Sidebar: React.FC = () => {
           </div>
           <div className="min-w-0 flex-1">
             <div className="text-xs font-semibold text-slate-100 truncate">
-              {currentUser?.name || settings?.displayName || 'Rohan Sen'}
+              {settings?.displayName || currentUser?.name || 'Rohan Sen'}
             </div>
             <div className="text-[11px] text-slate-400 truncate flex items-center gap-1">
               <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 inline-block shrink-0" />

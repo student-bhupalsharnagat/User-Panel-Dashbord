@@ -11,7 +11,8 @@ import { Client, MarketInstrument } from '../../types';
 
 export function roundToTick(val: number, tickSize: number = 0.05): number {
   if (!tickSize || tickSize <= 0) tickSize = 0.05;
-  return Number((Math.round(val / tickSize) * tickSize).toFixed(2));
+  const factor = Math.round(1 / tickSize) || 20;
+  return Number((Math.round(val * factor) / factor).toFixed(2));
 }
 
 export const OrderModal: React.FC = () => {
@@ -56,8 +57,8 @@ export const OrderModal: React.FC = () => {
   const currentInst = instruments.find((i) => i.symbol === selectedSymbol) || instruments[0];
   const currentClient = clients.find((c) => c.id === selectedClientId) || clients[0];
 
-  const numQty = typeof quantity === 'number' ? quantity : (parseInt(quantity, 10) || 0);
-  const numPrice = typeof price === 'number' ? price : (parseFloat(price) || 0);
+  const numQty = typeof quantity === 'number' ? quantity : (parseInt(String(quantity), 10) || 0);
+  const numPrice = typeof price === 'number' ? price : (parseFloat(String(price)) || 0);
   const estimatedOrderValue = (orderType === 'MARKET' ? (currentInst?.lastPrice || 0) : numPrice) * numQty;
   const estimatedMargin = Math.round(estimatedOrderValue * (product === 'CNC' ? 1 : 0.2));
   const hasSufficientMargin = currentClient ? currentClient.marginAvailable >= estimatedMargin : true;
@@ -66,8 +67,13 @@ export const OrderModal: React.FC = () => {
     e.preventDefault();
     if (!currentInst) return;
 
+    if (numQty <= 0) {
+      showToast('Order quantity must be greater than 0', 'error');
+      return;
+    }
+
     const lotSize = currentInst.lotSize || 1;
-    const finalQty = numQty <= 0 ? lotSize : numQty;
+    const finalQty = numQty;
     if (finalQty % lotSize !== 0) {
       showToast(`Quantity (${finalQty}) must be a multiple of lot size (${lotSize})`, 'error');
       return;
@@ -239,17 +245,9 @@ export const OrderModal: React.FC = () => {
               </label>
               <input
                 type="number"
-                min="1"
                 step={currentInst?.lotSize || 1}
                 value={quantity}
                 onChange={(e) => setQuantity(e.target.value)}
-                onBlur={() => {
-                  const num = parseInt(String(quantity), 10);
-                  const defaultLot = currentInst?.lotSize || 1;
-                  if (isNaN(num) || num <= 0) {
-                    setQuantity(defaultLot);
-                  }
-                }}
                 className="w-full bg-[#131b2e] border border-slate-700/80 rounded-lg px-3 py-2 text-xs font-mono text-white focus:outline-none focus:border-indigo-500"
               />
             </div>
@@ -264,12 +262,6 @@ export const OrderModal: React.FC = () => {
                 disabled={orderType === 'MARKET'}
                 value={orderType === 'MARKET' ? (currentInst?.lastPrice || 0) : price}
                 onChange={(e) => setPrice(e.target.value)}
-                onBlur={() => {
-                  const num = parseFloat(String(price));
-                  if (isNaN(num) || num <= 0) {
-                    setPrice(currentInst?.lastPrice || 0);
-                  }
-                }}
                 className={`w-full bg-[#131b2e] border border-slate-700/80 rounded-lg px-3 py-2 text-xs font-mono text-white focus:outline-none focus:border-indigo-500 ${
                   orderType === 'MARKET' ? 'opacity-60 cursor-not-allowed' : ''
                 }`}

@@ -45,7 +45,8 @@ export const PositionsView: React.FC = () => {
     setLoading(true);
     api.getPositions()
       .then((data) => {
-        setPositions(data.positions);
+        const activeOnly = (data.positions || []).filter((p: Position) => p.netQty !== 0);
+        setPositions(activeOnly);
         setSummary(data.summary);
       })
       .catch((err) => console.error('Failed to load positions:', err))
@@ -72,6 +73,7 @@ export const PositionsView: React.FC = () => {
   }, [latestTicks]);
 
   const filteredPositions = positions.filter((p) => {
+    if (p.netQty === 0) return false;
     const matchesSearch =
       p.instrument.toLowerCase().includes(searchQuery.toLowerCase()) ||
       p.clientName.toLowerCase().includes(searchQuery.toLowerCase()) ||
@@ -121,11 +123,11 @@ export const PositionsView: React.FC = () => {
 
   const totalRealisedVal = summary?.totalRealisedPnLL != null
     ? Number(summary.totalRealisedPnLL)
-    : (positions.length > 0 ? +(computedRealised / 100000).toFixed(2) : 10.59);
+    : +(computedRealised / 100000).toFixed(2);
 
   const totalUnrealisedVal = summary?.unrealisedPnLL != null
     ? Number(summary.unrealisedPnLL)
-    : (positions.length > 0 ? +(computedUnrealised / 100000).toFixed(2) : 3.89);
+    : +(computedUnrealised / 100000).toFixed(2);
 
   const netPnLVal = +(totalRealisedVal + totalUnrealisedVal).toFixed(2);
 

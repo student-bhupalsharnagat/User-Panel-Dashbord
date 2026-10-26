@@ -44,10 +44,11 @@ export const AnalyticsView: React.FC = () => {
       : timeRange === '30 Days'
       ? ['23 Sep', '28 Sep', '03 Oct', '08 Oct', '13 Oct', '18 Oct', '22 Oct']
       : ['16 Oct', '17 Oct', '18 Oct', '19 Oct', '20 Oct', '21 Oct', '22 Oct'];
-    const base = Number(analytics?.monthlyTurnoverCr) || 128.4;
+    const daysInPeriod = timeRange === '90 Days' ? 90 : (timeRange === '30 Days' ? 30 : 25);
+    const dailyBase = (Number(analytics?.monthlyTurnoverCr) || 742.8) / daysInPeriod;
     return dates.map((d, i) => ({
       day: d,
-      volumeCr: +((base * (0.7 + (i * 0.05))).toFixed(1))
+      volumeCr: +((dailyBase * (0.8 + (i * 0.06))).toFixed(1))
     }));
   }, [analytics?.turnoverTrend, analytics?.monthlyTurnoverCr, timeRange]);
 
@@ -83,10 +84,11 @@ export const AnalyticsView: React.FC = () => {
       : timeRange === '30 Days'
       ? ['23 Sep', '28 Sep', '03 Oct', '08 Oct', '13 Oct', '18 Oct', '22 Oct']
       : ['16 Oct', '17 Oct', '18 Oct', '19 Oct', '20 Oct', '21 Oct', '22 Oct'];
-    const base = Number(analytics?.commissionEarnedL) || 28.4;
+    const daysInPeriod = timeRange === '90 Days' ? 90 : (timeRange === '30 Days' ? 30 : 25);
+    const dailyCommBase = (Number(analytics?.commissionEarnedL) || 28.4) / daysInPeriod;
     return dates.map((d, i) => ({
       day: d,
-      netL: +((base * 0.14).toFixed(1))
+      netL: +((dailyCommBase * (0.8 + (i * 0.07))).toFixed(2))
     }));
   }, [analytics?.commissionEarnings, analytics?.commissionEarnedL, timeRange]);
 
@@ -94,19 +96,43 @@ export const AnalyticsView: React.FC = () => {
     return Math.max(1, ...commissionList.map((c: any) => Number(c.netL) || 0));
   }, [commissionList]);
 
+  const activeClients = analytics?.activeCount ?? 0;
+  const inactiveClients = analytics?.inactiveCount ?? 0;
+  const totalClients = activeClients + inactiveClients;
+  const activePercent = totalClients > 0 ? Math.round((activeClients / totalClients) * 100) : 0;
+
+  const orderBreakdown = analytics?.orderBreakdown;
+  const totalOrders = orderBreakdown
+    ? (orderBreakdown.executed + orderBreakdown.open + orderBreakdown.rejected + orderBreakdown.cancelled)
+    : 0;
+
+  const executionRateNumber = Number(analytics?.orderExecutionRate ?? 94.8);
+  const executedPct = totalOrders > 0
+    ? +((orderBreakdown!.executed / totalOrders) * 100).toFixed(1)
+    : executionRateNumber;
+  const openPct = totalOrders > 0
+    ? +((orderBreakdown!.open / totalOrders) * 100).toFixed(1)
+    : +(Math.max(0, (100 - executedPct) * 0.5)).toFixed(1);
+  const rejectedPct = totalOrders > 0
+    ? +((orderBreakdown!.rejected / totalOrders) * 100).toFixed(1)
+    : +(Math.max(0, (100 - executedPct) * 0.3)).toFixed(1);
+  const cancelledPct = totalOrders > 0
+    ? +Math.max(0, 100 - executedPct - openPct - rejectedPct).toFixed(1)
+    : +(Math.max(0, 100 - executedPct - openPct - rejectedPct)).toFixed(1);
+
   const handleExportDashboard = () => {
     const kpis = [
       ['Metric', 'Value', 'Change / Context'],
-      ['Monthly Turnover (Cr)', `₹${analytics?.monthlyTurnoverCr ?? 742.8} Cr`, `+${analytics?.turnoverChangePct ?? 12.6}% vs last month`],
-      ['Commission Earned (L)', `₹${analytics?.commissionEarnedL ?? 28.4} L`, `+${analytics?.commissionChangePct ?? 8.3}% vs last month`],
-      ['Order Execution Rate', `${analytics?.orderExecutionRate ?? 98.4}%`, `+${analytics?.executionImprovementPct ?? 0.8}% efficiency`],
-      ['Net P&L (L)', `₹${analytics?.netPnLL ?? 34.2} L`, `+${analytics?.netPnLChangePct ?? 14.2}% on period`],
-      ['Active Clients', `${analytics?.activeCount ?? 2142}`, ''],
-      ['Inactive Clients', `${analytics?.inactiveCount ?? 344}`, ''],
-      ['Executed Orders', `${analytics?.orderBreakdown?.executed ?? 1420}`, ''],
-      ['Open Orders', `${analytics?.orderBreakdown?.open ?? 184}`, ''],
-      ['Rejected Orders', `${analytics?.orderBreakdown?.rejected ?? 42}`, ''],
-      ['Cancelled Orders', `${analytics?.orderBreakdown?.cancelled ?? 18}`, ''],
+      ['Monthly Turnover (Cr)', `₹${analytics?.monthlyTurnoverCr ?? 0} Cr`, `+${analytics?.turnoverChangePct ?? 12.6}% vs last month`],
+      ['Commission Earned (L)', `₹${analytics?.commissionEarnedL ?? 0} L`, `+${analytics?.commissionChangePct ?? 8.3}% vs last month`],
+      ['Order Execution Rate', `${analytics?.orderExecutionRate ?? 0}%`, `+${analytics?.executionImprovementPct ?? 0.8}% efficiency`],
+      ['Net P&L (L)', `₹${analytics?.netPnLL ?? 0} L`, `+${analytics?.netPnLChangePct ?? 14.2}% on period`],
+      ['Active Clients', `${activeClients}`, ''],
+      ['Inactive Clients', `${inactiveClients}`, ''],
+      ['Executed Orders', `${orderBreakdown?.executed ?? 0}`, ''],
+      ['Open Orders', `${orderBreakdown?.open ?? 0}`, ''],
+      ['Rejected Orders', `${orderBreakdown?.rejected ?? 0}`, ''],
+      ['Cancelled Orders', `${orderBreakdown?.cancelled ?? 0}`, ''],
     ];
     const trendRows = trendList.map((t: any) => [`Turnover ${t.day}`, `₹${t.volumeCr} Cr`, '']);
     const commissionRows = commissionList.map((c: any) => [`Commission ${c.day}`, `₹${c.netL} L`, '']);
@@ -334,12 +360,12 @@ export const AnalyticsView: React.FC = () => {
                   stroke="#06b6d4"
                   strokeWidth="12"
                   strokeDasharray="238.76"
-                  strokeDashoffset={238.76 * (1 - 0.86)}
+                  strokeDashoffset={238.76 * (1 - (activePercent / 100))}
                   strokeLinecap="round"
                 />
               </svg>
               <div className="absolute inset-0 flex flex-col items-center justify-center">
-                <span className="text-xl font-bold font-mono text-white">86%</span>
+                <span className="text-xl font-bold font-mono text-white">{activePercent}%</span>
                 <span className="text-[9px] uppercase tracking-wider text-slate-400">Active</span>
               </div>
             </div>
@@ -348,12 +374,12 @@ export const AnalyticsView: React.FC = () => {
               <div className="flex items-center gap-2">
                 <span className="w-2 h-2 rounded-full bg-cyan-400 shrink-0" />
                 <span className="text-slate-400">Active:</span>
-                <span className="font-mono font-bold text-white ml-auto">2,142</span>
+                <span className="font-mono font-bold text-white ml-auto">{activeClients.toLocaleString('en-IN')}</span>
               </div>
               <div className="flex items-center gap-2">
                 <span className="w-2 h-2 rounded-full bg-slate-600 shrink-0" />
                 <span className="text-slate-400">Inactive:</span>
-                <span className="font-mono font-bold text-slate-300 ml-auto">344</span>
+                <span className="font-mono font-bold text-slate-300 ml-auto">{inactiveClients.toLocaleString('en-IN')}</span>
               </div>
             </div>
           </div>
@@ -369,40 +395,40 @@ export const AnalyticsView: React.FC = () => {
               <div>
                 <div className="flex justify-between text-slate-300 mb-1">
                   <span className="font-sans">Executed</span>
-                  <span className="text-emerald-400 font-bold">76%</span>
+                  <span className="text-emerald-400 font-bold">{executedPct}%</span>
                 </div>
                 <div className="w-full h-2 rounded-full bg-slate-800 overflow-hidden">
-                  <div className="h-full bg-emerald-500 rounded-full" style={{ width: '76%' }} />
+                  <div className="h-full bg-emerald-500 rounded-full" style={{ width: `${executedPct}%` }} />
                 </div>
               </div>
 
               <div>
                 <div className="flex justify-between text-slate-300 mb-1">
                   <span className="font-sans">Open</span>
-                  <span className="text-blue-400 font-bold">12%</span>
+                  <span className="text-blue-400 font-bold">{openPct}%</span>
                 </div>
                 <div className="w-full h-2 rounded-full bg-slate-800 overflow-hidden">
-                  <div className="h-full bg-blue-500 rounded-full" style={{ width: '12%' }} />
+                  <div className="h-full bg-blue-500 rounded-full" style={{ width: `${openPct}%` }} />
                 </div>
               </div>
 
               <div>
                 <div className="flex justify-between text-slate-300 mb-1">
                   <span className="font-sans">Rejected</span>
-                  <span className="text-rose-400 font-bold">7%</span>
+                  <span className="text-rose-400 font-bold">{rejectedPct}%</span>
                 </div>
                 <div className="w-full h-2 rounded-full bg-slate-800 overflow-hidden">
-                  <div className="h-full bg-rose-500 rounded-full" style={{ width: '7%' }} />
+                  <div className="h-full bg-rose-500 rounded-full" style={{ width: `${rejectedPct}%` }} />
                 </div>
               </div>
 
               <div>
                 <div className="flex justify-between text-slate-300 mb-1">
                   <span className="font-sans">Cancelled</span>
-                  <span className="text-slate-400 font-bold">5%</span>
+                  <span className="text-slate-400 font-bold">{cancelledPct}%</span>
                 </div>
                 <div className="w-full h-2 rounded-full bg-slate-800 overflow-hidden">
-                  <div className="h-full bg-slate-600 rounded-full" style={{ width: '5%' }} />
+                  <div className="h-full bg-slate-600 rounded-full" style={{ width: `${cancelledPct}%` }} />
                 </div>
               </div>
             </div>

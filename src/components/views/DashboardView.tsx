@@ -279,12 +279,12 @@ export const DashboardView: React.FC = () => {
               <TrendingUp className="w-4 h-4" />
             </div>
           </div>
-          <div className="text-2xl font-bold font-mono text-emerald-400 tracking-tight">
-            +₹{metrics?.openPnLL || 12.84} L
+          <div className={`text-2xl font-bold font-mono tracking-tight ${(metrics?.openPnLL ?? 0) >= 0 ? 'text-emerald-400' : 'text-rose-400'}`}>
+            {(metrics?.openPnLL ?? 0) >= 0 ? '+' : ''}₹{Number(metrics?.openPnLL ?? 0).toFixed(2)} L
           </div>
-          <div className="text-[11px] text-emerald-400 font-medium mt-1 flex items-center gap-1">
+          <div className={`text-[11px] font-medium mt-1 flex items-center gap-1 ${(metrics?.openPnLDayChangePct ?? 0) >= 0 ? 'text-emerald-400' : 'text-rose-400'}`}>
             <ArrowUpRight className="w-3.5 h-3.5" />
-            <span>+{metrics?.openPnLDayChangePct || 1.1}% on day</span>
+            <span>{(metrics?.openPnLDayChangePct ?? 0) >= 0 ? '+' : ''}{metrics?.openPnLDayChangePct ?? 0}% on day</span>
           </div>
         </div>
       </div>

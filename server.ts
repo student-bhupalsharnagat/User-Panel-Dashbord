@@ -1114,17 +1114,22 @@ export function mergeClients(existing: Client[], incomingRaw: any[]): Client[] {
         match.phone = item.phone;
       }
 
-      // If local client was explicitly created with 0 or has 0, keep 0 balance
-      const localMatch = persistentLocalClients.get(match.id) || persistentLocalClients.get(item.id);
-      if (localMatch && localMatch.ledgerBalance === 0) {
-        match.ledgerBalance = 0;
-        match.peakLedger = 0;
-        match.marginAvailable = 0;
+      // If local client was explicitly created with 0 or a specific balance, preserve it
+      const localMatch = persistentLocalClients.get(match.id) ||
+        persistentLocalClients.get(item.id) ||
+        Array.from(persistentLocalClients.values()).find(lc =>
+          (lc.email && match.email && lc.email.toLowerCase() === match.email.toLowerCase()) ||
+          (lc.email && item.email && lc.email.toLowerCase() === item.email.toLowerCase())
+        );
+      if (localMatch) {
+        match.ledgerBalance = localMatch.ledgerBalance;
+        match.peakLedger = localMatch.peakLedger;
+        match.marginAvailable = localMatch.marginAvailable;
       } else if (item.ledgerBalance > match.ledgerBalance) {
         match.ledgerBalance = item.ledgerBalance;
       }
-      if (localMatch && localMatch.ledgerBalance === 0) {
-        match.marginAvailable = 0;
+      if (localMatch) {
+        match.marginAvailable = localMatch.marginAvailable;
       } else if (item.marginAvailable > match.marginAvailable) {
         match.marginAvailable = item.marginAvailable;
       }
@@ -1347,10 +1352,11 @@ export async function syncAuthoritativeData(requestedTenantId?: string, force = 
         positions.unshift(newIncoming);
       }
       for (const [key, localPos] of persistentLocalPositions.entries()) {
-        if (!positions.some(p => (p.clientId + '_' + p.instrument) === key)) {
+        if (localPos.netQty !== 0 && !positions.some(p => (p.clientId + '_' + p.instrument) === key || p.id === localPos.id)) {
           positions.unshift(localPos);
         }
       }
+      positions = positions.filter(p => !isDummyRecord(p) && p.netQty !== 0);
 
       if (isUsingPostgres()) {
         for (const p of positions) {
@@ -1359,10 +1365,11 @@ export async function syncAuthoritativeData(requestedTenantId?: string, force = 
       }
     } else {
       for (const [key, localPos] of persistentLocalPositions.entries()) {
-        if (!positions.some(p => (p.clientId + '_' + p.instrument) === key)) {
+        if (localPos.netQty !== 0 && !positions.some(p => (p.clientId + '_' + p.instrument) === key || p.id === localPos.id)) {
           positions.unshift(localPos);
         }
       }
+      positions = positions.filter(p => !isDummyRecord(p) && p.netQty !== 0);
     }
 
     if (fundsList.length > 0) {
@@ -1569,11 +1576,13 @@ if (APP_ENV !== 'production') {
     const target = instruments[Math.floor(Math.random() * instruments.length)];
     if (target && target.status === 'Enabled') {
       const delta = +( (Math.random() - 0.49) * (target.lastPrice * 0.001) ).toFixed(2);
-      target.lastPrice = +(target.lastPrice + delta).toFixed(2);
+      const tick = target.tickSize || 0.05;
+      const factor = Math.round(1 / tick) || 20;
+      target.lastPrice = Math.round((target.lastPrice + delta) * factor) / factor;
       target.change = +(target.change + delta).toFixed(2);
       target.changePercent = +((target.change / (target.lastPrice - target.change)) * 100).toFixed(2);
-      target.bid = +(target.lastPrice - 0.5).toFixed(2);
-      target.ask = +(target.lastPrice + 0.5).toFixed(2);
+      target.bid = Math.round((target.lastPrice - tick) * factor) / factor;
+      target.ask = Math.round((target.lastPrice + tick) * factor) / factor;
 
       // Recalculate open positions MTM
       positions.forEach((pos) => {
@@ -1715,12 +1724,13 @@ function calculateAuthoritativeMetrics(userRole: string, brokerId: string, clien
   const inactiveCount = filteredClients.filter(c => c.status !== 'Active').length;
   const totalCount = filteredClients.length;
 
-  const totalUnrealised = filteredPositions.reduce((acc, p) => acc + (Number(p.unrealisedPnL) || 0), 0);
-  const totalRealised = filteredPositions.reduce((acc, p) => acc + (Number(p.realisedPnL) || 0), 0);
+  const openPositions = filteredPositions.filter(p => !isDummyRecord(p) && p.netQty !== 0);
+  const totalUnrealised = openPositions.reduce((acc, p) => acc + (Number(p.unrealisedPnL) || 0), 0);
+  const totalRealised = filteredPositions.filter(p => !isDummyRecord(p)).reduce((acc, p) => acc + (Number(p.realisedPnL) || 0), 0);
   const netPnL = totalRealised + totalUnrealised;
 
   const totalLedgerBalance = filteredClients.reduce((acc, c) => acc + (Number(c.ledgerBalance) || 0), 0);
-  const totalMarginUsed = filteredPositions.reduce((acc, p) => acc + (Number(p.marginUsed) || 0), 0);
+  const totalMarginUsed = openPositions.reduce((acc, p) => acc + (Number(p.marginUsed) || 0), 0);
   const totalMarginAvailable = filteredClients.reduce((acc, c) => acc + (Number(c.marginAvailable) || 0), 0);
 
   const pendingDeps = fundTransactions.filter(t => t.type === 'Deposit' && t.status === 'Pending').length;
@@ -1733,7 +1743,7 @@ function calculateAuthoritativeMetrics(userRole: string, brokerId: string, clien
     activeClientsRatio: totalCount > 0 ? +((activeCount / totalCount) * 100).toFixed(1) : 0,
     ledgerBalanceCr: +(totalLedgerBalance / 10000000).toFixed(2),
     ledgerBalanceNetWeekL: +(totalLedgerBalance / 100000).toFixed(2),
-    openPnLL: +(netPnL / 100000).toFixed(2),
+    openPnLL: +(totalUnrealised / 100000).toFixed(2),
     openPnLDayChangePct: 0,
     inactiveClients: inactiveCount,
     newToday: filteredClients.filter(c => matchesDateFilter(c.createdDate, 'Today')).length,
@@ -2319,8 +2329,17 @@ app.post(['/api/role', '/api/auth/switch-role'], (req: Request, res: Response) =
       message: 'Role switching is explicitly disabled in this deployment.',
     });
   }
-  const role = req.body?.role || req.body?.targetRole;
-  const targetUser = (role && systemUsers[role]) ? systemUsers[role] : systemUsers['broker_admin'];
+  let rawRole = req.body?.role || req.body?.targetRole;
+  let normalizedRole = rawRole ? String(rawRole).trim().toLowerCase().replace(/-/g, '_') : 'broker_admin';
+  if (normalizedRole === 'subbroker') normalizedRole = 'sub_broker';
+  if (normalizedRole === 'superadmin') normalizedRole = 'super_admin';
+  if (normalizedRole === 'brokeradmin') normalizedRole = 'broker_admin';
+
+  const baseUser = systemUsers[normalizedRole] || systemUsers['broker_admin'];
+  const targetUser = { ...baseUser };
+  if (targetUser.role === 'broker_admin' && settingsState.displayName) {
+    targetUser.name = settingsState.displayName;
+  }
 
   const token = createSignedToken({
     sub: targetUser.id,
@@ -2367,8 +2386,8 @@ app.get('/api/dashboard/summary', authMiddleware, async (req: AuthenticatedReque
       if (sm.active_users) metrics.activeClients = sm.active_users;
       metrics.inactiveClients = Math.max(0, metrics.totalClients - metrics.activeClients);
       metrics.activeClientsRatio = metrics.totalClients > 0 ? +((metrics.activeClients / metrics.totalClients) * 100).toFixed(1) : 0;
-      if (sm.total_turnover) metrics.clientTurnoverCr = +(sm.total_turnover / 10000000).toFixed(2);
-      if (sm.total_pnl !== undefined) metrics.openPnLL = +(sm.total_pnl / 100000).toFixed(2);
+      const openPositions = positions.filter(p => !isDummyRecord(p) && p.netQty !== 0);
+      if (openPositions.length === 0 && sm.total_pnl !== undefined) metrics.openPnLL = +(sm.total_pnl / 100000).toFixed(2);
       if (sm.total_used_margin !== undefined) metrics.marginUsedCr = +(sm.total_used_margin / 10000000).toFixed(2);
     }
   } catch (err: any) {
@@ -2451,7 +2470,9 @@ app.get(['/api/clients', '/api/admin/clients'], authMiddleware, async (req: Auth
       c.id.toLowerCase().includes(query) ||
       c.name.toLowerCase().includes(query) ||
       c.email.toLowerCase().includes(query) ||
-      c.phone.includes(query)
+      c.phone.includes(query) ||
+      (c.pan && c.pan.toLowerCase().includes(query)) ||
+      (c.clientCode && c.clientCode.toLowerCase().includes(query))
     );
   }
 
@@ -2495,13 +2516,18 @@ app.post('/api/clients', authMiddleware, requireRole(['broker_admin', 'super_adm
     return res.status(400).json({ success: false, message: 'Name, email, and phone are required' });
   }
 
+  const panClean = String(pan || '').trim().toUpperCase();
+  if (!panClean || !/^[A-Z]{5}[0-9]{4}[A-Z]{1}$/.test(panClean)) {
+    return res.status(400).json({ success: false, message: 'Invalid PAN format. Standard format is 5 letters, 4 digits, 1 letter (e.g. ABCDE1234F).' });
+  }
+
   const phoneClean = String(phone || '').replace(/[\s\+\-\(\)]/g, '');
-  if (!/^\d{10,15}$/.test(phoneClean)) {
-    return res.status(400).json({ success: false, message: 'Please enter a valid 10-digit mobile number' });
+  if (!/^[6-9]\d{9}$/.test(phoneClean)) {
+    return res.status(400).json({ success: false, message: 'Please enter a valid 10-digit Indian mobile number starting with 6-9' });
   }
 
   const newId = isDemo ? `CLT-DM-${Date.now()}` : `CLT-LIVE-${Date.now()}`;
-  const margin = Number(req.body.initialMargin ?? req.body.ledgerBalance ?? 0);
+  const margin = req.body.initialMargin !== undefined ? Math.max(0, Number(req.body.initialMargin)) : (req.body.ledgerBalance !== undefined ? Math.max(0, Number(req.body.ledgerBalance)) : 0);
 
   const newClient: Client = {
     id: newId,
@@ -2510,7 +2536,7 @@ app.post('/api/clients', authMiddleware, requireRole(['broker_admin', 'super_adm
     name,
     email,
     phone,
-    pan: pan || 'ABCDE1234F',
+    pan: panClean,
     status: 'Active',
     isDemo: Boolean(isDemo),
     ledgerBalance: margin,
@@ -2521,6 +2547,8 @@ app.post('/api/clients', authMiddleware, requireRole(['broker_admin', 'super_adm
     marginAvailable: margin,
     brokerId: user.brokerId || 'BRK-ROHAN-01',
     brokerName: user.name || 'Rohan Sen',
+    tenantId: user.tenantId || DEFAULT_TENANT_ID,
+    subBrokerId: (user as any).subBrokerId || 'SUB-BRK-001',
     kycStatus: 'Verified',
     kycDocuments: ['PAN Card', 'Aadhaar Card', 'Client Agreement'],
     createdDate: new Date().toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' }),
@@ -2724,8 +2752,8 @@ app.post('/api/orders', authMiddleware, async (req: AuthenticatedRequest, res: R
         message: 'Order price must be greater than ₹0',
       });
     }
-    const tickRatio = numPrice / tickSize;
-    if (Math.abs(tickRatio - Math.round(tickRatio)) > 1e-4) {
+    const factor = Math.round(1 / tickSize) || 20;
+    if (Math.abs(Math.round(numPrice * factor) - (numPrice * factor)) > 0.01) {
       return res.status(400).json({
         success: false,
         message: `Price ₹${numPrice} must be a valid multiple of tick size ₹${tickSize}`,
@@ -2834,19 +2862,55 @@ app.post('/api/orders', authMiddleware, async (req: AuthenticatedRequest, res: R
     let existingPos = positions.find(p => p.clientId === client.id && p.instrument === targetInst.symbol);
     if (existingPos) {
       if (side === 'BUY') {
-        const totalCost = (existingPos.avgPrice * existingPos.netQty) + (fillPrice * qty);
-        existingPos.netQty += qty;
-        existingPos.buyQty += qty;
-        existingPos.avgPrice = +(totalCost / existingPos.netQty).toFixed(2);
+        if (existingPos.netQty < 0) {
+          // Covering short position
+          const coverQty = Math.min(Math.abs(existingPos.netQty), qty);
+          const pnlChunk = Math.round(coverQty * (existingPos.avgPrice - fillPrice));
+          existingPos.realisedPnL = (existingPos.realisedPnL || 0) + pnlChunk;
+          client.ledgerBalance += pnlChunk;
+          client.marginAvailable += pnlChunk;
+          existingPos.netQty += qty;
+          existingPos.buyQty += qty;
+        } else {
+          // Adding to long position
+          const totalCost = (existingPos.avgPrice * existingPos.netQty) + (fillPrice * qty);
+          existingPos.netQty += qty;
+          existingPos.buyQty += qty;
+          existingPos.avgPrice = +(totalCost / existingPos.netQty).toFixed(2);
+        }
       } else {
-        existingPos.netQty -= qty;
-        existingPos.sellQty += qty;
+        if (existingPos.netQty > 0) {
+          // Closing long position (realize P&L)
+          const closeQty = Math.min(existingPos.netQty, qty);
+          const pnlChunk = Math.round(closeQty * (fillPrice - existingPos.avgPrice));
+          existingPos.realisedPnL = (existingPos.realisedPnL || 0) + pnlChunk;
+          client.ledgerBalance += pnlChunk;
+          client.marginAvailable += pnlChunk;
+          existingPos.netQty -= qty;
+          existingPos.sellQty += qty;
+        } else {
+          // Adding to short position
+          const totalCost = (existingPos.avgPrice * Math.abs(existingPos.netQty)) + (fillPrice * qty);
+          existingPos.netQty -= qty;
+          existingPos.sellQty += qty;
+          existingPos.avgPrice = +(totalCost / Math.abs(existingPos.netQty)).toFixed(2);
+        }
       }
-      existingPos.marginUsed += marginRequired;
-      existingPos.unrealisedPnL = Math.round(existingPos.netQty * (targetInst.lastPrice - existingPos.avgPrice));
-      existingPos.totalPnL = existingPos.realisedPnL + existingPos.unrealisedPnL;
-      persistentLocalPositions.set(client.id + '_' + targetInst.symbol, existingPos);
-      if (isUsingPostgres()) dbRepo.upsertPosition(existingPos).catch(console.warn);
+
+      existingPos.marginUsed = Math.round(Math.abs(existingPos.netQty) * existingPos.avgPrice * (existingPos.product === 'CNC' ? 1 : 0.2));
+      existingPos.unrealisedPnL = existingPos.netQty !== 0 ? Math.round(existingPos.netQty * (targetInst.lastPrice - existingPos.avgPrice)) : 0;
+      existingPos.totalPnL = (existingPos.realisedPnL || 0) + existingPos.unrealisedPnL;
+
+      if (existingPos.netQty === 0) {
+        // Position is completely closed
+        positions = positions.filter(p => p.id !== existingPos!.id);
+        persistentLocalPositions.delete(client.id + '_' + targetInst.symbol);
+        persistentLocalPositions.delete(existingPos.id);
+        if (isUsingPostgres()) dbRepo.deletePosition(existingPos.id).catch(console.warn);
+      } else {
+        persistentLocalPositions.set(client.id + '_' + targetInst.symbol, existingPos);
+        if (isUsingPostgres()) dbRepo.upsertPosition(existingPos).catch(console.warn);
+      }
     } else {
       const newPos: Position = {
         id: `POS-LIVE-${Date.now()}-${Math.floor(1000 + Math.random() * 9000)}`,
@@ -3024,7 +3088,7 @@ app.get('/api/positions', authMiddleware, async (req: AuthenticatedRequest, res:
     console.warn('[Positions API] Remote fetch notice:', err.message);
   }
 
-  let result = filterByHierarchy(positions.filter(p => !isDummyRecord(p)), user);
+  let result = filterByHierarchy(positions.filter(p => !isDummyRecord(p) && p.netQty !== 0), user);
 
   const totalRealised = result.reduce((acc, p) => acc + p.realisedPnL, 0);
   const totalUnrealised = result.reduce((acc, p) => acc + p.unrealisedPnL, 0);
@@ -3083,6 +3147,8 @@ app.post('/api/positions/:id/square-off', authMiddleware, (req: AuthenticatedReq
   }
 
   positions.splice(positionIndex, 1);
+  persistentLocalPositions.delete(pos.id);
+  persistentLocalPositions.delete(pos.clientId + '_' + pos.instrument);
   savePersistence();
 
   tradingPlatformClient.squareOffPosition(pos.id).catch((e: any) => console.warn('[Square-off Proxy] Notice:', e.message));
@@ -3445,9 +3511,19 @@ app.get('/api/analytics', authMiddleware, (req: AuthenticatedRequest, res: Respo
     return acc + (p * (Number(o.quantity) || 1));
   }, 0);
 
-  const executedOrders = userOrders.filter(o => o.status === 'Executed');
-  const executionRate = userOrders.length > 0 ? +((executedOrders.length / userOrders.length) * 100).toFixed(1) : 94.8;
-  const baseCommission = executedOrders.length * 20;
+  const userClients = user ? filterByHierarchy(clients.filter(c => !isDummyRecord(c)), user) : clients.filter(c => !isDummyRecord(c));
+  const activeCount = userClients.filter(c => c.status === 'Active').length;
+  const inactiveCount = userClients.filter(c => c.status !== 'Active').length;
+
+  const orderBreakdown = {
+    executed: userOrders.filter(o => o.status === 'Executed').length,
+    open: userOrders.filter(o => o.status === 'Open').length,
+    rejected: userOrders.filter(o => o.status === 'Rejected').length,
+    cancelled: userOrders.filter(o => o.status === 'Cancelled').length,
+  };
+  const totalOrders = orderBreakdown.executed + orderBreakdown.open + orderBreakdown.rejected + orderBreakdown.cancelled;
+  const executionRate = totalOrders > 0 ? +((orderBreakdown.executed / totalOrders) * 100).toFixed(1) : 94.8;
+  const baseCommission = orderBreakdown.executed * 20;
   const baseNetPnL = userPositions.reduce((acc, p) => acc + (Number(p.totalPnL) || 0), 0);
 
   let scale = 1;
@@ -3460,9 +3536,12 @@ app.get('/api/analytics', authMiddleware, (req: AuthenticatedRequest, res: Respo
     dates = ['24 Jul', '07 Aug', '21 Aug', '04 Sep', '18 Sep', '02 Oct', '22 Oct'];
   }
 
+  const daysInPeriod = timeRange === '90 Days' ? 90 : (timeRange === '30 Days' ? 30 : 7);
   const turnoverCr = +(Math.max(12.85 * scale, (baseTurnover * scale) / 10000000)).toFixed(2);
   const commissionEarnedL = +(Math.max(2.4 * scale, (baseCommission * scale) / 100000)).toFixed(2);
   const netPnLL = +(Math.max(3.5 * scale, (baseNetPnL * scale) / 100000)).toFixed(2);
+  const dailyTurnoverBase = turnoverCr / daysInPeriod;
+  const dailyCommBase = commissionEarnedL / daysInPeriod;
 
   res.json({
     success: true,
@@ -3475,24 +3554,17 @@ app.get('/api/analytics', authMiddleware, (req: AuthenticatedRequest, res: Respo
       executionImprovementPct: 1.1,
       netPnLL: netPnLL,
       netPnLChangePct: 8.8,
-      turnoverTrend: [
-        { day: dates[0], volumeCr: +(turnoverCr * 0.7).toFixed(1) },
-        { day: dates[1], volumeCr: +(turnoverCr * 0.85).toFixed(1) },
-        { day: dates[2], volumeCr: +(turnoverCr * 0.78).toFixed(1) },
-        { day: dates[3], volumeCr: +(turnoverCr * 1.1).toFixed(1) },
-        { day: dates[4], volumeCr: +(turnoverCr * 0.95).toFixed(1) },
-        { day: dates[5], volumeCr: +(turnoverCr * 1.25).toFixed(1) },
-        { day: dates[6], volumeCr: turnoverCr },
-      ],
-      commissionEarnings: [
-        { day: dates[0], netL: +(commissionEarnedL * 0.11).toFixed(1) },
-        { day: dates[1], netL: +(commissionEarnedL * 0.15).toFixed(1) },
-        { day: dates[2], netL: +(commissionEarnedL * 0.12).toFixed(1) },
-        { day: dates[3], netL: +(commissionEarnedL * 0.18).toFixed(1) },
-        { day: dates[4], netL: +(commissionEarnedL * 0.14).toFixed(1) },
-        { day: dates[5], netL: +(commissionEarnedL * 0.20).toFixed(1) },
-        { day: dates[6], netL: +(commissionEarnedL * 0.10).toFixed(1) },
-      ],
+      activeCount,
+      inactiveCount,
+      orderBreakdown,
+      turnoverTrend: dates.map((d, i) => ({
+        day: d,
+        volumeCr: +(dailyTurnoverBase * (0.85 + (i * 0.05))).toFixed(2),
+      })),
+      commissionEarnings: dates.map((d, i) => ({
+        day: d,
+        netL: +(dailyCommBase * (0.85 + (i * 0.05))).toFixed(2),
+      })),
     },
   });
 });
@@ -3558,6 +3630,54 @@ app.get('/api/reports/preview/:id', authMiddleware, (req: Request, res: Response
       'Avg Price': p.avgPrice,
       'Current Price': p.currentPrice,
       'Total P&L': p.totalPnL,
+    }));
+  } else if (report.type === 'turnover') {
+    previewData = matchedOrders.map(o => {
+      const price = typeof o.orderPrice === 'number' ? o.orderPrice : (o.avgPrice || 0);
+      const turnover = Math.round(price * o.quantity);
+      return {
+        'Trade / Order ID': o.id,
+        'Date': o.created,
+        'Client': o.clientName,
+        'Instrument': o.instrument,
+        'Exchange': o.exchange || 'NSE',
+        'Side': o.side,
+        'Traded Qty': o.executedQty || o.quantity,
+        'Price (INR)': price,
+        'Turnover (INR)': turnover,
+        'Status': o.status,
+      };
+    }).slice(0, 10);
+  } else if (report.type === 'brokerage') {
+    previewData = matchedOrders.map(o => {
+      const price = typeof o.orderPrice === 'number' ? o.orderPrice : (o.avgPrice || 0);
+      const turnover = Math.round(price * o.quantity);
+      const brokerage = Math.min(20, Math.round(turnover * 0.0003)) || 20;
+      return {
+        'Order ID': o.id,
+        'Date': o.created,
+        'Client': o.clientName,
+        'Instrument': o.instrument,
+        'Side': o.side,
+        'Traded Qty': o.executedQty || o.quantity,
+        'Turnover (INR)': turnover,
+        'Brokerage (INR)': brokerage,
+        'Status': o.status,
+      };
+    }).slice(0, 10);
+  } else if (report.type === 'funds') {
+    let matchedFunds = fundTransactions.filter(f => !isDummyRecord(f));
+    if (period && period !== 'All') {
+      matchedFunds = matchedFunds.filter(f => matchesDateFilter(f.requestDate, period));
+    }
+    previewData = matchedFunds.slice(0, 10).map(f => ({
+      'Transaction ID': f.id,
+      'Client': f.clientName,
+      'Type': f.type,
+      'Amount (INR)': f.amount,
+      'Date': f.requestDate,
+      'Method': f.method,
+      'Status': f.status,
     }));
   } else {
     previewData = matchedLedger.slice(0, 10).map(l => ({
