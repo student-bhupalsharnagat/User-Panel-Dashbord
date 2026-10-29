@@ -27,6 +27,8 @@ export const PositionsView: React.FC = () => {
     isLiveMode,
     isCompactMode,
     latestTicks,
+    positionsFilter,
+    setPositionsFilter,
   } = useApp();
 
   const [positions, setPositions] = useState<Position[]>([]);
@@ -36,6 +38,14 @@ export const PositionsView: React.FC = () => {
   const [pageSize, setPageSize] = useState(10);
   const [page, setPage] = useState(1);
   const [loading, setLoading] = useState(true);
+
+  // Consume any target positionsFilter set from Notifications
+  useEffect(() => {
+    if (positionsFilter) {
+      if (positionsFilter.query) setSearchQuery(positionsFilter.query);
+      setPositionsFilter(null);
+    }
+  }, [positionsFilter, setPositionsFilter]);
 
   useEffect(() => {
     setPage(1);

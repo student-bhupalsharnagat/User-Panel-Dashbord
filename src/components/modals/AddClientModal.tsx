@@ -4,7 +4,7 @@
  */
 
 import React, { useState } from 'react';
-import { X, UserPlus, Shield, CheckCircle2 } from 'lucide-react';
+import { X, UserPlus, Shield, CheckCircle2, AlertTriangle } from 'lucide-react';
 import { useApp } from '../../context/AppContext';
 import { api } from '../../services/api';
 
@@ -17,39 +17,47 @@ export const AddClientModal: React.FC = () => {
   const [pan, setPan] = useState('');
   const [initialMargin, setInitialMargin] = useState<number | string>(0);
   const [isDemo, setIsDemo] = useState(false);
+  const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const [isSubmitting, setIsSubmitting] = useState(false);
 
   if (!isAddClientOpen) return null;
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!name || !email || !phone) {
-      showToast('Name, email, and phone are required', 'error');
+    setErrorMessage(null);
+
+    if (!name.trim() || !email.trim() || !phone.trim()) {
+      setErrorMessage('Full name, email address, and mobile number are required.');
       return;
     }
 
     const digitsOnly = phone.replace(/\D/g, '');
-    const validDigits = digitsOnly.length === 12 && digitsOnly.startsWith('91') ? digitsOnly.slice(2) : digitsOnly;
+    const validDigits = digitsOnly.length === 12 && digitsOnly.startsWith('91')
+      ? digitsOnly.slice(2)
+      : (digitsOnly.length === 11 && digitsOnly.startsWith('0') ? digitsOnly.slice(1) : digitsOnly);
+
     if (validDigits.length !== 10 || !/^[6-9]/.test(validDigits)) {
-      showToast('Please enter a valid 10-digit mobile number starting with 6-9', 'error');
+      setErrorMessage('Please enter a valid 10-digit Indian mobile number starting with 6-9. (Numeric length must be 10 digits).');
       return;
     }
 
     const panClean = (pan || '').trim().toUpperCase();
-    if (panClean && !/^[A-Z]{5}[0-9]{4}[A-Z]{1}$/.test(panClean)) {
-      showToast('Invalid PAN format. Must be 5 letters, 4 numbers, 1 letter (e.g. ABCDE1234F)', 'error');
+    if (!panClean || !/^[A-Z]{5}[0-9]{4}[A-Z]{1}$/.test(panClean)) {
+      setErrorMessage('Invalid PAN format. Standard PAN must be 5 letters, 4 numbers, and 1 letter (e.g. ABCDE1234F). Numeric-only values (like 1234567890) are strictly rejected.');
       return;
     }
 
-    const parsedMargin = initialMargin === '' || initialMargin === null ? 0 : Math.max(0, parseFloat(String(initialMargin)) || 0);
+    const parsedMargin = (initialMargin === '' || initialMargin === null || isNaN(Number(initialMargin)))
+      ? 0
+      : Math.max(0, Number(initialMargin));
 
     setIsSubmitting(true);
     try {
       const newClient = await api.createClient({
-        name,
-        email,
-        phone,
-        pan: panClean || 'ABCDE1234F',
+        name: name.trim(),
+        email: email.trim(),
+        phone: `+91 ${validDigits}`,
+        pan: panClean,
         initialMargin: parsedMargin,
         ledgerBalance: parsedMargin,
         isDemo,
@@ -63,8 +71,9 @@ export const AddClientModal: React.FC = () => {
       setPhone('');
       setPan('');
       setInitialMargin(0);
+      setErrorMessage(null);
     } catch (err: any) {
-      showToast(err.message || 'Failed to onboard client', 'error');
+      setErrorMessage(err.message || 'Failed to onboard client');
     } finally {
       setIsSubmitting(false);
     }
@@ -92,6 +101,20 @@ export const AddClientModal: React.FC = () => {
         </div>
 
         <form onSubmit={handleSubmit} className="p-4 sm:p-5 space-y-3.5 overflow-y-auto flex-1">
+          {errorMessage && (
+            <div className="p-3 rounded-lg bg-rose-500/15 border border-rose-500/40 text-rose-300 text-xs flex items-start gap-2 animate-in fade-in duration-100">
+              <AlertTriangle className="w-4 h-4 text-rose-400 shrink-0 mt-0.5" />
+              <div className="flex-1 font-medium leading-relaxed">{errorMessage}</div>
+              <button
+                type="button"
+                onClick={() => setErrorMessage(null)}
+                className="text-rose-400 hover:text-white p-0.5"
+              >
+                <X className="w-3.5 h-3.5" />
+              </button>
+            </div>
+          )}
+
           <div>
             <label className="block text-[11px] font-semibold text-slate-400 uppercase tracking-wider mb-1">
               Full Legal Name *

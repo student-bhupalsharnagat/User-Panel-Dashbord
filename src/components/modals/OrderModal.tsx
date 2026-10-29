@@ -63,9 +63,16 @@ export const OrderModal: React.FC = () => {
   const estimatedMargin = Math.round(estimatedOrderValue * (product === 'CNC' ? 1 : 0.2));
   const hasSufficientMargin = currentClient ? currentClient.marginAvailable >= estimatedMargin : true;
 
+  const isInstrumentDisabled = currentInst?.status === 'Disabled';
+
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!currentInst) return;
+
+    if (isInstrumentDisabled) {
+      showToast(`Trading is currently disabled for ${currentInst.symbol}`, 'error');
+      return;
+    }
 
     if (numQty <= 0) {
       showToast('Order quantity must be greater than 0', 'error');
@@ -291,6 +298,12 @@ export const OrderModal: React.FC = () => {
                 <span>Insufficient margin available for this trade.</span>
               </div>
             )}
+            {isInstrumentDisabled && (
+              <div className="pt-1 flex items-center gap-1.5 text-amber-400 text-[11px]">
+                <AlertCircle className="w-3.5 h-3.5 shrink-0" />
+                <span>Trading is disabled for {currentInst?.symbol}. Orders cannot be placed.</span>
+              </div>
+            )}
           </div>
 
           {/* Action Buttons */}
@@ -304,7 +317,7 @@ export const OrderModal: React.FC = () => {
             </button>
             <button
               type="submit"
-              disabled={isSubmitting || !hasSufficientMargin}
+              disabled={isSubmitting || !hasSufficientMargin || isInstrumentDisabled}
               className={`flex-1 py-2 text-xs font-bold text-white rounded-lg transition-all shadow-md ${
                 side === 'BUY'
                   ? 'bg-emerald-600 hover:bg-emerald-500 disabled:bg-emerald-900/50'

@@ -536,6 +536,24 @@ export const defaultMarketInstruments: MarketInstrument[] = [
     tickSize: 0.05,
     status: 'Disabled',
   },
+  {
+    symbol: 'ITC',
+    name: 'ITC Limited',
+    exchange: 'NSE',
+    lastPrice: 428.50,
+    change: -1.20,
+    changePercent: -0.28,
+    bid: 428.30,
+    ask: 428.70,
+    volume: '3.8M',
+    high: 432.00,
+    low: 426.00,
+    type: 'Equity',
+    contractExpiry: 'EQ',
+    lotSize: 1,
+    tickSize: 0.05,
+    status: 'Disabled',
+  },
 ];
 
 let instruments: MarketInstrument[] = [...defaultMarketInstruments];
@@ -545,6 +563,56 @@ let positions: Position[] = [];
 let fundTransactions: FundTransaction[] = [];
 let ledgerEntries: LedgerEntry[] = [];
 let auditLogs: AuditLog[] = [];
+
+export interface SupportTicket {
+  id: string;
+  category: string;
+  subject: string;
+  message: string;
+  priority: string;
+  status: 'Open' | 'In Progress' | 'Resolved' | 'Closed';
+  createdAt: string;
+  updatedAt: string;
+  user: {
+    name: string;
+    email: string;
+    role: string;
+  };
+  replies: Array<{
+    id: string;
+    sender: string;
+    role: string;
+    message: string;
+    timestamp: string;
+  }>;
+}
+
+let tickets: SupportTicket[] = [
+  {
+    id: 'TCK-1001',
+    category: 'Billing & Margin',
+    subject: 'Client Margin Allocation Query',
+    message: 'Need clarification on margin multiplier for intraday MCX crude contracts.',
+    priority: 'Medium',
+    status: 'In Progress',
+    createdAt: '2026-10-28 11:30:00',
+    updatedAt: '2026-10-28 14:15:00',
+    user: {
+      name: 'Rohan Sen',
+      email: 'rohan.sen@nextrade.example',
+      role: 'Broker Admin',
+    },
+    replies: [
+      {
+        id: 'REP-1',
+        sender: 'Central Support Desk',
+        role: 'Operations Admin',
+        message: 'Intraday margin multiplier for MCX is set to 5x standard exchange SPAN margins.',
+        timestamp: '2026-10-28 14:15:00',
+      },
+    ],
+  },
+];
 
 // Single audit write path. Timestamp is 'YYYY-MM-DD HH:MM:SS' IST so date filters stay correct after midnight
 // (the old 'HH:MM:SS, Today' strings matched Today forever); id is unique so React keys never collide.
@@ -564,7 +632,7 @@ function pushAudit(entry: AuditLog): AuditLog {
   return log;
 }
 
-const disabledInstrumentSymbols = new Set<string>();
+const disabledInstrumentSymbols = new Set<string>(['BANKNIFTY25APRFUT', 'ITC']);
 const persistentLocalOrders = new Map<string, Order>();
 const persistentLocalPositions = new Map<string, Position>();
 const persistentLocalClients = new Map<string, Client>();
@@ -685,6 +753,48 @@ function seedDefaultNotificationOrders() {
       tenantId: DEFAULT_TENANT_ID,
     });
   }
+  if (!fundTransactions.some(f => f.referenceId === 'UTR958310421' || f.id === 'FTX-958310421')) {
+    fundTransactions.unshift({
+      id: 'FTX-958310421',
+      clientId: 'CLI-AARAV-01',
+      clientName: 'Aarav Mehta',
+      type: 'Deposit',
+      amount: 250000,
+      method: 'Bank transfer',
+      requestDate: new Date().toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' }),
+      referenceId: 'UTR958310421',
+      status: 'Pending',
+      verification: 'Manual verification required',
+      proofDocument: 'bank_slip_958310421.pdf',
+      brokerId: 'BRK-ROHAN-01',
+      subBrokerId: 'SUB-BRK-001',
+      masterId: 'MST-ALPHA-01',
+      tenantId: DEFAULT_TENANT_ID,
+    });
+  }
+  if (!positions.some(p => p.instrument === 'BANKNIFTY')) {
+    positions.unshift({
+      id: 'POS-MEERA-BN-01',
+      clientId: 'CLI-MEERA-01',
+      clientName: 'Meera Nair',
+      instrument: 'BANKNIFTY',
+      exchange: 'NFO',
+      product: 'NRML',
+      netQty: 30,
+      buyQty: 30,
+      sellQty: 0,
+      avgPrice: 48500.00,
+      currentPrice: 48940.00,
+      unrealisedPnL: 13200.00,
+      realisedPnL: 0,
+      totalPnL: 13200.00,
+      marginUsed: 145000,
+      brokerId: 'BRK-ROHAN-01',
+      subBrokerId: 'SUB-BRK-001',
+      masterId: 'MST-ALPHA-01',
+      tenantId: DEFAULT_TENANT_ID,
+    });
+  }
 }
 
 export function initPersistenceStore() {
@@ -714,6 +824,7 @@ export function initPersistenceStore() {
       if (Array.isArray(store.ledgerEntries)) ledgerEntries = store.ledgerEntries.filter((l: any) => !isDummyRecord(l));
       if (Array.isArray(store.auditLogs)) auditLogs = store.auditLogs;
       if (Array.isArray(store.userAccounts)) userAccounts = store.userAccounts;
+      if (Array.isArray(store.tickets)) tickets = store.tickets;
       seedAccounts().catch(() => {});
       if (Array.isArray(store.instruments) && store.instruments.length > 0) {
         instruments = store.instruments.map((i: any) => {
@@ -726,7 +837,7 @@ export function initPersistenceStore() {
       if (store.tenantBranding) tenantBranding = { ...tenantBranding, ...store.tenantBranding };
       if (store.settingsState) settingsState = { ...settingsState, ...store.settingsState };
       seedDefaultNotificationOrders();
-      console.log(`[Persistence] Loaded persisted snapshot: ${clients.length} clients, ${orders.length} orders, ${positions.length} positions, ${userAccounts.length} accounts.`);
+      console.log(`[Persistence] Loaded persisted snapshot: ${clients.length} clients, ${orders.length} orders, ${positions.length} positions, ${userAccounts.length} accounts, ${tickets.length} tickets.`);
     } else {
       seedAccounts().catch(() => {});
       seedDefaultNotificationOrders();
@@ -756,6 +867,7 @@ export function savePersistence() {
       ledgerEntries: ledgerEntries.filter(l => !isDummyRecord(l)),
       auditLogs,
       userAccounts,
+      tickets,
     };
     const tmpFile = `${PERSISTENCE_FILE}.tmp.${Date.now()}`;
     fs.writeFileSync(tmpFile, JSON.stringify(store, null, 2), 'utf8');
@@ -2113,6 +2225,7 @@ app.post('/api/auth/register', async (req: Request, res: Response) => {
 
     // If trader_client (or partner), also sync to clients state & Trading Platform
     if (targetRole === 'trader_client' || targetRole === 'sub_broker') {
+      const regMargin = req.body.initialMargin !== undefined ? Math.max(0, Number(req.body.initialMargin)) : (req.body.initialBalance !== undefined ? Math.max(0, Number(req.body.initialBalance)) : 0);
       const newClientRecord: Client = {
         id: newId,
         userId: newId,
@@ -2123,19 +2236,19 @@ app.post('/api/auth/register', async (req: Request, res: Response) => {
         pan: newAccount.pan || 'ABCDE1234F',
         status: 'Active',
         isDemo: false,
-        ledgerBalance: 100000,
+        ledgerBalance: regMargin,
         openPnL: 0,
-        peakLedger: 100000,
+        peakLedger: regMargin,
         marginUsed: 0,
         income: 0,
-        marginAvailable: 100000,
+        marginAvailable: regMargin,
         brokerId: newAccount.brokerId,
         brokerName: 'NexTrade Broker',
         kycStatus: 'Verified',
         kycDocuments: ['PAN Card', 'Client Agreement'],
         createdDate: new Date().toISOString().split('T')[0],
         lastActive: 'Just now',
-        riskLimit: 500000,
+        riskLimit: regMargin > 0 ? regMargin * 2 : 500000,
         isLive: true,
       };
 
@@ -2382,10 +2495,12 @@ app.get('/api/dashboard/summary', authMiddleware, async (req: AuthenticatedReque
     const liveSummaryRes = await tradingPlatformClient.fetchLiveSummary(user.tenantId);
     if (liveSummaryRes.success && liveSummaryRes.metrics) {
       const sm = liveSummaryRes.metrics;
-      if (sm.total_users) metrics.totalClients = sm.total_users;
-      if (sm.active_users) metrics.activeClients = sm.active_users;
-      metrics.inactiveClients = Math.max(0, metrics.totalClients - metrics.activeClients);
-      metrics.activeClientsRatio = metrics.totalClients > 0 ? +((metrics.activeClients / metrics.totalClients) * 100).toFixed(1) : 0;
+      if (clients.length === 0 && sm.total_users) metrics.totalClients = sm.total_users;
+      if (clients.length === 0 && sm.active_users) metrics.activeClients = sm.active_users;
+      if (clients.length === 0) {
+        metrics.inactiveClients = Math.max(0, metrics.totalClients - metrics.activeClients);
+        metrics.activeClientsRatio = metrics.totalClients > 0 ? +((metrics.activeClients / metrics.totalClients) * 100).toFixed(1) : 0;
+      }
       const openPositions = positions.filter(p => !isDummyRecord(p) && p.netQty !== 0);
       if (openPositions.length === 0 && sm.total_pnl !== undefined) metrics.openPnLL = +(sm.total_pnl / 100000).toFixed(2);
       if (sm.total_used_margin !== undefined) metrics.marginUsedCr = +(sm.total_used_margin / 10000000).toFixed(2);
@@ -2733,6 +2848,13 @@ app.post('/api/orders', authMiddleware, async (req: AuthenticatedRequest, res: R
   }
 
   const targetInst = instruments.find(i => i.symbol === instrument || i.name === instrument) || instruments[0];
+  if (targetInst && (targetInst.status === 'Disabled' || disabledInstrumentSymbols.has(targetInst.symbol))) {
+    return res.status(400).json({
+      success: false,
+      message: `Trading is currently disabled for ${targetInst.symbol}`,
+    });
+  }
+
   const lotSize = targetInst?.lotSize || 1;
   const tickSize = targetInst?.tickSize || 0.05;
   const qty = Number(quantity);
@@ -2741,7 +2863,7 @@ app.post('/api/orders', authMiddleware, async (req: AuthenticatedRequest, res: R
   if (qty <= 0 || (lotSize > 1 && qty % lotSize !== 0)) {
     return res.status(400).json({
       success: false,
-      message: `Quantity (${qty}) must be a multiple of lot size (${lotSize})`,
+      message: qty <= 0 ? 'Order quantity must be greater than 0' : `Quantity (${qty}) must be a multiple of lot size (${lotSize})`,
     });
   }
 
@@ -2856,11 +2978,11 @@ app.post('/api/orders', authMiddleware, async (req: AuthenticatedRequest, res: R
   persistentLocalOrders.set(newOrder.id, newOrder);
 
   if (isExecuted) {
-    client.marginUsed += marginRequired;
-    client.marginAvailable -= marginRequired;
-
-    let existingPos = positions.find(p => p.clientId === client.id && p.instrument === targetInst.symbol);
+    let existingPos = positions.find(p => p.clientId === client.id && p.instrument === targetInst.symbol && p.netQty !== 0);
     if (existingPos) {
+      const prevMargin = existingPos.marginUsed || 0;
+      const isReducing = (side === 'BUY' && existingPos.netQty < 0) || (side === 'SELL' && existingPos.netQty > 0);
+
       if (side === 'BUY') {
         if (existingPos.netQty < 0) {
           // Covering short position
@@ -2868,7 +2990,6 @@ app.post('/api/orders', authMiddleware, async (req: AuthenticatedRequest, res: R
           const pnlChunk = Math.round(coverQty * (existingPos.avgPrice - fillPrice));
           existingPos.realisedPnL = (existingPos.realisedPnL || 0) + pnlChunk;
           client.ledgerBalance += pnlChunk;
-          client.marginAvailable += pnlChunk;
           existingPos.netQty += qty;
           existingPos.buyQty += qty;
         } else {
@@ -2885,7 +3006,6 @@ app.post('/api/orders', authMiddleware, async (req: AuthenticatedRequest, res: R
           const pnlChunk = Math.round(closeQty * (fillPrice - existingPos.avgPrice));
           existingPos.realisedPnL = (existingPos.realisedPnL || 0) + pnlChunk;
           client.ledgerBalance += pnlChunk;
-          client.marginAvailable += pnlChunk;
           existingPos.netQty -= qty;
           existingPos.sellQty += qty;
         } else {
@@ -2901,17 +3021,28 @@ app.post('/api/orders', authMiddleware, async (req: AuthenticatedRequest, res: R
       existingPos.unrealisedPnL = existingPos.netQty !== 0 ? Math.round(existingPos.netQty * (targetInst.lastPrice - existingPos.avgPrice)) : 0;
       existingPos.totalPnL = (existingPos.realisedPnL || 0) + existingPos.unrealisedPnL;
 
+      if (isReducing) {
+        const released = Math.max(0, prevMargin - existingPos.marginUsed);
+        client.marginUsed = Math.max(0, client.marginUsed - released);
+        client.marginAvailable = Math.max(0, client.ledgerBalance - client.marginUsed);
+      } else {
+        const additional = Math.max(0, existingPos.marginUsed - prevMargin);
+        client.marginUsed += additional;
+        client.marginAvailable = Math.max(0, client.ledgerBalance - client.marginUsed);
+      }
+
       if (existingPos.netQty === 0) {
-        // Position is completely closed
-        positions = positions.filter(p => p.id !== existingPos!.id);
+        // Round trip completed: keep position with netQty: 0 so realisedPnL is retained
         persistentLocalPositions.delete(client.id + '_' + targetInst.symbol);
-        persistentLocalPositions.delete(existingPos.id);
-        if (isUsingPostgres()) dbRepo.deletePosition(existingPos.id).catch(console.warn);
+        if (isUsingPostgres()) dbRepo.upsertPosition(existingPos).catch(console.warn);
       } else {
         persistentLocalPositions.set(client.id + '_' + targetInst.symbol, existingPos);
         if (isUsingPostgres()) dbRepo.upsertPosition(existingPos).catch(console.warn);
       }
     } else {
+      client.marginUsed += marginRequired;
+      client.marginAvailable = Math.max(0, client.ledgerBalance - client.marginUsed);
+
       const newPos: Position = {
         id: `POS-LIVE-${Date.now()}-${Math.floor(1000 + Math.random() * 9000)}`,
         clientId: client.id,
@@ -3088,20 +3219,21 @@ app.get('/api/positions', authMiddleware, async (req: AuthenticatedRequest, res:
     console.warn('[Positions API] Remote fetch notice:', err.message);
   }
 
-  let result = filterByHierarchy(positions.filter(p => !isDummyRecord(p) && p.netQty !== 0), user);
+  const allUserPositions = filterByHierarchy(positions.filter(p => !isDummyRecord(p)), user);
+  const openPositions = allUserPositions.filter(p => p.netQty !== 0);
 
-  const totalRealised = result.reduce((acc, p) => acc + p.realisedPnL, 0);
-  const totalUnrealised = result.reduce((acc, p) => acc + p.unrealisedPnL, 0);
+  const totalRealised = allUserPositions.reduce((acc, p) => acc + (p.realisedPnL || 0), 0);
+  const totalUnrealised = openPositions.reduce((acc, p) => acc + (p.unrealisedPnL || 0), 0);
   const netPnL = totalRealised + totalUnrealised;
 
   res.json({
     success: true,
-    positions: result,
+    positions: openPositions,
     summary: {
       totalRealisedPnLL: +(totalRealised / 100000).toFixed(2),
       unrealisedPnLL: +(totalUnrealised / 100000).toFixed(2),
       netPnLL: +(netPnL / 100000).toFixed(2),
-      marginUtilisedCr: 7.28,
+      marginUtilisedCr: +(openPositions.reduce((acc, p) => acc + (p.marginUsed || 0), 0) / 10000000).toFixed(2),
     },
   });
 });
@@ -3146,14 +3278,19 @@ app.post('/api/positions/:id/square-off', authMiddleware, (req: AuthenticatedReq
     });
   }
 
-  positions.splice(positionIndex, 1);
+  // Update position to closed (netQty: 0) while retaining realised P&L
+  pos.realisedPnL = (pos.realisedPnL || 0) + (pos.unrealisedPnL || 0);
+  pos.unrealisedPnL = 0;
+  pos.totalPnL = pos.realisedPnL;
+  pos.netQty = 0;
+  pos.marginUsed = 0;
   persistentLocalPositions.delete(pos.id);
   persistentLocalPositions.delete(pos.clientId + '_' + pos.instrument);
   savePersistence();
 
   tradingPlatformClient.squareOffPosition(pos.id).catch((e: any) => console.warn('[Square-off Proxy] Notice:', e.message));
   if (isUsingPostgres()) {
-    dbRepo.deletePosition(pos.id).catch(console.warn);
+    dbRepo.upsertPosition(pos).catch(console.warn);
   }
 
   pushAudit({
@@ -3771,6 +3908,85 @@ app.all(['/api/settings', '/api/user/settings'], authMiddleware, (req: Authentic
   });
 
   res.json({ success: true, settings: settingsState });
+});
+
+// Support Tickets (Persistent Server Storage & S2S sync)
+app.get('/api/tickets', authMiddleware, (_req: AuthenticatedRequest, res: Response) => {
+  res.json({ success: true, tickets });
+});
+
+app.post('/api/tickets', authMiddleware, (req: AuthenticatedRequest, res: Response) => {
+  const user = req.user!;
+  const { category, subject, message, priority } = req.body;
+  if (!subject || !message) {
+    return res.status(400).json({ success: false, message: 'Subject and message are required' });
+  }
+  const newTicket: SupportTicket = {
+    id: `TCK-${Date.now().toString().slice(-4)}`,
+    category: category || 'General Support',
+    subject,
+    message,
+    priority: priority || 'Medium',
+    status: 'Open',
+    createdAt: new Date().toISOString().replace('T', ' ').slice(0, 19),
+    updatedAt: new Date().toISOString().replace('T', ' ').slice(0, 19),
+    user: {
+      name: user.name,
+      email: user.email,
+      role: user.roleTitle || user.role,
+    },
+    replies: [],
+  };
+  tickets.unshift(newTicket);
+  savePersistence();
+  pushAudit({
+    id: `LOG-${Date.now().toString().slice(-4)}`,
+    timestamp: new Date().toLocaleTimeString('en-GB') + ', Today',
+    user: user.name,
+    role: user.roleTitle,
+    action: 'Created Support Ticket',
+    relatedEntity: newTicket.id,
+    ipAddress: req.ip || '127.0.0.1',
+    result: 'Success',
+    details: `Ticket "${newTicket.subject}" created under category ${newTicket.category}`,
+  });
+  res.status(201).json({ success: true, message: 'Support ticket submitted successfully', ticket: newTicket, id: newTicket.id });
+});
+
+app.post('/api/tickets/:id/reply', authMiddleware, (req: AuthenticatedRequest, res: Response) => {
+  const user = req.user!;
+  const ticket = tickets.find(t => t.id === req.params.id);
+  if (!ticket) {
+    return res.status(404).json({ success: false, message: 'Ticket not found' });
+  }
+  const { message } = req.body;
+  if (!message || !message.trim()) {
+    return res.status(400).json({ success: false, message: 'Reply message cannot be empty' });
+  }
+  const reply = {
+    id: `REP-${Date.now().toString().slice(-4)}`,
+    sender: user.name,
+    role: user.roleTitle || user.role,
+    message: message.trim(),
+    timestamp: new Date().toISOString().replace('T', ' ').slice(0, 19),
+  };
+  ticket.replies.push(reply);
+  ticket.updatedAt = reply.timestamp;
+  savePersistence();
+
+  pushAudit({
+    id: `LOG-${Date.now().toString().slice(-4)}`,
+    timestamp: new Date().toLocaleTimeString('en-GB') + ', Today',
+    user: user.name,
+    role: user.roleTitle,
+    action: 'Replied to Support Ticket',
+    relatedEntity: ticket.id,
+    ipAddress: req.ip || '127.0.0.1',
+    result: 'Success',
+    details: `Added reply to ticket ${ticket.id} (${ticket.subject})`,
+  });
+
+  res.json({ success: true, message: 'Reply posted successfully', ticket, reply });
 });
 
 // White-label & Central Admin Propagation with HMAC Signature Validation

@@ -29,6 +29,8 @@ export const FundsView: React.FC = () => {
     showToast,
     isLiveMode,
     isCompactMode,
+    fundsFilter,
+    setFundsFilter,
   } = useApp();
 
   const [transactions, setTransactions] = useState<FundTransaction[]>([]);
@@ -38,6 +40,16 @@ export const FundsView: React.FC = () => {
   const [pageSize, setPageSize] = useState(10);
   const [page, setPage] = useState(1);
   const [loading, setLoading] = useState(true);
+
+  // Consume any target fundsFilter set from Notifications
+  useEffect(() => {
+    if (fundsFilter) {
+      if (fundsFilter.tab) setActiveTab(fundsFilter.tab);
+      if (fundsFilter.query) setSearchQuery(fundsFilter.query);
+      setTimeRange('All Time');
+      setFundsFilter(null);
+    }
+  }, [fundsFilter, setFundsFilter]);
 
   useEffect(() => {
     setPage(1);

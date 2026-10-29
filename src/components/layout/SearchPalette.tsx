@@ -25,6 +25,7 @@ export const SearchPalette: React.FC = () => {
     setActiveTab,
     openOrderModal,
     openClientDetail,
+    refreshTrigger,
   } = useApp();
 
   const [query, setQuery] = useState('');
@@ -44,7 +45,7 @@ export const SearchPalette: React.FC = () => {
         setOrders(ords);
       }).catch(() => {});
     }
-  }, [isSearchOpen]);
+  }, [isSearchOpen, refreshTrigger]);
 
   if (!isSearchOpen) return null;
 

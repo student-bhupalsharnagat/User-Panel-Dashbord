@@ -558,18 +558,34 @@ export const api = {
   },
 
   // Support Tickets (Persistent server-dispatched workflow)
+  async getTickets(): Promise<any[]> {
+    const res = await authenticatedFetch('/api/tickets');
+    const data = await res.json();
+    return data.tickets || [];
+  },
+
   async submitTicket(ticketData: {
     category: string;
     subject: string;
     message: string;
     priority?: string;
-  }): Promise<{ success: boolean; id: string; message: string }> {
+  }): Promise<{ success: boolean; id: string; message: string; ticket?: any }> {
     const res = await authenticatedFetch('/api/tickets', {
       method: 'POST',
       body: JSON.stringify(ticketData),
     });
     const data = await res.json();
     if (!data.success) throw new Error(data.message || 'Failed to submit support ticket');
+    return data;
+  },
+
+  async replyTicket(id: string, message: string): Promise<any> {
+    const res = await authenticatedFetch(`/api/tickets/${id}/reply`, {
+      method: 'POST',
+      body: JSON.stringify({ message }),
+    });
+    const data = await res.json();
+    if (!data.success) throw new Error(data.message || 'Failed to reply to support ticket');
     return data;
   },
 };

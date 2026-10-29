@@ -24,6 +24,7 @@ import {
 import { useApp } from '../../context/AppContext';
 import { api } from '../../services/api';
 import { Client } from '../../types';
+import { matchesDateFilter } from '../../utils/dateUtils';
 
 export const ClientsView: React.FC = () => {
   const {
@@ -69,8 +70,11 @@ export const ClientsView: React.FC = () => {
     return true;
   });
 
+  const totalClients = clients.length;
   const activeCount = clients.filter(c => c.status === 'Active').length;
   const inactiveCount = clients.filter(c => c.status !== 'Active').length;
+  const inactivePercent = totalClients > 0 ? ((inactiveCount / totalClients) * 100).toFixed(1) : '0';
+  const newTodayCount = clients.filter(c => matchesDateFilter(c.createdDate, 'Today')).length;
   const paginatedClients = filteredClients.slice((page - 1) * pageSize, page * pageSize);
 
   const cellPad = isCompactMode ? 'px-2.5 py-1.5' : 'px-3 py-3';
@@ -157,8 +161,10 @@ export const ClientsView: React.FC = () => {
               <UserCheck className="w-4 h-4" />
             </div>
           </div>
-          <div className="text-2xl font-bold font-mono text-white tracking-tight">2,142</div>
-          <div className="text-[11px] text-emerald-400 font-medium mt-1">+12 this month</div>
+          <div className="text-2xl font-bold font-mono text-white tracking-tight">{activeCount.toLocaleString('en-IN')}</div>
+          <div className="text-[11px] text-emerald-400 font-medium mt-1">
+            {totalClients > 0 ? ((activeCount / totalClients) * 100).toFixed(1) : 0}% of book
+          </div>
         </div>
 
         <div className="p-4 rounded-xl bg-[#111827] border border-[#1e293b]">
@@ -168,8 +174,8 @@ export const ClientsView: React.FC = () => {
               <UserX className="w-4 h-4" />
             </div>
           </div>
-          <div className="text-2xl font-bold font-mono text-white tracking-tight">344</div>
-          <div className="text-[11px] text-slate-400 mt-1">13.8% of book</div>
+          <div className="text-2xl font-bold font-mono text-white tracking-tight">{inactiveCount.toLocaleString('en-IN')}</div>
+          <div className="text-[11px] text-slate-400 mt-1">{inactivePercent}% of book</div>
         </div>
 
         <div className="p-4 rounded-xl bg-[#111827] border border-[#1e293b]">
@@ -179,8 +185,8 @@ export const ClientsView: React.FC = () => {
               <Users className="w-4 h-4" />
             </div>
           </div>
-          <div className="text-2xl font-bold font-mono text-white tracking-tight">2,486</div>
-          <div className="text-[11px] text-emerald-400 font-medium mt-1">+12.1% this month</div>
+          <div className="text-2xl font-bold font-mono text-white tracking-tight">{totalClients.toLocaleString('en-IN')}</div>
+          <div className="text-[11px] text-emerald-400 font-medium mt-1">Verified on book</div>
         </div>
 
         <div className="p-4 rounded-xl bg-[#111827] border border-[#1e293b]">
@@ -190,8 +196,8 @@ export const ClientsView: React.FC = () => {
               <Activity className="w-4 h-4" />
             </div>
           </div>
-          <div className="text-2xl font-bold font-mono text-white tracking-tight">28</div>
-          <div className="text-[11px] text-cyan-400 font-medium mt-1">+6 vs yesterday</div>
+          <div className="text-2xl font-bold font-mono text-white tracking-tight">{newTodayCount.toLocaleString('en-IN')}</div>
+          <div className="text-[11px] text-cyan-400 font-medium mt-1">Registered today</div>
         </div>
       </div>
 

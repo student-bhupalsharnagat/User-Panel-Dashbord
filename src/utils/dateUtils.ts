@@ -140,7 +140,7 @@ export function parseRecordDate(raw: any): ISTDateInfo | null {
  * Supports: 'Today', 'Yesterday', '7 Days', '30 Days', '90 Days', 'This Month', 'This Week', 'Fiscal Q1', 'All'.
  */
 export function matchesDateFilter(rawDate: any, filter: string): boolean {
-  if (!filter || filter === 'All' || filter === 'all' || filter === 'All statuses') {
+  if (!filter || filter === 'All' || filter === 'all' || filter === 'All Time' || filter === 'all time' || filter === 'All statuses') {
     return true;
   }
 

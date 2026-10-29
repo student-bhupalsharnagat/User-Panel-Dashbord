@@ -48,6 +48,14 @@ interface AppContextType {
   // Filter for Orders navigation
   ordersFilter: { status?: string; query?: string } | null;
   setOrdersFilter: (filter: { status?: string; query?: string } | null) => void;
+
+  // Filter for Funds navigation
+  fundsFilter: { query?: string; tab?: 'Deposits' | 'Withdrawals' } | null;
+  setFundsFilter: (filter: { query?: string; tab?: 'Deposits' | 'Withdrawals' } | null) => void;
+
+  // Filter for Positions navigation
+  positionsFilter: { query?: string } | null;
+  setPositionsFilter: (filter: { query?: string } | null) => void;
   
   // Data Modes
   isLiveMode: boolean;
@@ -145,12 +153,15 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
   const [tenantBranding, setTenantBranding] = useState<TenantBranding | null>(null);
   const [settings, setSettings] = useState<SettingsState | null>(null);
   const [ordersFilter, setOrdersFilter] = useState<{ status?: string; query?: string } | null>(null);
+  const [fundsFilter, setFundsFilter] = useState<{ query?: string; tab?: 'Deposits' | 'Withdrawals' } | null>(null);
+  const [positionsFilter, setPositionsFilter] = useState<{ query?: string } | null>(null);
 
   const updateUserSettings = useCallback((newSettings: Partial<SettingsState>) => {
     setSettings((prev) => (prev ? { ...prev, ...newSettings } : (newSettings as SettingsState)));
     if (newSettings.displayName) {
       setCurrentUser((prev) => {
         if (!prev) return prev;
+        if (prev.role !== 'broker_admin') return prev;
         const updated = { ...prev, name: newSettings.displayName! };
         if (typeof window !== 'undefined' && window.localStorage) {
           localStorage.setItem('nextrade_auth_user', JSON.stringify(updated));
@@ -248,9 +259,9 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
   }, []);
 
   const lastRefreshTimestampRef = useRef<number>(0);
-  const triggerRefresh = useCallback(() => {
+  const triggerRefresh = useCallback((force: boolean = true) => {
     const now = Date.now();
-    if (now - lastRefreshTimestampRef.current < 1500) return;
+    if (!force && now - lastRefreshTimestampRef.current < 500) return;
     lastRefreshTimestampRef.current = now;
     setRefreshTrigger((prev) => prev + 1);
   }, []);
@@ -271,7 +282,7 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
           }
         }
         if (data.user) {
-          const finalName = data.settings?.displayName || data.user.name;
+          const finalName = (data.user.role === 'broker_admin' && data.settings?.displayName) ? data.settings.displayName : data.user.name;
           const userWithUpdatedName = { ...data.user, name: finalName };
           setCurrentUser(userWithUpdatedName);
           if (typeof window !== 'undefined' && window.localStorage) {
@@ -367,7 +378,7 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
   // Switch role handler
   const switchRole = async (role?: string) => {
     try {
-      const targetRole = role || (currentUser?.role === 'broker_admin' ? 'sub_broker' : (currentUser?.role === 'sub_broker' ? 'super_admin' : 'broker_admin'));
+      const targetRole = role || (currentUser?.role === 'broker_admin' ? 'sub_broker' : (currentUser?.role === 'sub_broker' ? 'trader_client' : 'broker_admin'));
       const res = await api.switchRole(targetRole);
       if (res && res.user) {
         setCurrentUser(res.user);
@@ -657,6 +668,10 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
         updateUserSettings,
         ordersFilter,
         setOrdersFilter,
+        fundsFilter,
+        setFundsFilter,
+        positionsFilter,
+        setPositionsFilter,
         isLiveMode,
         setIsLiveMode,
         isCompactMode,

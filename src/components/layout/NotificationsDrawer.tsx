@@ -12,8 +12,9 @@ export const NotificationsDrawer: React.FC = () => {
     isNotificationsOpen,
     setIsNotificationsOpen,
     setActiveTab,
-    openFundActionModal,
     setOrdersFilter,
+    setFundsFilter,
+    setPositionsFilter,
   } = useApp();
 
   if (!isNotificationsOpen) return null;
@@ -26,6 +27,10 @@ export const NotificationsDrawer: React.FC = () => {
       type: 'warning' as const,
       time: '10 mins ago',
       actionTab: 'positions',
+      onReview: () => {
+        setPositionsFilter?.({ query: 'BANKNIFTY' });
+        setActiveTab('positions');
+      },
     },
     {
       id: 'notif-2',
@@ -34,6 +39,10 @@ export const NotificationsDrawer: React.FC = () => {
       type: 'info' as const,
       time: '24 mins ago',
       actionTab: 'funds',
+      onReview: () => {
+        setFundsFilter?.({ tab: 'Deposits', query: 'UTR958310421' });
+        setActiveTab('funds');
+      },
     },
     {
       id: 'notif-3',
@@ -42,7 +51,10 @@ export const NotificationsDrawer: React.FC = () => {
       type: 'success' as const,
       time: '38 mins ago',
       actionTab: 'orders',
-      filter: { query: 'ORD-98421', status: 'All' },
+      onReview: () => {
+        setOrdersFilter?.({ query: 'ORD-98421', status: 'All' });
+        setActiveTab('orders');
+      },
     },
     {
       id: 'notif-4',
@@ -51,7 +63,10 @@ export const NotificationsDrawer: React.FC = () => {
       type: 'warning' as const,
       time: '1 hour ago',
       actionTab: 'orders',
-      filter: { query: 'ORD-98416', status: 'Rejected' },
+      onReview: () => {
+        setOrdersFilter?.({ query: 'ORD-98416', status: 'Rejected' });
+        setActiveTab('orders');
+      },
     },
   ];
 
@@ -89,10 +104,7 @@ export const NotificationsDrawer: React.FC = () => {
                     <button
                       onClick={() => {
                         setIsNotificationsOpen(false);
-                        if (n.filter && setOrdersFilter) {
-                          setOrdersFilter(n.filter);
-                        }
-                        setActiveTab(n.actionTab as any);
+                        n.onReview();
                       }}
                       className="text-[10px] text-indigo-400 hover:text-indigo-300 font-semibold flex items-center gap-0.5"
                     >

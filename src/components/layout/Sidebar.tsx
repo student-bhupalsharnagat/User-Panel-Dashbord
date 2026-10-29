@@ -75,8 +75,7 @@ export const Sidebar: React.FC = () => {
     const current = currentUser?.role || 'broker_admin';
     let nextRole = 'broker_admin';
     if (current === 'broker_admin') nextRole = 'sub_broker';
-    else if (current === 'sub_broker') nextRole = 'super_admin';
-    else if (current === 'super_admin') nextRole = 'broker_admin';
+    else if (current === 'sub_broker') nextRole = 'trader_client';
     else nextRole = 'broker_admin';
     switchRole(nextRole);
     setIsMobileMenuOpen(false);
@@ -141,15 +140,15 @@ export const Sidebar: React.FC = () => {
         {/* User / Broker Identity Card */}
         <div className="p-3 mx-3 mt-3 rounded-xl bg-[#131b2e] border border-[#1e2a42] flex items-center gap-3">
           <div className="w-9 h-9 rounded-lg bg-indigo-600/30 border border-indigo-500/40 text-indigo-300 font-bold flex items-center justify-center text-xs shrink-0 overflow-hidden">
-            {settings?.profileImage ? (
+            {currentUser?.role === 'broker_admin' && settings?.profileImage ? (
               <img src={settings.profileImage} alt="Avatar" className="w-full h-full object-cover" />
             ) : (
-              currentUser?.avatar || 'RS'
+              currentUser?.avatar || (currentUser?.name ? currentUser.name.split(' ').map(n => n[0]).join('').slice(0, 2).toUpperCase() : 'RS')
             )}
           </div>
           <div className="min-w-0 flex-1">
             <div className="text-xs font-semibold text-slate-100 truncate">
-              {settings?.displayName || currentUser?.name || 'Rohan Sen'}
+              {currentUser?.role === 'broker_admin' ? (settings?.displayName || currentUser?.name || 'Rohan Sen') : (currentUser?.name || 'User')}
             </div>
             <div className="text-[11px] text-slate-400 truncate flex items-center gap-1">
               <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 inline-block shrink-0" />
@@ -208,7 +207,7 @@ export const Sidebar: React.FC = () => {
           <button
             onClick={handleRoleSwitch}
             className="w-full flex items-center justify-between px-3 py-2 rounded-lg text-xs text-slate-400 hover:text-slate-200 hover:bg-[#131c30] transition-colors group cursor-pointer"
-            title="Switch role between Broker Admin and Central Super Admin"
+            title="Switch role between Broker Admin, Sub-Broker, and Trader Client"
           >
             <div className="flex items-center gap-3 min-w-0">
               <Activity className="w-4 h-4 text-slate-500 group-hover:text-amber-400 transition-colors shrink-0" />
