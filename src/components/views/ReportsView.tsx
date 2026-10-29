@@ -59,8 +59,17 @@ export const ReportsView: React.FC = () => {
   const handleQuickExport = async (report: ReportItem) => {
     try {
       const res = await api.getReportPreview(report.id, period);
-      if (res.data.length === 0) {
-        showToast('No records to export', 'error');
+      if (!res.data || res.data.length === 0) {
+        const headerRow = (res as any).headers && (res as any).headers.length > 0 ? (res as any).headers.join(',') : 'Report,Period,Status\n' + `"${report.title}","${period}","No records"`;
+        const csvContent = 'data:text/csv;charset=utf-8,' + headerRow;
+        const encodedUri = encodeURI(csvContent);
+        const link = document.createElement('a');
+        link.setAttribute('href', encodedUri);
+        link.setAttribute('download', `${report.id}_${new Date().toISOString().slice(0, 10)}.csv`);
+        document.body.appendChild(link);
+        link.click();
+        document.body.removeChild(link);
+        showToast(`Exported ${report.title} to CSV`, 'info');
         return;
       }
       const headers = Object.keys(res.data[0]).join(',');

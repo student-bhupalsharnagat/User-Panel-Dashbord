@@ -155,7 +155,7 @@ export const DashboardView: React.FC = () => {
       ['Inactive Clients', metrics.inactiveClients],
       ['New Today', metrics.newToday],
       ['Ledger Balance (Cr)', `₹${metrics.ledgerBalanceCr} Cr`],
-      ['Open P&L (L)', `+₹${metrics.openPnLL} L`],
+      ['Open P&L (L)', `${Number(metrics.openPnLL) >= 0 ? '+' : ''}₹${metrics.openPnLL} L`],
       ['Margin Used (Cr)', `₹${metrics.marginUsedCr} Cr`],
       ['Margin Available (Cr)', `₹${metrics.marginAvailableCr} Cr`],
       ['Today Orders', metrics.todaysOrders],
@@ -180,7 +180,11 @@ export const DashboardView: React.FC = () => {
         <div>
           <div className="flex items-center gap-2.5">
             <h2 className="text-xl font-bold tracking-tight text-white">Business overview</h2>
-            <span className="px-2 py-0.5 rounded text-[11px] font-semibold bg-indigo-500/15 text-indigo-400 border border-indigo-500/30">
+            <span className={`px-2 py-0.5 rounded text-[11px] font-semibold border ${
+              isLiveMode
+                ? 'bg-emerald-500/15 text-emerald-400 border-emerald-500/30'
+                : 'bg-indigo-500/15 text-indigo-400 border border-indigo-500/30'
+            }`}>
               {isLiveMode ? 'Live engine' : 'Sandbox mode'}
             </span>
           </div>

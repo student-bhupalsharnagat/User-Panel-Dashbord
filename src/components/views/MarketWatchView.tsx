@@ -272,23 +272,39 @@ export const MarketWatchView: React.FC = () => {
                       <div className="flex items-center justify-center gap-1.5">
                         <button
                           onClick={() => {
+                            if (inst.status === 'Disabled') {
+                              showToast(`Trading is currently disabled for ${inst.symbol}`, 'error');
+                              return;
+                            }
                             const tick = inst.tickSize || 0.05;
                             const factor = Math.round(1 / tick) || 20;
                             const roundedPrice = Number((Math.round(inst.lastPrice * factor) / factor).toFixed(2));
                             openOrderModal({ ...inst, lastPrice: roundedPrice }, 'BUY');
                           }}
-                          className="px-2.5 py-1 bg-emerald-600/30 hover:bg-emerald-600 border border-emerald-500/40 text-emerald-300 hover:text-white rounded text-[11px] font-bold transition-all"
+                          className={`px-2.5 py-1 rounded text-[11px] font-bold transition-all ${
+                            inst.status === 'Disabled'
+                              ? 'bg-slate-800/40 border border-slate-700/40 text-slate-500 cursor-not-allowed'
+                              : 'bg-emerald-600/30 hover:bg-emerald-600 border border-emerald-500/40 text-emerald-300 hover:text-white'
+                          }`}
                         >
                           BUY
                         </button>
                         <button
                           onClick={() => {
+                            if (inst.status === 'Disabled') {
+                              showToast(`Trading is currently disabled for ${inst.symbol}`, 'error');
+                              return;
+                            }
                             const tick = inst.tickSize || 0.05;
                             const factor = Math.round(1 / tick) || 20;
                             const roundedPrice = Number((Math.round(inst.lastPrice * factor) / factor).toFixed(2));
                             openOrderModal({ ...inst, lastPrice: roundedPrice }, 'SELL');
                           }}
-                          className="px-2.5 py-1 bg-rose-600/30 hover:bg-rose-600 border border-rose-500/40 text-rose-300 hover:text-white rounded text-[11px] font-bold transition-all"
+                          className={`px-2.5 py-1 rounded text-[11px] font-bold transition-all ${
+                            inst.status === 'Disabled'
+                              ? 'bg-slate-800/40 border border-slate-700/40 text-slate-500 cursor-not-allowed'
+                              : 'bg-rose-600/30 hover:bg-rose-600 border border-rose-500/40 text-rose-300 hover:text-white'
+                          }`}
                         >
                           SELL
                         </button>

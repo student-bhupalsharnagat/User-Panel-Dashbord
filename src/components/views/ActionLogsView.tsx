@@ -47,7 +47,7 @@ export const ActionLogsView: React.FC = () => {
 
   const filteredLogs = logs.filter((l) => {
     const q = searchQuery.toLowerCase();
-    const matchesSearch = [l.user, l.action, l.relatedEntity, l.role].some((v) => String(v ?? '').toLowerCase().includes(q));
+    const matchesSearch = [l.user, l.action, l.relatedEntity, l.role, l.details].some((v) => String(v ?? '').toLowerCase().includes(q));
     const matchesDate = timeRange === 'All Time' || matchesDateFilter(l.timestamp, timeRange);
     return matchesSearch && matchesDate;
   });

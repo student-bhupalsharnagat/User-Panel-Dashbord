@@ -154,6 +154,10 @@ export class TradingPlatformClient extends EventEmitter {
     return this.baseUrl;
   }
 
+  public clearCache(): void {
+    this.cache.clear();
+  }
+
   /**
    * Resolves outgoing tenant ID (defaults to TNT-001).
    * Strips any accidental comma-separated duplicates (e.g. "TNT-001, TNT-001" -> "TNT-001").
@@ -1004,6 +1008,7 @@ export class TradingPlatformClient extends EventEmitter {
    * Square off open position on authoritative matching engine
    */
   public async squareOffPosition(positionId: string): Promise<{ success: boolean; position?: any; message?: string }> {
+    this.clearCache();
     try {
       const headers = await this.getAuthHeaders();
       const res = await fetch(`${this.baseUrl}/api/trading/position/close`.replace(/\/api\/api\//g, '/api/'), {

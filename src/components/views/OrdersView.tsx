@@ -205,6 +205,7 @@ export const OrdersView: React.FC = () => {
                 <option value="Today">Today</option>
                 <option value="Yesterday">Yesterday</option>
                 <option value="This Week">This Week</option>
+                <option value="All Time">All Time</option>
               </select>
               <ChevronDown className="w-3.5 h-3.5 text-slate-400 absolute right-2 top-1/2 -translate-y-1/2 pointer-events-none" />
             </div>

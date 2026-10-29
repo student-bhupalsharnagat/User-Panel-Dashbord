@@ -1456,7 +1456,11 @@ export async function syncAuthoritativeData(requestedTenantId?: string, force = 
       for (const p of positions) {
         const key = p.clientId + '_' + p.instrument;
         if (incomingPosMap.has(key)) {
-          Object.assign(p, incomingPosMap.get(key));
+          const incoming = incomingPosMap.get(key)!;
+          const retainedRealised = (incoming.realisedPnL !== 0 ? incoming.realisedPnL : p.realisedPnL) || 0;
+          Object.assign(p, incoming);
+          p.realisedPnL = retainedRealised;
+          p.totalPnL = p.realisedPnL + (p.unrealisedPnL || 0);
           incomingPosMap.delete(key);
         }
       }
@@ -1464,7 +1468,7 @@ export async function syncAuthoritativeData(requestedTenantId?: string, force = 
         positions.unshift(newIncoming);
       }
       for (const [key, localPos] of persistentLocalPositions.entries()) {
-        if (localPos.netQty !== 0 && !positions.some(p => (p.clientId + '_' + p.instrument) === key || p.id === localPos.id)) {
+        if (!positions.some(p => (p.clientId + '_' + p.instrument) === key || p.id === localPos.id)) {
           positions.unshift(localPos);
         }
       }
@@ -1905,9 +1909,10 @@ app.get('/api/realtime/stream', authMiddleware, (req: AuthenticatedRequest, res:
 // Authentication & Session
 app.get('/api/auth/me', authMiddleware, (req: AuthenticatedRequest, res: Response) => {
   const user = req.user!;
+  const effectiveName = (user.role === 'broker_admin' && settingsState.displayName) ? settingsState.displayName : user.name;
   const fullUser: AuthenticatedUser = {
     id: user.sub,
-    name: user.name,
+    name: effectiveName,
     email: user.email,
     role: user.role,
     roleTitle: user.roleTitle,
@@ -1917,7 +1922,7 @@ app.get('/api/auth/me', authMiddleware, (req: AuthenticatedRequest, res: Respons
     phone: user.phone,
     timezone: 'IST (UTC +05:30)',
     currency: 'INR - Indian Rupee',
-    avatar: user.name.split(' ').map(n => n[0]).join('').slice(0, 2).toUpperCase(),
+    avatar: effectiveName.split(' ').map(n => n[0]).join('').slice(0, 2).toUpperCase(),
   };
 
   const token = createSignedToken({
@@ -2385,11 +2390,12 @@ app.get('/api/bootstrap', authMiddleware, async (req: AuthenticatedRequest, res:
   let scopedLedger = filterByHierarchy(cleanLedger, user);
   const returnedInstruments = instruments && instruments.length > 0 ? instruments : defaultMarketInstruments;
 
+  const effectiveName = (user.role === 'broker_admin' && settingsState.displayName) ? settingsState.displayName : user.name;
   res.json({
     success: true,
     user: {
       id: user.sub,
-      name: user.name,
+      name: effectiveName,
       email: user.email,
       role: user.role,
       roleTitle: user.roleTitle,
@@ -2399,7 +2405,7 @@ app.get('/api/bootstrap', authMiddleware, async (req: AuthenticatedRequest, res:
       phone: user.phone,
       timezone: 'IST (UTC +05:30)',
       currency: 'INR - Indian Rupee',
-      avatar: user.name.split(' ').map(n => n[0]).join('').slice(0, 2).toUpperCase(),
+      avatar: effectiveName.split(' ').map(n => n[0]).join('').slice(0, 2).toUpperCase(),
     },
     metrics,
     clients: scopedClients,
@@ -2488,6 +2494,18 @@ app.post(['/api/role', '/api/auth/switch-role'], (req: Request, res: Response) =
 // Dashboard Summary with Live Real-Time Authoritative Data
 app.get('/api/dashboard/summary', authMiddleware, async (req: AuthenticatedRequest, res: Response) => {
   const user = req.user!;
+
+  if (clients.filter(c => !isDummyRecord(c)).length === 0) {
+    try {
+      const liveClientsRes = await tradingPlatformClient.fetchAllLiveClients(user.tenantId);
+      if (liveClientsRes.success && Array.isArray(liveClientsRes.clients) && liveClientsRes.clients.length > 0) {
+        clients = mergeClients(clients, liveClientsRes.clients).filter(c => !isDummyRecord(c));
+      }
+    } catch (err: any) {
+      console.warn('[Dashboard Summary API] Remote client fetch notice:', err.message);
+    }
+  }
+
   let metrics = calculateAuthoritativeMetrics(user.role, user.brokerId, user.role === 'trader_client' ? user.sub : undefined, user);
 
   // Actively fetch live authoritative metrics from Trading Platform
@@ -2495,15 +2513,16 @@ app.get('/api/dashboard/summary', authMiddleware, async (req: AuthenticatedReque
     const liveSummaryRes = await tradingPlatformClient.fetchLiveSummary(user.tenantId);
     if (liveSummaryRes.success && liveSummaryRes.metrics) {
       const sm = liveSummaryRes.metrics;
-      if (clients.length === 0 && sm.total_users) metrics.totalClients = sm.total_users;
-      if (clients.length === 0 && sm.active_users) metrics.activeClients = sm.active_users;
-      if (clients.length === 0) {
-        metrics.inactiveClients = Math.max(0, metrics.totalClients - metrics.activeClients);
-        metrics.activeClientsRatio = metrics.totalClients > 0 ? +((metrics.activeClients / metrics.totalClients) * 100).toFixed(1) : 0;
-      }
       const openPositions = positions.filter(p => !isDummyRecord(p) && p.netQty !== 0);
-      if (openPositions.length === 0 && sm.total_pnl !== undefined) metrics.openPnLL = +(sm.total_pnl / 100000).toFixed(2);
-      if (sm.total_used_margin !== undefined) metrics.marginUsedCr = +(sm.total_used_margin / 10000000).toFixed(2);
+      if (openPositions.length === 0 && sm.total_pnl !== undefined) {
+        metrics.openPnLL = +(sm.total_pnl / 100000).toFixed(2);
+        metrics.unrealisedPnL = Number(sm.total_pnl);
+        const net = (metrics.realisedPnL || 0) + metrics.unrealisedPnL;
+        metrics.totalPnLFormatted = `${net >= 0 ? '+' : '-'}₹${Math.abs(net).toLocaleString('en-IN')}`;
+      }
+      if (sm.total_used_margin !== undefined && metrics.marginUsedCr === 0) {
+        metrics.marginUsedCr = +(sm.total_used_margin / 10000000).toFixed(2);
+      }
     }
   } catch (err: any) {
     console.warn('[Dashboard Summary API] Remote fetch notice:', err.message);
@@ -2581,11 +2600,13 @@ app.get(['/api/clients', '/api/admin/clients'], authMiddleware, async (req: Auth
   }
   if (q) {
     const query = String(q).toLowerCase();
+    const qDigits = query.replace(/\D/g, '');
     result = result.filter(c =>
       c.id.toLowerCase().includes(query) ||
       c.name.toLowerCase().includes(query) ||
       c.email.toLowerCase().includes(query) ||
       c.phone.includes(query) ||
+      (qDigits.length >= 3 && c.phone.replace(/\D/g, '').includes(qDigits)) ||
       (c.pan && c.pan.toLowerCase().includes(query)) ||
       (c.clientCode && c.clientCode.toLowerCase().includes(query))
     );
@@ -2636,7 +2657,10 @@ app.post('/api/clients', authMiddleware, requireRole(['broker_admin', 'super_adm
     return res.status(400).json({ success: false, message: 'Invalid PAN format. Standard format is 5 letters, 4 digits, 1 letter (e.g. ABCDE1234F).' });
   }
 
-  const phoneClean = String(phone || '').replace(/[\s\+\-\(\)]/g, '');
+  const digitsOnly = String(phone || '').replace(/\D/g, '');
+  const phoneClean = digitsOnly.length === 12 && digitsOnly.startsWith('91')
+    ? digitsOnly.slice(2)
+    : (digitsOnly.length === 11 && digitsOnly.startsWith('0') ? digitsOnly.slice(1) : digitsOnly);
   if (!/^[6-9]\d{9}$/.test(phoneClean)) {
     return res.status(400).json({ success: false, message: 'Please enter a valid 10-digit Indian mobile number starting with 6-9' });
   }
@@ -2847,11 +2871,14 @@ app.post('/api/orders', authMiddleware, async (req: AuthenticatedRequest, res: R
     return res.status(403).json({ success: false, message: 'Forbidden: Client is not assigned to your broker' });
   }
 
-  const targetInst = instruments.find(i => i.symbol === instrument || i.name === instrument) || instruments[0];
-  if (targetInst && (targetInst.status === 'Disabled' || disabledInstrumentSymbols.has(targetInst.symbol))) {
+  const requestedSymbol = String(instrument || '').toUpperCase().trim();
+  const targetInst = instruments.find(i => i.symbol.toUpperCase() === requestedSymbol || i.name.toUpperCase() === requestedSymbol)
+    || defaultMarketInstruments.find(i => i.symbol.toUpperCase() === requestedSymbol || i.name.toUpperCase() === requestedSymbol)
+    || instruments[0];
+  if (disabledInstrumentSymbols.has(requestedSymbol) || (targetInst && (targetInst.status === 'Disabled' || disabledInstrumentSymbols.has(targetInst.symbol)))) {
     return res.status(400).json({
       success: false,
-      message: `Trading is currently disabled for ${targetInst.symbol}`,
+      message: `Trading is currently disabled for ${targetInst?.symbol || requestedSymbol}`,
     });
   }
 
@@ -3031,14 +3058,8 @@ app.post('/api/orders', authMiddleware, async (req: AuthenticatedRequest, res: R
         client.marginAvailable = Math.max(0, client.ledgerBalance - client.marginUsed);
       }
 
-      if (existingPos.netQty === 0) {
-        // Round trip completed: keep position with netQty: 0 so realisedPnL is retained
-        persistentLocalPositions.delete(client.id + '_' + targetInst.symbol);
-        if (isUsingPostgres()) dbRepo.upsertPosition(existingPos).catch(console.warn);
-      } else {
-        persistentLocalPositions.set(client.id + '_' + targetInst.symbol, existingPos);
-        if (isUsingPostgres()) dbRepo.upsertPosition(existingPos).catch(console.warn);
-      }
+      persistentLocalPositions.set(client.id + '_' + targetInst.symbol, existingPos);
+      if (isUsingPostgres()) dbRepo.upsertPosition(existingPos).catch(console.warn);
     } else {
       client.marginUsed += marginRequired;
       client.marginAvailable = Math.max(0, client.ledgerBalance - client.marginUsed);
@@ -3169,20 +3190,19 @@ app.get('/api/positions', authMiddleware, async (req: AuthenticatedRequest, res:
     if (livePosRes.success && Array.isArray(livePosRes.positions) && livePosRes.positions.length > 0) {
       livePosRes.positions.forEach((remotePos: any) => {
         const posId = String(remotePos.id || remotePos.positionId || `POS-${remotePos.symbol}`).trim();
-        const match = positions.find(p => p.id === posId || p.instrument === remotePos.symbol);
-        const buyQty = Number(remotePos.buyQty || (remotePos.side === 'BUY' ? remotePos.quantity : 0));
-        const sellQty = Number(remotePos.sellQty || (remotePos.side === 'SELL' ? remotePos.quantity : 0));
-        const netQty = Number(remotePos.netQty ?? (remotePos.side === 'SELL' ? -remotePos.quantity : (remotePos.quantity || (buyQty - sellQty))));
-        const avgPrice = Number(remotePos.buyPrice || remotePos.avgPrice || remotePos.price || 0);
-        const currentPrice = Number(remotePos.currentPrice || remotePos.markPrice || remotePos.ltp || avgPrice);
-        const realisedPnL = Number(remotePos.realisedPnL || 0);
-        const unrealisedPnL = Number(remotePos.pnl || remotePos.unrealisedPnL || (netQty * (currentPrice - avgPrice)));
-
         const { clientId, clientName } = resolveClientForRecord(
           remotePos.clientId || remotePos.userId || remotePos.user_id || remotePos.client_id || remotePos.clientCode,
           remotePos.clientName || remotePos.client_name,
           clients
         );
+        const match = positions.find(p => p.id === posId || (p.clientId === clientId && p.instrument === remotePos.symbol));
+        const buyQty = Number(remotePos.buyQty || (remotePos.side === 'BUY' ? remotePos.quantity : 0));
+        const sellQty = Number(remotePos.sellQty || (remotePos.side === 'SELL' ? remotePos.quantity : 0));
+        const netQty = Number(remotePos.netQty ?? (remotePos.side === 'SELL' ? -remotePos.quantity : (remotePos.quantity || (buyQty - sellQty))));
+        const avgPrice = Number(remotePos.buyPrice || remotePos.avgPrice || remotePos.price || 0);
+        const currentPrice = Number(remotePos.currentPrice || remotePos.markPrice || remotePos.ltp || avgPrice);
+        const realisedPnL = Number(remotePos.realisedPnL !== undefined && remotePos.realisedPnL !== null && remotePos.realisedPnL !== 0 ? remotePos.realisedPnL : (match?.realisedPnL || 0));
+        const unrealisedPnL = Number(remotePos.pnl || remotePos.unrealisedPnL || (netQty * (currentPrice - avgPrice)));
 
         const posObj: Position = {
           id: posId,
@@ -3278,16 +3298,18 @@ app.post('/api/positions/:id/square-off', authMiddleware, (req: AuthenticatedReq
     });
   }
 
+  const originalQty = pos.netQty;
   // Update position to closed (netQty: 0) while retaining realised P&L
   pos.realisedPnL = (pos.realisedPnL || 0) + (pos.unrealisedPnL || 0);
   pos.unrealisedPnL = 0;
   pos.totalPnL = pos.realisedPnL;
   pos.netQty = 0;
   pos.marginUsed = 0;
-  persistentLocalPositions.delete(pos.id);
-  persistentLocalPositions.delete(pos.clientId + '_' + pos.instrument);
+  persistentLocalPositions.set(pos.id, pos);
+  persistentLocalPositions.set(pos.clientId + '_' + pos.instrument, pos);
   savePersistence();
 
+  tradingPlatformClient.clearCache();
   tradingPlatformClient.squareOffPosition(pos.id).catch((e: any) => console.warn('[Square-off Proxy] Notice:', e.message));
   if (isUsingPostgres()) {
     dbRepo.upsertPosition(pos).catch(console.warn);
@@ -3302,74 +3324,14 @@ app.post('/api/positions/:id/square-off', authMiddleware, (req: AuthenticatedReq
     relatedEntity: pos.id,
     ipAddress: req.ip || '127.0.0.1',
     result: 'Success',
-    details: `Squared off ${pos.netQty} ${pos.instrument} for ${pos.clientName}. Realised P&L: ₹${squaredPnL.toLocaleString('en-IN')}`,
+    details: `Squared off ${originalQty} ${pos.instrument} for ${pos.clientName}. Realised P&L: ₹${squaredPnL.toLocaleString('en-IN')}`,
   });
 
   broadcastScopedEvent('position_squared_off', { id: pos.id, pnl: squaredPnL }, { brokerId: pos.brokerId, clientId: pos.clientId });
   res.json({ success: true, message: 'Position squared off successfully', pnl: squaredPnL });
 });
 
-// Support Ticket Submission Route (Durable PostgreSQL & Upstream Platform Routing)
-app.post('/api/tickets', authMiddleware, async (req: AuthenticatedRequest, res: Response) => {
-  const user = req.user!;
-  const { category, subject, message, priority } = req.body;
 
-  if (!subject || !message) {
-    return res.status(400).json({ success: false, message: 'Subject and message are required' });
-  }
-
-  const ticketId = `TCK-${Date.now().toString().slice(-6)}`;
-  const ticket = {
-    id: ticketId,
-    clientId: user.sub,
-    clientName: user.name,
-    category: category || 'General',
-    subject,
-    message,
-    priority: priority || 'Medium',
-    status: 'Open',
-    createdAt: new Date().toISOString(),
-  };
-
-  fetch(`${TRADING_PLATFORM_URL}/api/trading/tickets`.replace(/\/api\/api\//g, '/api/'), {
-    method: 'POST',
-    headers: {
-      'content-type': 'application/json',
-      'x-tenant-id': DEFAULT_TENANT_ID,
-    },
-    body: JSON.stringify({
-      subject,
-      category,
-      message,
-      description: message,
-      priority,
-      userId: user.sub,
-    }),
-  }).catch((e: any) => console.warn('[Ticket Upstream Sync] Notice:', e.message));
-
-  if (isUsingPostgres()) {
-    dbRepo.insertTicket(ticket).catch(console.warn);
-  }
-
-  pushAudit({
-    id: `LOG-${Date.now().toString().slice(-4)}`,
-    timestamp: new Date().toLocaleTimeString('en-GB') + ', Today',
-    user: user.name,
-    role: user.roleTitle,
-    action: 'Support Ticket Submitted',
-    relatedEntity: ticketId,
-    ipAddress: req.ip || '127.0.0.1',
-    result: 'Success',
-    details: `${category}: ${subject}`,
-  });
-  savePersistence();
-
-  res.json({
-    success: true,
-    id: ticketId,
-    message: 'Support ticket submitted successfully. Our operations desk will respond shortly.',
-  });
-});
 
 // Pay-in / Pay-out (Funds) with Live Data
 app.get('/api/funds', authMiddleware, async (req: AuthenticatedRequest, res: Response) => {
@@ -3708,7 +3670,9 @@ app.get('/api/analytics', authMiddleware, (req: AuthenticatedRequest, res: Respo
 
 // Action / Audit Logs (trader clients only see their own events)
 function scopedAuditLogs(user: TokenPayload): AuditLog[] {
-  return user.role === 'trader_client' ? auditLogs.filter(l => l.user === user.name) : auditLogs;
+  return user.role === 'trader_client'
+    ? auditLogs.filter(l => l.user === user.name || (l.details && l.details.includes(user.name)) || l.relatedEntity === user.sub)
+    : auditLogs;
 }
 
 app.get(['/api/audit-logs', '/api/action-logs'], authMiddleware, (req: AuthenticatedRequest, res: Response) => {
@@ -3939,6 +3903,27 @@ app.post('/api/tickets', authMiddleware, (req: AuthenticatedRequest, res: Respon
   };
   tickets.unshift(newTicket);
   savePersistence();
+
+  fetch(`${TRADING_PLATFORM_URL}/api/trading/tickets`.replace(/\/api\/api\//g, '/api/'), {
+    method: 'POST',
+    headers: {
+      'content-type': 'application/json',
+      'x-tenant-id': DEFAULT_TENANT_ID,
+    },
+    body: JSON.stringify({
+      subject,
+      category,
+      message,
+      description: message,
+      priority,
+      userId: user.sub,
+    }),
+  }).catch((e: any) => console.warn('[Ticket Upstream Sync] Notice:', e.message));
+
+  if (isUsingPostgres()) {
+    dbRepo.insertTicket(newTicket).catch(console.warn);
+  }
+
   pushAudit({
     id: `LOG-${Date.now().toString().slice(-4)}`,
     timestamp: new Date().toLocaleTimeString('en-GB') + ', Today',

@@ -25,7 +25,7 @@ import { api } from '../../services/api';
 import { SettingsState } from '../../types';
 
 export const SettingsView: React.FC = () => {
-  const { showToast, currentUser, tenantBranding, isLiveMode, isCompactMode, setIsCompactMode, updateUserSettings } = useApp();
+  const { showToast, currentUser, tenantBranding, isLiveMode, isCompactMode, setIsCompactMode, updateUserSettings, refreshTrigger } = useApp();
 
   const [activeSection, setActiveSection] = useState<
     'profile' | 'security' | 'notifications' | 'tables' | 'support' | 'broker_config'
@@ -71,7 +71,7 @@ export const SettingsView: React.FC = () => {
         }
       }).catch(() => {});
     }
-  }, [activeSection]);
+  }, [activeSection, refreshTrigger]);
 
   const handleReplySubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -249,11 +249,7 @@ export const SettingsView: React.FC = () => {
                   </div>
                 </div>
 
-                <button
-                  type="button"
-                  onClick={() => fileInputRef.current?.click()}
-                  className="px-3 py-1.5 rounded-lg bg-[#131b2e] border border-[#1e2a42] hover:bg-slate-800 text-xs font-medium text-slate-200 hover:text-white transition-colors cursor-pointer inline-flex items-center"
-                >
+                <div>
                   <input
                     id="profile-image-upload"
                     type="file"
@@ -262,8 +258,14 @@ export const SettingsView: React.FC = () => {
                     className="hidden"
                     onChange={handleImageUpload}
                   />
-                  Change image
-                </button>
+                  <button
+                    type="button"
+                    onClick={() => fileInputRef.current?.click()}
+                    className="px-3 py-1.5 rounded-lg bg-[#131b2e] border border-[#1e2a42] hover:bg-slate-800 text-xs font-medium text-slate-200 hover:text-white transition-colors cursor-pointer inline-flex items-center"
+                  >
+                    Change image
+                  </button>
+                </div>
               </div>
 
               {/* Inputs */}

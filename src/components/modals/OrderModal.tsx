@@ -252,6 +252,7 @@ export const OrderModal: React.FC = () => {
               </label>
               <input
                 type="number"
+                min="1"
                 step={currentInst?.lotSize || 1}
                 value={quantity}
                 onChange={(e) => setQuantity(e.target.value)}
@@ -265,6 +266,7 @@ export const OrderModal: React.FC = () => {
               </label>
               <input
                 type="number"
+                min={currentInst?.tickSize || 0.05}
                 step={currentInst?.tickSize || 0.05}
                 disabled={orderType === 'MARKET'}
                 value={orderType === 'MARKET' ? (currentInst?.lastPrice || 0) : price}
