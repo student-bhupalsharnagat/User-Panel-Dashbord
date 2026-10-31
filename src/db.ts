@@ -98,7 +98,10 @@ export function isDummyString(val?: any): boolean {
   if (val === undefined || val === null) return false;
   const str = String(val).trim().toLowerCase();
   if (!str) return false;
+  // Always preserve valid demo accounts
+  if (['arrav', 'aarav', 'vtx_demo', 'vtx123'].includes(str)) return false;
   for (const pat of DUMMY_PATTERNS) {
+    if (pat === 'aarav mehta' && ['arrav', 'aarav', 'aarav mehta'].includes(str)) continue;
     if (str.includes(pat)) return true;
   }
   if (str === 'ord-98421' || str === 'ord-98416') return false;

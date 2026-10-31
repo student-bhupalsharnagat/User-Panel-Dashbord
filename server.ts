@@ -158,6 +158,51 @@ export function getSeededDefaultAccounts(): UserAccount[] {
   const defaultPasswordHash = hashPassword('Password@123');
   return [
     {
+      id: 'USR-VTX-DEMO',
+      userId: 'vtx_demo',
+      name: 'NexTrade Demo Trader',
+      email: 'vtx_demo@nextrade.example',
+      phone: '+91 98765 43210',
+      passwordHash: defaultPasswordHash,
+      role: 'trader_client',
+      roleTitle: 'Trader Client',
+      brokerId: 'BRK-ROHAN-01',
+      tenantId: DEFAULT_TENANT_ID,
+      organization: 'NexTrade Retail',
+      pan: 'ABCDE1234D',
+      createdAt: '2026-01-01T00:00:00.000Z',
+    },
+    {
+      id: 'USR-VTX123',
+      userId: 'vtx123',
+      name: 'Vertex Demo User',
+      email: 'vtx123@vertex.trade',
+      phone: '+91 98765 43211',
+      passwordHash: defaultPasswordHash,
+      role: 'trader_client',
+      roleTitle: 'Trader Client',
+      brokerId: 'BRK-ROHAN-01',
+      tenantId: DEFAULT_TENANT_ID,
+      organization: 'NexTrade Retail',
+      pan: 'ABCDE1234V',
+      createdAt: '2026-01-01T00:00:00.000Z',
+    },
+    {
+      id: 'USR-ARRAV',
+      userId: 'arrav',
+      name: 'Aarav Mehta',
+      email: 'arrav@vertex.trade',
+      phone: '+91 98765 43212',
+      passwordHash: defaultPasswordHash,
+      role: 'trader_client',
+      roleTitle: 'Trader Client',
+      brokerId: 'BRK-ROHAN-01',
+      tenantId: DEFAULT_TENANT_ID,
+      organization: 'NexTrade Retail',
+      pan: 'ABCDE1234A',
+      createdAt: '2026-01-01T00:00:00.000Z',
+    },
+    {
       id: 'BRK-ROHAN-01',
       userId: 'BRK-ROHAN-01',
       name: 'Rohan Sen',
@@ -2052,9 +2097,9 @@ app.post('/api/auth/login', async (req: Request, res: Response) => {
         details: `Failed login attempt for identifier "${cleanIdentifier}" - Account not found`,
       });
 
-      return res.status(401).json({
+      return res.status(404).json({
         success: false,
-        message: 'Invalid credentials. No account found for this Email, Mobile, or User ID.',
+        message: 'Account not found. Please check your user ID or register first.',
       });
     }
 
