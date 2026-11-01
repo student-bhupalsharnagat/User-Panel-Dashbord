@@ -251,9 +251,12 @@ export const api = {
   },
 
   async switchRole(role: string): Promise<{ user: AuthenticatedUser; token: string }> {
+    const token = getAuthToken();
+    const headers: Record<string, string> = { 'Content-Type': 'application/json' };
+    if (token) headers['Authorization'] = `Bearer ${token}`;
     const res = await fetch(resolveApiUrl('/api/auth/switch-role'), {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      headers,
       body: JSON.stringify({ role }),
     });
     const data = await res.json();
@@ -357,7 +360,7 @@ export const api = {
     return this.getClients(params);
   },
 
-  async getClientById(id: string): Promise<{ client: Client; orders: Order[]; positions: Position[] }> {
+  async getClientById(id: string): Promise<{ client: Client; orders: Order[]; positions: Position[]; ledger?: LedgerEntry[] }> {
     const res = await authenticatedFetch(`/api/clients/${id}`);
     const data = await res.json();
     if (!data.success) throw new Error(data.message || 'Client query failed');

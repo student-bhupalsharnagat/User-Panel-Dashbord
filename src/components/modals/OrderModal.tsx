@@ -74,6 +74,16 @@ export const OrderModal: React.FC = () => {
       return;
     }
 
+    if (currentClient && currentClient.status && currentClient.status !== 'Active') {
+      showToast(`Account is ${currentClient.status}. Order placement is restricted.`, 'error');
+      return;
+    }
+
+    if (currentClient && currentClient.riskLimit && ((currentClient.marginUsed || 0) + estimatedMargin > currentClient.riskLimit)) {
+      showToast(`Margin requirement exceeds client risk limit of ₹${currentClient.riskLimit.toLocaleString('en-IN')}`, 'error');
+      return;
+    }
+
     if (numQty <= 0) {
       showToast('Order quantity must be greater than 0', 'error');
       return;

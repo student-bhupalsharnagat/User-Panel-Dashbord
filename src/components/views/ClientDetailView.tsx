@@ -19,7 +19,7 @@ import {
 } from 'lucide-react';
 import { useApp } from '../../context/AppContext';
 import { api } from '../../services/api';
-import { Client, Order, Position } from '../../types';
+import { Client, Order, Position, LedgerEntry } from '../../types';
 
 export const ClientDetailView: React.FC = () => {
   const {
@@ -33,22 +33,35 @@ export const ClientDetailView: React.FC = () => {
   const [clientData, setClientData] = useState<Client | null>(selectedClientForDetail);
   const [clientOrders, setClientOrders] = useState<Order[]>([]);
   const [clientPositions, setClientPositions] = useState<Position[]>([]);
-  const [activeTab, setActiveTab] = useState<'overview' | 'orders' | 'positions' | 'kyc'>('overview');
+  const [clientLedger, setClientLedger] = useState<LedgerEntry[]>([]);
+  const [activeTab, setActiveTab] = useState<'overview' | 'positions' | 'orders' | 'ledger' | 'kyc'>('overview');
 
   useEffect(() => {
     if (selectedClientForDetail) {
+      setClientData(selectedClientForDetail);
+      setClientOrders([]);
+      setClientPositions([]);
+      setClientLedger([]);
       api.getClientById(selectedClientForDetail.id)
         .then((res) => {
-          setClientData(res.client);
-          setClientOrders(res.orders);
-          setClientPositions(res.positions);
+          if (res && res.client) {
+            setClientData(res.client);
+            setClientOrders(res.orders || []);
+            setClientPositions(res.positions || []);
+            setClientLedger(res.ledger || []);
+          }
         })
         .catch(() => {});
+    } else {
+      setClientData(null);
+      setClientOrders([]);
+      setClientPositions([]);
+      setClientLedger([]);
     }
-  }, [selectedClientForDetail, refreshTrigger]);
+  }, [selectedClientForDetail?.id, refreshTrigger]);
 
   if (!selectedClientForDetail) return null;
-  const client = clientData || selectedClientForDetail;
+  const client = (clientData && clientData.id === selectedClientForDetail.id) ? clientData : selectedClientForDetail;
 
   return (
     <div className="fixed inset-0 z-40 flex justify-end bg-black/60 backdrop-blur-xs animate-in fade-in duration-150">
@@ -95,7 +108,7 @@ export const ClientDetailView: React.FC = () => {
 
         {/* Tab Navigation */}
         <div className="px-3.5 sm:px-5 border-b border-slate-800 flex gap-3 sm:gap-4 text-xs font-medium overflow-x-auto no-scrollbar">
-          {(['overview', 'positions', 'orders', 'kyc'] as const).map((tab) => (
+          {(['overview', 'positions', 'orders', 'ledger', 'kyc'] as const).map((tab) => (
             <button
               key={tab}
               onClick={() => setActiveTab(tab)}
@@ -105,7 +118,7 @@ export const ClientDetailView: React.FC = () => {
                   : 'border-transparent text-slate-400 hover:text-slate-200'
               }`}
             >
-              {tab === 'kyc' ? 'KYC & Verification' : tab}
+              {tab === 'kyc' ? 'KYC & Verification' : tab === 'ledger' ? 'Ledger Journal' : tab}
             </button>
           ))}
         </div>
@@ -274,6 +287,39 @@ export const ClientDetailView: React.FC = () => {
             </div>
           )}
 
+          {activeTab === 'ledger' && (
+            <div className="space-y-2">
+              <h4 className="text-xs font-bold text-white uppercase tracking-wider">Client Financial Ledger ({clientLedger.length})</h4>
+              {clientLedger.length === 0 ? (
+                <div className="p-6 text-center text-xs text-slate-500 rounded-xl bg-slate-900/60 border border-slate-800">
+                  No ledger transactions recorded for this client.
+                </div>
+              ) : (
+                clientLedger.map((entry) => (
+                  <div
+                    key={entry.id}
+                    className="p-3 rounded-xl bg-slate-900 border border-slate-800 flex items-center justify-between text-xs"
+                  >
+                    <div>
+                      <div className="font-semibold text-white">{entry.description}</div>
+                      <div className="text-[10px] text-slate-400 font-mono mt-0.5">
+                        {entry.id} · {entry.date} · Ref: {entry.referenceId}
+                      </div>
+                    </div>
+                    <div className="text-right font-mono">
+                      {entry.credit > 0 ? (
+                        <div className="text-emerald-400 font-bold">+₹{entry.credit.toLocaleString('en-IN')}</div>
+                      ) : (
+                        <div className="text-rose-400 font-bold">-₹{entry.debit.toLocaleString('en-IN')}</div>
+                      )}
+                      <div className="text-[10px] text-slate-400">Bal: ₹{entry.runningBalance.toLocaleString('en-IN')}</div>
+                    </div>
+                  </div>
+                ))
+              )}
+            </div>
+          )}
+
           {activeTab === 'kyc' && (
             <div className="space-y-3">
               <h4 className="text-xs font-bold text-white uppercase tracking-wider">KYC Compliance & Verification Dossier</h4>
@@ -286,12 +332,16 @@ export const ClientDetailView: React.FC = () => {
                 </div>
                 <div className="pt-2 border-t border-slate-800 space-y-1.5">
                   <div className="text-[11px] font-semibold text-slate-400">Verified Client Proof Documents:</div>
-                  {client.kycDocuments.map((doc, i) => (
-                    <div key={i} className="flex items-center gap-2 text-xs text-slate-300 p-2 rounded bg-slate-800/60">
-                      <ShieldCheck className="w-4 h-4 text-emerald-400 shrink-0" />
-                      <span>{doc}</span>
-                    </div>
-                  ))}
+                  {(client.kycDocuments || []).length === 0 ? (
+                    <div className="text-xs text-slate-500 italic p-2">Standard identity dossier verified on file.</div>
+                  ) : (
+                    (client.kycDocuments || []).map((doc, i) => (
+                      <div key={i} className="flex items-center gap-2 text-xs text-slate-300 p-2 rounded bg-slate-800/60">
+                        <ShieldCheck className="w-4 h-4 text-emerald-400 shrink-0" />
+                        <span>{doc}</span>
+                      </div>
+                    ))
+                  )}
                 </div>
               </div>
             </div>

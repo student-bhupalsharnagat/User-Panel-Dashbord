@@ -117,6 +117,7 @@ export const MarketWatchView: React.FC = () => {
   };
 
   const handleExportPDF = () => {
+    showToast('Opening PDF print preview for Market Watch...', 'info');
     window.print();
   };
 

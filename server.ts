@@ -2591,11 +2591,14 @@ app.get('/api/dashboard/summary', authMiddleware, async (req: AuthenticatedReque
     { day: 'Fri', depositsCr: 4.82, withdrawalsCr: 2.16 },
   ];
 
+  const pendingKycCount = clients.filter(c => !isDummyRecord(c) && c.kycStatus === 'Pending').length;
+  const orderExceptionsCount = orders.filter(o => !isDummyRecord(o) && (o.status === 'Rejected' || o.status === 'Cancelled')).length;
+
   const operationsQueue = [
     { id: 'op-dep', title: 'Deposit verification', count: metrics.pendingDeposits, statusType: 'deposit', color: '#f59e0b' },
     { id: 'op-wdr', title: 'Withdrawal review', count: metrics.pendingWithdrawals, statusType: 'withdrawal', color: '#ef4444' },
-    { id: 'op-kyc', title: 'KYC documents', count: 24, statusType: 'kyc', color: '#3b82f6' },
-    { id: 'op-ord', title: 'Order exceptions', count: 6, statusType: 'orders', color: '#8b5cf6' },
+    { id: 'op-kyc', title: 'KYC documents', count: pendingKycCount, statusType: 'kyc', color: '#3b82f6' },
+    { id: 'op-ord', title: 'Order exceptions', count: orderExceptionsCount, statusType: 'orders', color: '#8b5cf6' },
   ];
 
   res.json({
@@ -2677,13 +2680,15 @@ app.get('/api/clients/:id', authMiddleware, (req: AuthenticatedRequest, res: Res
   }
 
   const clientOrders = orders.filter(o => o.clientId === client.id);
-  const clientPositions = positions.filter(p => p.clientId === client.id);
+  const clientPositions = positions.filter(p => p.clientId === client.id && p.netQty !== 0);
+  const clientLedger = ledgerEntries.filter(l => l.clientId === client.id || (client.name && l.description?.includes(client.name)));
 
   res.json({
     success: true,
     client,
     orders: clientOrders,
     positions: clientPositions,
+    ledger: clientLedger,
   });
 });
 
@@ -2916,6 +2921,14 @@ app.post('/api/orders', authMiddleware, async (req: AuthenticatedRequest, res: R
     return res.status(403).json({ success: false, message: 'Forbidden: Client is not assigned to your broker' });
   }
 
+  // Account status validation
+  if (client.status && client.status !== 'Active') {
+    return res.status(400).json({
+      success: false,
+      message: `Account status is ${client.status}. Order placement is restricted for inactive or suspended accounts.`,
+    });
+  }
+
   const requestedSymbol = String(instrument || '').toUpperCase().trim();
   const targetInst = instruments.find(i => i.symbol.toUpperCase() === requestedSymbol || i.name.toUpperCase() === requestedSymbol)
     || defaultMarketInstruments.find(i => i.symbol.toUpperCase() === requestedSymbol || i.name.toUpperCase() === requestedSymbol)
@@ -2994,6 +3007,48 @@ app.post('/api/orders', authMiddleware, async (req: AuthenticatedRequest, res: R
       ipAddress: req.ip || '127.0.0.1',
       result: 'Failed',
       details: rejectedOrder.rejectionReason || 'RMS Margin Check Failed',
+    });
+
+    broadcastScopedEvent('order_placed', rejectedOrder, { brokerId: client.brokerId, clientId: client.id });
+    recordIdempotency(req, 400, { success: false, message: rejectedOrder.rejectionReason, order: rejectedOrder });
+    return res.status(400).json({ success: false, message: rejectedOrder.rejectionReason, order: rejectedOrder });
+  }
+
+  // Authoritative Risk-Limit Rule Check
+  if (client.riskLimit && ((client.marginUsed || 0) + marginRequired > client.riskLimit)) {
+    const rejectedOrder: Order = {
+      id: `ORD-REJ-${Date.now()}-${Math.floor(1000 + Math.random() * 9000)}`,
+      clientId: client.id,
+      clientName: client.name,
+      instrument: targetInst.symbol,
+      exchange: targetInst.exchange,
+      side: side as 'BUY' | 'SELL',
+      type: type as 'LIMIT' | 'MARKET' | 'SL-M',
+      quantity: qty,
+      orderPrice: price,
+      executedQty: 0,
+      avgPrice: 0,
+      status: 'Rejected',
+      created: new Date().toLocaleTimeString('en-GB'),
+      brokerId: client.brokerId,
+      rejectionReason: `RMS Error: Total margin requirement ₹${((client.marginUsed || 0) + marginRequired).toLocaleString('en-IN')} exceeds client risk limit of ₹${client.riskLimit.toLocaleString('en-IN')}`,
+    };
+    orders.unshift(rejectedOrder);
+    savePersistence();
+    if (isUsingPostgres()) {
+      dbRepo.insertOrder(rejectedOrder).catch(console.warn);
+    }
+
+    pushAudit({
+      id: `LOG-${Date.now().toString().slice(-4)}`,
+      timestamp: new Date().toLocaleTimeString('en-GB') + ', Today',
+      user: client.name,
+      role: 'RMS Risk Engine',
+      action: 'Order Rejected (Risk Limit Exceeded)',
+      relatedEntity: rejectedOrder.id,
+      ipAddress: req.ip || '127.0.0.1',
+      result: 'Failed',
+      details: rejectedOrder.rejectionReason || 'RMS Risk Limit Exceeded',
     });
 
     broadcastScopedEvent('order_placed', rejectedOrder, { brokerId: client.brokerId, clientId: client.id });
@@ -3330,17 +3385,24 @@ app.post('/api/positions/:id/square-off', authMiddleware, (req: AuthenticatedReq
     client.ledgerBalance += squaredPnL;
 
     // Record ledger entry for square-off settlement
-    ledgerEntries.unshift({
+    const squareOffLedgerEntry: LedgerEntry = {
       id: `LED-TXN-${Date.now()}-${Math.floor(1000 + Math.random() * 9000)}`,
       date: new Date().toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' }),
       referenceId: pos.id,
-      description: `Square-off settlement: ${pos.instrument} (${pos.netQty} qty)`,
+      description: `Square-off settlement: ${pos.instrument} (${pos.netQty} qty) [${client.name}]`,
       debit: squaredPnL < 0 ? Math.abs(squaredPnL) : 0,
       credit: squaredPnL > 0 ? squaredPnL : 0,
       runningBalance: client.ledgerBalance,
       status: 'Completed',
       type: 'Trade Settlement',
-    });
+      clientId: client.id,
+      brokerId: client.brokerId,
+      tenantId: user.tenantId || client.tenantId,
+    };
+    ledgerEntries.unshift(squareOffLedgerEntry);
+    if (isUsingPostgres()) {
+      dbRepo.insertLedgerEntry(squareOffLedgerEntry).catch(console.warn);
+    }
   }
 
   const originalQty = pos.netQty;
@@ -3474,7 +3536,7 @@ app.post('/api/funds/:id/approve', authMiddleware, requireRole(['broker_admin', 
       client.marginAvailable -= txn.amount;
     }
 
-    ledgerEntries.unshift({
+    const fundLedgerEntry: LedgerEntry = {
       id: `LED-TXN-${Date.now()}-${Math.floor(1000 + Math.random() * 9000)}`,
       date: new Date().toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' }),
       referenceId: txn.referenceId,
@@ -3484,7 +3546,14 @@ app.post('/api/funds/:id/approve', authMiddleware, requireRole(['broker_admin', 
       runningBalance: client.ledgerBalance,
       status: 'Completed',
       type: txn.type,
-    });
+      clientId: client.id,
+      brokerId: client.brokerId,
+      tenantId: user.tenantId || client.tenantId,
+    };
+    ledgerEntries.unshift(fundLedgerEntry);
+    if (isUsingPostgres()) {
+      dbRepo.insertLedgerEntry(fundLedgerEntry).catch(console.warn);
+    }
   }
 
   savePersistence();

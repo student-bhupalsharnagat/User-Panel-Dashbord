@@ -127,6 +127,11 @@ export const PositionsView: React.FC = () => {
     showToast('Exported Open Positions to CSV', 'success');
   };
 
+  const handleExportPDF = () => {
+    showToast('Opening PDF print preview for Open Positions...', 'info');
+    window.print();
+  };
+
   // Derived KPI sums ensuring Net P&L always includes Realised P&L
   const computedRealised = positions.reduce((acc, p) => acc + (p.realisedPnL || 0), 0);
   const computedUnrealised = positions.reduce((acc, p) => acc + (p.unrealisedPnL || 0), 0);
@@ -170,7 +175,7 @@ export const PositionsView: React.FC = () => {
             <span>Export CSV</span>
           </button>
           <button
-            onClick={() => window.print()}
+            onClick={handleExportPDF}
             className="px-3 sm:px-3.5 py-1.5 sm:py-2 rounded-lg bg-[#131b2e] border border-[#1e2a42] hover:bg-slate-800 text-xs font-medium text-slate-200 hover:text-white transition-colors flex items-center gap-2 cursor-pointer shadow-sm"
           >
             <FileText className="w-3.5 h-3.5 text-slate-400" />

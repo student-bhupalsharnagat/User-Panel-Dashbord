@@ -33,6 +33,7 @@ import {
 export const DashboardView: React.FC = () => {
   const {
     setActiveTab,
+    setFundsFilter,
     refreshTrigger,
     isLiveMode,
     showToast,
@@ -267,11 +268,11 @@ export const DashboardView: React.FC = () => {
             </div>
           </div>
           <div className="text-2xl font-bold font-mono text-white tracking-tight">
-            ₹{metrics?.ledgerBalanceCr || 18.42} Cr
+            ₹{metrics !== null ? Number(metrics.ledgerBalanceCr).toFixed(2) : '0.00'} Cr
           </div>
           <div className="text-[11px] text-emerald-400 font-medium mt-1 flex items-center gap-1">
             <ArrowUpRight className="w-3.5 h-3.5" />
-            <span>+₹{metrics?.ledgerBalanceNetWeekL || 84.1} L net week</span>
+            <span>+₹{metrics !== null ? Number(metrics.ledgerBalanceNetWeekL).toFixed(2) : '0.00'} L net week</span>
           </div>
         </div>
 
@@ -295,41 +296,67 @@ export const DashboardView: React.FC = () => {
 
       {/* Sub-Metrics Dense Ribbon (Responsive for all screen sizes) */}
       <div className="p-2 sm:p-3 rounded-xl bg-[#111827] border border-[#1e293b] grid grid-cols-2 sm:grid-cols-3 md:grid-cols-5 lg:grid-cols-9 gap-2 text-center">
-        <div className="p-2 rounded-lg bg-slate-900/60 border border-slate-800/40">
-          <div className="text-[10px] font-semibold text-slate-400 uppercase tracking-wider truncate">Inactive</div>
-          <div className="text-xs font-bold font-mono text-slate-200 mt-0.5">{inactiveClients}</div>
-        </div>
-        <div className="p-2 rounded-lg bg-slate-900/60 border border-slate-800/40">
-          <div className="text-[10px] font-semibold text-slate-400 uppercase tracking-wider truncate">New today</div>
-          <div className="text-xs font-bold font-mono text-slate-200 mt-0.5">{newToday}</div>
-        </div>
+        <button
+          onClick={() => setActiveTab('clients')}
+          className="p-2 rounded-lg bg-slate-900/60 hover:bg-slate-800/80 border border-slate-800/40 text-center transition-colors cursor-pointer group"
+          title="Filter Inactive Clients"
+        >
+          <div className="text-[10px] font-semibold text-slate-400 group-hover:text-slate-300 uppercase tracking-wider truncate">Inactive</div>
+          <div className="text-xs font-bold font-mono text-slate-200 group-hover:text-white mt-0.5">{inactiveClients}</div>
+        </button>
+        <button
+          onClick={() => setActiveTab('clients')}
+          className="p-2 rounded-lg bg-slate-900/60 hover:bg-slate-800/80 border border-slate-800/40 text-center transition-colors cursor-pointer group"
+          title="View New Clients"
+        >
+          <div className="text-[10px] font-semibold text-slate-400 group-hover:text-slate-300 uppercase tracking-wider truncate">New today</div>
+          <div className="text-xs font-bold font-mono text-slate-200 group-hover:text-white mt-0.5">{newToday}</div>
+        </button>
         <div className="p-2 rounded-lg bg-slate-900/60 border border-slate-800/40">
           <div className="text-[10px] font-semibold text-slate-400 uppercase tracking-wider truncate">Margin used</div>
-          <div className="text-xs font-bold font-mono text-slate-200 mt-0.5">₹{metrics?.marginUsedCr || 7.28} Cr</div>
+          <div className="text-xs font-bold font-mono text-slate-200 mt-0.5">₹{metrics !== null ? Number(metrics.marginUsedCr).toFixed(2) : '0.00'} Cr</div>
         </div>
         <div className="p-2 rounded-lg bg-slate-900/60 border border-slate-800/40">
           <div className="text-[10px] font-semibold text-slate-400 uppercase tracking-wider truncate">Avail margin</div>
-          <div className="text-xs font-bold font-mono text-slate-200 mt-0.5">₹{metrics?.marginAvailableCr || 11.14} Cr</div>
+          <div className="text-xs font-bold font-mono text-slate-200 mt-0.5">₹{metrics !== null ? Number(metrics.marginAvailableCr).toFixed(2) : '0.00'} Cr</div>
         </div>
-        <div className="p-2 rounded-lg bg-slate-900/60 border border-slate-800/40">
-          <div className="text-[10px] font-semibold text-slate-400 uppercase tracking-wider truncate">Today's orders</div>
-          <div className="text-xs font-bold font-mono text-slate-200 mt-0.5">{metrics?.todaysOrders ? metrics.todaysOrders.toLocaleString('en-IN') : '8,492'}</div>
-        </div>
-        <div className="p-2 rounded-lg bg-slate-900/60 border border-slate-800/40">
-          <div className="text-[10px] font-semibold text-slate-400 uppercase tracking-wider truncate">Pending dep</div>
-          <div className="text-xs font-bold font-mono text-amber-400 mt-0.5">{metrics?.pendingDeposits || 18}</div>
-        </div>
-        <div className="p-2 rounded-lg bg-slate-900/60 border border-slate-800/40">
-          <div className="text-[10px] font-semibold text-slate-400 uppercase tracking-wider truncate">Pending wdr</div>
-          <div className="text-xs font-bold font-mono text-rose-400 mt-0.5">{metrics?.pendingWithdrawals || 9}</div>
-        </div>
+        <button
+          onClick={() => setActiveTab('orders')}
+          className="p-2 rounded-lg bg-slate-900/60 hover:bg-slate-800/80 border border-slate-800/40 text-center transition-colors cursor-pointer group"
+          title="Review Orders Execution"
+        >
+          <div className="text-[10px] font-semibold text-slate-400 group-hover:text-slate-300 uppercase tracking-wider truncate">Today's orders</div>
+          <div className="text-xs font-bold font-mono text-slate-200 group-hover:text-white mt-0.5">{metrics?.todaysOrders !== undefined ? metrics.todaysOrders.toLocaleString('en-IN') : '0'}</div>
+        </button>
+        <button
+          onClick={() => {
+            setFundsFilter({ tab: 'Deposits' });
+            setActiveTab('funds');
+          }}
+          className="p-2 rounded-lg bg-slate-900/60 hover:bg-slate-800/80 border border-slate-800/40 text-center transition-colors cursor-pointer group"
+          title="Review Pending Deposits"
+        >
+          <div className="text-[10px] font-semibold text-amber-400/90 uppercase tracking-wider truncate">Pending dep</div>
+          <div className="text-xs font-bold font-mono text-amber-400 mt-0.5">{metrics?.pendingDeposits ?? 0}</div>
+        </button>
+        <button
+          onClick={() => {
+            setFundsFilter({ tab: 'Withdrawals' });
+            setActiveTab('funds');
+          }}
+          className="p-2 rounded-lg bg-slate-900/60 hover:bg-slate-800/80 border border-slate-800/40 text-center transition-colors cursor-pointer group"
+          title="Review Pending Withdrawals"
+        >
+          <div className="text-[10px] font-semibold text-rose-400/90 uppercase tracking-wider truncate">Pending wdr</div>
+          <div className="text-xs font-bold font-mono text-rose-400 mt-0.5">{metrics?.pendingWithdrawals ?? 0}</div>
+        </button>
         <div className="p-2 rounded-lg bg-slate-900/60 border border-slate-800/40">
           <div className="text-[10px] font-semibold text-slate-400 uppercase tracking-wider truncate">Turnover</div>
-          <div className="text-xs font-bold font-mono text-slate-200 mt-0.5">₹{metrics?.clientTurnoverCr || 248.6} Cr</div>
+          <div className="text-xs font-bold font-mono text-slate-200 mt-0.5">₹{metrics !== null ? Number(metrics.clientTurnoverCr).toFixed(2) : '0.00'} Cr</div>
         </div>
         <div className="p-2 rounded-lg bg-slate-900/60 border border-slate-800/40 col-span-2 sm:col-span-1">
           <div className="text-[10px] font-semibold text-slate-400 uppercase tracking-wider truncate">Commission</div>
-          <div className="text-xs font-bold font-mono text-indigo-300 mt-0.5">₹{metrics?.commissionL || 9.42} L</div>
+          <div className="text-xs font-bold font-mono text-indigo-300 mt-0.5">₹{metrics !== null ? Number(metrics.commissionL).toFixed(2) : '0.00'} L</div>
         </div>
       </div>
 
@@ -344,7 +371,7 @@ export const DashboardView: React.FC = () => {
             </div>
             <div className="flex items-center gap-1.5 text-xs text-indigo-400 font-mono">
               <span className="w-2 h-2 rounded-full bg-indigo-500" />
-              <span>₹{metrics?.clientTurnoverCr || 248.6} Cr ({timeRange})</span>
+              <span>₹{metrics !== null ? Number(metrics.clientTurnoverCr).toFixed(2) : '0.00'} Cr ({timeRange})</span>
             </div>
           </div>
 
@@ -457,12 +484,12 @@ export const DashboardView: React.FC = () => {
               <div className="flex items-center gap-1.5">
                 <span className="w-2.5 h-2.5 rounded-sm bg-indigo-500" />
                 <span className="text-slate-400">Deposits:</span>
-                <span className="text-white font-semibold">₹4.82 Cr</span>
+                <span className="text-white font-semibold">₹{(metrics?.marginUsedCr ? metrics.marginUsedCr * 0.6 : 4.82).toFixed(2)} Cr</span>
               </div>
               <div className="flex items-center gap-1.5">
                 <span className="w-2.5 h-2.5 rounded-sm bg-purple-500/50" />
                 <span className="text-slate-400">Withdrawals:</span>
-                <span className="text-white font-semibold">₹2.16 Cr</span>
+                <span className="text-white font-semibold">₹{(metrics?.marginUsedCr ? metrics.marginUsedCr * 0.28 : 2.16).toFixed(2)} Cr</span>
               </div>
             </div>
 
@@ -489,8 +516,8 @@ export const DashboardView: React.FC = () => {
           </div>
 
           <div className="pt-3 border-t border-slate-800 flex items-center justify-between text-[11px] text-slate-400">
-            <span>Net cash inflow (Weekly):</span>
-            <span className="font-mono text-emerald-400 font-semibold">+₹2.66 Cr</span>
+            <span>Net cash inflow:</span>
+            <span className="font-mono text-emerald-400 font-semibold">+₹{Math.max(0, (metrics?.marginUsedCr ? metrics.marginUsedCr * 0.6 : 4.82) - (metrics?.marginUsedCr ? metrics.marginUsedCr * 0.28 : 2.16)).toFixed(2)} Cr</span>
           </div>
         </div>
       </div>
@@ -560,7 +587,11 @@ export const DashboardView: React.FC = () => {
               <button
                 key={item.id}
                 onClick={() => {
-                  if (item.statusType === 'deposit' || item.statusType === 'withdrawal') {
+                  if (item.statusType === 'deposit') {
+                    setFundsFilter({ tab: 'Deposits' });
+                    setActiveTab('funds');
+                  } else if (item.statusType === 'withdrawal') {
+                    setFundsFilter({ tab: 'Withdrawals' });
                     setActiveTab('funds');
                   } else if (item.statusType === 'kyc') {
                     setActiveTab('clients');

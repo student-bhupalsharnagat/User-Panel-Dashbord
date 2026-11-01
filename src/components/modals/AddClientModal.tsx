@@ -27,7 +27,17 @@ export const AddClientModal: React.FC = () => {
     setErrorMessage(null);
 
     if (!name.trim() || !email.trim() || !phone.trim()) {
-      setErrorMessage('Full name, email address, and mobile number are required.');
+      const msg = 'Full name, email address, and mobile number are required.';
+      setErrorMessage(msg);
+      showToast(msg, 'error');
+      return;
+    }
+
+    const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+    if (!emailRegex.test(email.trim())) {
+      const msg = 'Please enter a valid email address (e.g. client@example.com).';
+      setErrorMessage(msg);
+      showToast(msg, 'error');
       return;
     }
 
@@ -37,13 +47,17 @@ export const AddClientModal: React.FC = () => {
       : (digitsOnly.length === 11 && digitsOnly.startsWith('0') ? digitsOnly.slice(1) : digitsOnly);
 
     if (validDigits.length !== 10 || !/^[6-9]/.test(validDigits)) {
-      setErrorMessage('Please enter a valid 10-digit Indian mobile number starting with 6-9. (Numeric length must be 10 digits).');
+      const msg = 'Please enter a valid 10-digit Indian mobile number starting with 6-9. (Numeric length must be 10 digits).';
+      setErrorMessage(msg);
+      showToast(msg, 'error');
       return;
     }
 
     const panClean = (pan || '').trim().toUpperCase();
     if (!panClean || !/^[A-Z]{5}[0-9]{4}[A-Z]{1}$/.test(panClean)) {
-      setErrorMessage('Invalid PAN format. Standard PAN must be 5 letters, 4 numbers, and 1 letter (e.g. ABCDE1234F). Numeric-only values (like 1234567890) are strictly rejected.');
+      const msg = 'Invalid PAN format. Standard PAN must be 5 letters, 4 numbers, and 1 letter (e.g. ABCDE1234F). Numeric-only values (like 1234567890) are strictly rejected.';
+      setErrorMessage(msg);
+      showToast(msg, 'error');
       return;
     }
 
@@ -73,7 +87,9 @@ export const AddClientModal: React.FC = () => {
       setInitialMargin(0);
       setErrorMessage(null);
     } catch (err: any) {
-      setErrorMessage(err.message || 'Failed to onboard client');
+      const msg = err.message || 'Failed to onboard client';
+      setErrorMessage(msg);
+      showToast(msg, 'error');
     } finally {
       setIsSubmitting(false);
     }

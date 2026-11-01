@@ -105,6 +105,11 @@ export const FundsView: React.FC = () => {
     showToast(`Exported ${activeTab} transactions to CSV`, 'success');
   };
 
+  const handleExportPDF = () => {
+    showToast(`Opening PDF print preview for ${activeTab}...`, 'info');
+    window.print();
+  };
+
   return (
     <div className="p-3.5 sm:p-5 lg:p-6 space-y-4 sm:space-y-6 max-w-[1600px] mx-auto text-slate-100">
       {/* Header */}
@@ -134,7 +139,7 @@ export const FundsView: React.FC = () => {
             <span>Export CSV</span>
           </button>
           <button
-            onClick={() => window.print()}
+            onClick={handleExportPDF}
             className="px-3 sm:px-3.5 py-1.5 sm:py-2 rounded-lg bg-[#131b2e] border border-[#1e2a42] hover:bg-slate-800 text-xs font-medium text-slate-200 hover:text-white transition-colors flex items-center gap-2 cursor-pointer shadow-sm"
           >
             <FileText className="w-3.5 h-3.5 text-slate-400" />
