@@ -97,6 +97,14 @@ export class TradingPlatformClient extends EventEmitter {
   private token: string | null = null;
   private ws: any = null;
   private wsReconnectTimer: any = null;
+  private wsPingInterval: any = null;
+  private wsConnectionTimeoutTimer: any = null;
+  private lastWsActivity: number = Date.now();
+  private reconnectAttempts = 0;
+  private readonly MAX_RECONNECT_DELAY_MS = 15000;
+  private readonly INITIAL_RECONNECT_DELAY_MS = 1000;
+  private readonly WS_PING_INTERVAL_MS = 15000;
+  private readonly WS_ACTIVITY_TIMEOUT_MS = 35000;
   private isReconnecting = false;
   private clockOffsetMs = 0;
   private lastClockSync: number | null = null;
@@ -365,7 +373,7 @@ export class TradingPlatformClient extends EventEmitter {
       method: 'GET',
       path: '/api/internal/v1/trading/orders?limit=100',
       tenantId: cleanTenant,
-      timeoutMs: 45000
+      timeoutMs: 8000
     });
     if (res.success) {
       const orders = extractOrders(res.data || res);
@@ -396,7 +404,7 @@ export class TradingPlatformClient extends EventEmitter {
       method: 'GET',
       path: '/api/internal/v1/trading/positions?limit=100',
       tenantId: cleanTenant,
-      timeoutMs: 45000
+      timeoutMs: 8000
     });
     if (res.success) {
       const positions = extractPositions(res.data || res);
@@ -427,7 +435,7 @@ export class TradingPlatformClient extends EventEmitter {
       method: 'GET',
       path: '/api/internal/v1/trading/funds?limit=100',
       tenantId: cleanTenant,
-      timeoutMs: 45000
+      timeoutMs: 8000
     });
     if (res.success) {
       const funds = extractFunds(res.data || res);
@@ -458,7 +466,7 @@ export class TradingPlatformClient extends EventEmitter {
       method: 'GET',
       path: '/api/internal/v1/trading/ledger?limit=100',
       tenantId: cleanTenant,
-      timeoutMs: 45000
+      timeoutMs: 8000
     });
     if (res.success) {
       const ledger = extractLedger(res.data || res);
@@ -562,7 +570,13 @@ export class TradingPlatformClient extends EventEmitter {
 
     const resultsMap = new Map<string, any>();
 
-    const primary = await this.fetchLiveOrders(primaryTenant);
+    const [primarySettled, secondarySettled] = await Promise.allSettled([
+      this.fetchLiveOrders(primaryTenant),
+      this.fetchLiveOrders(secondaryTenant),
+    ]);
+    const primary = primarySettled.status === 'fulfilled' ? primarySettled.value : { success: false, orders: [] };
+    const secondary = secondarySettled.status === 'fulfilled' ? secondarySettled.value : { success: false, orders: [] };
+
     if (primary.success && Array.isArray(primary.orders)) {
       primary.orders.forEach((o: any) => {
         const id = o.id || o.order_id || o.client_order_id;
@@ -570,7 +584,6 @@ export class TradingPlatformClient extends EventEmitter {
       });
     }
 
-    const secondary = await this.fetchLiveOrders(secondaryTenant);
     if (secondary.success && Array.isArray(secondary.orders)) {
       secondary.orders.forEach((o: any) => {
         const id = o.id || o.order_id || o.client_order_id;
@@ -606,7 +619,13 @@ export class TradingPlatformClient extends EventEmitter {
 
     const resultsMap = new Map<string, any>();
 
-    const primary = await this.fetchLivePositions(primaryTenant);
+    const [primarySettled, secondarySettled] = await Promise.allSettled([
+      this.fetchLivePositions(primaryTenant),
+      this.fetchLivePositions(secondaryTenant),
+    ]);
+    const primary = primarySettled.status === 'fulfilled' ? primarySettled.value : { success: false, positions: [] };
+    const secondary = secondarySettled.status === 'fulfilled' ? secondarySettled.value : { success: false, positions: [] };
+
     if (primary.success && Array.isArray(primary.positions)) {
       primary.positions.forEach((p: any) => {
         const id = p.id || p.position_id || p.positionId;
@@ -614,7 +633,6 @@ export class TradingPlatformClient extends EventEmitter {
       });
     }
 
-    const secondary = await this.fetchLivePositions(secondaryTenant);
     if (secondary.success && Array.isArray(secondary.positions)) {
       secondary.positions.forEach((p: any) => {
         const id = p.id || p.position_id || p.positionId;
@@ -650,7 +668,13 @@ export class TradingPlatformClient extends EventEmitter {
 
     const resultsMap = new Map<string, any>();
 
-    const primary = await this.fetchLiveFunds(primaryTenant);
+    const [primarySettled, secondarySettled] = await Promise.allSettled([
+      this.fetchLiveFunds(primaryTenant),
+      this.fetchLiveFunds(secondaryTenant),
+    ]);
+    const primary = primarySettled.status === 'fulfilled' ? primarySettled.value : { success: false, funds: [] };
+    const secondary = secondarySettled.status === 'fulfilled' ? secondarySettled.value : { success: false, funds: [] };
+
     if (primary.success && Array.isArray(primary.funds)) {
       primary.funds.forEach((f: any) => {
         const id = f.id || f.transactionId || f.transaction_id;
@@ -658,7 +682,6 @@ export class TradingPlatformClient extends EventEmitter {
       });
     }
 
-    const secondary = await this.fetchLiveFunds(secondaryTenant);
     if (secondary.success && Array.isArray(secondary.funds)) {
       secondary.funds.forEach((f: any) => {
         const id = f.id || f.transactionId || f.transaction_id;
@@ -694,7 +717,13 @@ export class TradingPlatformClient extends EventEmitter {
 
     const resultsMap = new Map<string, any>();
 
-    const primary = await this.fetchLiveLedger(primaryTenant);
+    const [primarySettled, secondarySettled] = await Promise.allSettled([
+      this.fetchLiveLedger(primaryTenant),
+      this.fetchLiveLedger(secondaryTenant),
+    ]);
+    const primary = primarySettled.status === 'fulfilled' ? primarySettled.value : { success: false, ledger: [] };
+    const secondary = secondarySettled.status === 'fulfilled' ? secondarySettled.value : { success: false, ledger: [] };
+
     if (primary.success && Array.isArray(primary.ledger)) {
       primary.ledger.forEach((l: any) => {
         const id = l.id || l.entryId || l.transaction_id;
@@ -702,7 +731,6 @@ export class TradingPlatformClient extends EventEmitter {
       });
     }
 
-    const secondary = await this.fetchLiveLedger(secondaryTenant);
     if (secondary.success && Array.isArray(secondary.ledger)) {
       secondary.ledger.forEach((l: any) => {
         const id = l.id || l.entryId || l.transaction_id;
@@ -1030,6 +1058,8 @@ export class TradingPlatformClient extends EventEmitter {
       return;
     }
 
+    this.cleanUpWebSocket();
+
     if (!this.token) {
       await this.authenticate();
     }
@@ -1044,35 +1074,104 @@ export class TradingPlatformClient extends EventEmitter {
       const ws = new (globalThis as any).WebSocket(wsUrl);
       this.ws = ws;
 
-      ws.onopen = () => {
-        console.log('[TradingPlatformClient] Real-time WebSocket connected to Trading Platform.');
-        this.status.wsConnected = true;
-        this.status.error = null;
-        this.emit('ws_connected');
-      };
+      // 10s handshake timeout
+      this.wsConnectionTimeoutTimer = setTimeout(() => {
+        if (this.ws && this.ws.readyState !== 1) {
+          console.warn('[TradingPlatformClient] WebSocket handshake timed out (10s), reconnecting...');
+          this.status.wsConnected = false;
+          this.cleanUpWebSocket();
+          this.scheduleReconnect();
+        }
+      }, 10000);
 
-      ws.onmessage = (event: any) => {
-        try {
-          const message = JSON.parse(event.data);
-          this.status.lastWsEvent = message.event || 'message';
-          this.emit('realtime_event', message);
-        } catch {}
-      };
+      return new Promise<void>((resolve) => {
+        let isSettled = false;
+        const settle = () => {
+          if (!isSettled) {
+            isSettled = true;
+            resolve();
+          }
+        };
 
-      ws.onerror = (err: any) => {
-        console.warn('[TradingPlatformClient] WebSocket notice:', err?.message || 'Connection error');
-        this.status.wsConnected = false;
-      };
+        ws.onopen = () => {
+          clearTimeout(this.wsConnectionTimeoutTimer);
+          this.wsConnectionTimeoutTimer = null;
+          this.reconnectAttempts = 0;
+          this.lastWsActivity = Date.now();
+          console.log('[TradingPlatformClient] Real-time WebSocket connected to Trading Platform.');
+          this.status.wsConnected = true;
+          this.status.error = null;
+          this.emit('ws_connected');
+          this.startWsHeartbeat();
+          settle();
+        };
 
-      ws.onclose = () => {
-        this.status.wsConnected = false;
-        this.emit('ws_disconnected');
-        this.scheduleReconnect();
-      };
+        ws.onmessage = (event: any) => {
+          this.lastWsActivity = Date.now();
+          try {
+            const message = JSON.parse(event.data);
+            if (message.event === 'pong') {
+              return;
+            }
+            this.status.lastWsEvent = message.event || 'message';
+            this.emit('realtime_event', message);
+          } catch {}
+        };
+
+        ws.onerror = (err: any) => {
+          console.warn('[TradingPlatformClient] WebSocket notice:', err?.message || 'Connection error');
+          this.status.wsConnected = false;
+          settle();
+        };
+
+        ws.onclose = () => {
+          this.status.wsConnected = false;
+          this.emit('ws_disconnected');
+          this.cleanUpWebSocket();
+          this.scheduleReconnect();
+          settle();
+        };
+      });
     } catch (err: any) {
       console.warn('[TradingPlatformClient] WebSocket setup error:', err.message);
       this.status.wsConnected = false;
+      this.cleanUpWebSocket();
       this.scheduleReconnect();
+    }
+  }
+
+  private startWsHeartbeat() {
+    clearInterval(this.wsPingInterval);
+    this.wsPingInterval = setInterval(() => {
+      if (!this.ws || this.ws.readyState !== 1) {
+        return;
+      }
+      if (Date.now() - this.lastWsActivity > this.WS_ACTIVITY_TIMEOUT_MS) {
+        console.warn('[TradingPlatformClient] WebSocket inactivity timeout (no data for 35s), cycling connection...');
+        this.cleanUpWebSocket();
+        this.scheduleReconnect();
+        return;
+      }
+      try {
+        this.ws.send(JSON.stringify({ type: 'ping', timestamp: Date.now() }));
+      } catch {}
+    }, this.WS_PING_INTERVAL_MS);
+  }
+
+  private cleanUpWebSocket() {
+    clearInterval(this.wsPingInterval);
+    this.wsPingInterval = null;
+    clearTimeout(this.wsConnectionTimeoutTimer);
+    this.wsConnectionTimeoutTimer = null;
+    if (this.ws) {
+      try {
+        this.ws.onopen = null;
+        this.ws.onmessage = null;
+        this.ws.onerror = null;
+        this.ws.onclose = null;
+        this.ws.close();
+      } catch {}
+      this.ws = null;
     }
   }
 
@@ -1080,21 +1179,26 @@ export class TradingPlatformClient extends EventEmitter {
     if (this.isReconnecting) return;
     this.isReconnecting = true;
     clearTimeout(this.wsReconnectTimer);
+
+    const delay = Math.min(
+      this.INITIAL_RECONNECT_DELAY_MS * Math.pow(1.5, this.reconnectAttempts) + Math.random() * 500,
+      this.MAX_RECONNECT_DELAY_MS
+    );
+    this.reconnectAttempts++;
+
     this.wsReconnectTimer = setTimeout(async () => {
       this.isReconnecting = false;
       this.token = null;
       await this.connectWebSocket();
-    }, 5000);
+    }, delay);
   }
 
   public disconnect() {
     clearTimeout(this.wsReconnectTimer);
-    if (this.ws) {
-      try {
-        this.ws.close();
-      } catch {}
-      this.ws = null;
-    }
+    this.isReconnecting = false;
+    this.reconnectAttempts = 0;
+    this.status.wsConnected = false;
+    this.cleanUpWebSocket();
   }
 }
 

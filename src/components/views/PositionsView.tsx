@@ -3,7 +3,7 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useMemo, useRef } from 'react';
 import {
   Search,
   Download,
@@ -38,6 +38,12 @@ export const PositionsView: React.FC = () => {
   const [pageSize, setPageSize] = useState(10);
   const [page, setPage] = useState(1);
   const [loading, setLoading] = useState(true);
+  const hasLoadedRef = useRef(false);
+  const latestTicksRef = useRef(latestTicks);
+
+  useEffect(() => {
+    latestTicksRef.current = latestTicks;
+  }, [latestTicks]);
 
   // Consume any target positionsFilter set from Notifications
   useEffect(() => {
@@ -52,12 +58,28 @@ export const PositionsView: React.FC = () => {
   }, [searchQuery, productFilter]);
 
   useEffect(() => {
-    setLoading(true);
+    if (!hasLoadedRef.current) {
+      setLoading(true);
+    }
     api.getPositions()
       .then((data) => {
         const activeOnly = (data.positions || []).filter((p: Position) => p.netQty !== 0);
-        setPositions(activeOnly);
+        const ticks = latestTicksRef.current || {};
+        const merged = activeOnly.map((pos: Position) => {
+          const update = ticks[pos.instrument];
+          if (!update || !update.lastPrice) return pos;
+          const currentPrice = update.lastPrice;
+          const unrealisedPnL = Math.round((currentPrice - pos.avgPrice) * pos.netQty);
+          return {
+            ...pos,
+            currentPrice,
+            unrealisedPnL,
+            totalPnL: pos.realisedPnL + unrealisedPnL,
+          };
+        });
+        setPositions(merged);
         setSummary(data.summary);
+        hasLoadedRef.current = true;
       })
       .catch((err) => console.error('Failed to load positions:', err))
       .finally(() => setLoading(false));
@@ -66,10 +88,12 @@ export const PositionsView: React.FC = () => {
   // Recalculate MTM and current prices when live streaming ticks arrive
   useEffect(() => {
     if (!latestTicks || Object.keys(latestTicks).length === 0) return;
-    setPositions((prev) =>
-      prev.map((pos) => {
+    setPositions((prev) => {
+      let changed = false;
+      const next = prev.map((pos) => {
         const update = latestTicks[pos.instrument];
-        if (!update || !update.lastPrice) return pos;
+        if (!update || !update.lastPrice || update.lastPrice === pos.currentPrice) return pos;
+        changed = true;
         const currentPrice = update.lastPrice;
         const unrealisedPnL = Math.round((currentPrice - pos.avgPrice) * pos.netQty);
         return {
@@ -78,21 +102,27 @@ export const PositionsView: React.FC = () => {
           unrealisedPnL,
           totalPnL: pos.realisedPnL + unrealisedPnL,
         };
-      })
-    );
+      });
+      return changed ? next : prev;
+    });
   }, [latestTicks]);
 
-  const filteredPositions = positions.filter((p) => {
-    if (p.netQty === 0) return false;
-    const matchesSearch =
-      p.instrument.toLowerCase().includes(searchQuery.toLowerCase()) ||
-      p.clientName.toLowerCase().includes(searchQuery.toLowerCase()) ||
-      p.clientId.toLowerCase().includes(searchQuery.toLowerCase());
-    const matchesProduct = productFilter === 'All' || p.product === productFilter;
-    return matchesSearch && matchesProduct;
-  });
+  const filteredPositions = useMemo(() => {
+    const q = searchQuery.toLowerCase();
+    return positions.filter((p) => {
+      if (p.netQty === 0) return false;
+      const matchesSearch =
+        p.instrument.toLowerCase().includes(q) ||
+        p.clientName.toLowerCase().includes(q) ||
+        p.clientId.toLowerCase().includes(q);
+      const matchesProduct = productFilter === 'All' || p.product === productFilter;
+      return matchesSearch && matchesProduct;
+    });
+  }, [positions, searchQuery, productFilter]);
 
-  const paginatedPositions = filteredPositions.slice((page - 1) * pageSize, page * pageSize);
+  const paginatedPositions = useMemo(() => {
+    return filteredPositions.slice((page - 1) * pageSize, page * pageSize);
+  }, [filteredPositions, page, pageSize]);
 
   const cellPad = isCompactMode ? 'px-2.5 py-1.5' : 'px-3.5 py-3';
   const headPad = isCompactMode ? 'px-2.5 py-2' : 'px-3.5 py-3';

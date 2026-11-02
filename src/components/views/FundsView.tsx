@@ -3,7 +3,7 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useMemo, useRef } from 'react';
 import {
   Search,
   Filter,
@@ -40,6 +40,8 @@ export const FundsView: React.FC = () => {
   const [pageSize, setPageSize] = useState(10);
   const [page, setPage] = useState(1);
   const [loading, setLoading] = useState(true);
+  const hasLoadedRef = useRef(false);
+  const activeReqIdRef = useRef(0);
 
   // Consume any target fundsFilter set from Notifications
   useEffect(() => {
@@ -56,25 +58,45 @@ export const FundsView: React.FC = () => {
   }, [searchQuery, activeTab, timeRange]);
 
   useEffect(() => {
-    setLoading(true);
+    const reqId = ++activeReqIdRef.current;
+    if (!hasLoadedRef.current) {
+      setLoading(true);
+    }
     api.getFunds(activeTab === 'Deposits' ? 'Deposit' : 'Withdrawal', timeRange)
-      .then((data) => setTransactions(data))
-      .catch((err) => console.error('Failed to load fund transactions:', err))
-      .finally(() => setLoading(false));
+      .then((data) => {
+        if (reqId === activeReqIdRef.current) {
+          setTransactions(data);
+          hasLoadedRef.current = true;
+        }
+      })
+      .catch((err) => {
+        if (reqId === activeReqIdRef.current) {
+          console.error('Failed to load fund transactions:', err);
+        }
+      })
+      .finally(() => {
+        if (reqId === activeReqIdRef.current) {
+          setLoading(false);
+        }
+      });
   }, [activeTab, timeRange, refreshTrigger]);
 
-  const filteredTxns = transactions.filter((t) => {
+  const filteredTxns = useMemo(() => {
     const q = searchQuery.toLowerCase();
-    const matchesSearch = (
-      t.id.toLowerCase().includes(q) ||
-      t.clientName.toLowerCase().includes(q) ||
-      t.clientId.toLowerCase().includes(q) ||
-      t.referenceId.toLowerCase().includes(q)
-    );
-    return matchesSearch && matchesDateFilter(t.requestDate, timeRange);
-  });
+    return transactions.filter((t) => {
+      const matchesSearch = (
+        t.id.toLowerCase().includes(q) ||
+        t.clientName.toLowerCase().includes(q) ||
+        t.clientId.toLowerCase().includes(q) ||
+        t.referenceId.toLowerCase().includes(q)
+      );
+      return matchesSearch && matchesDateFilter(t.requestDate, timeRange);
+    });
+  }, [transactions, searchQuery, timeRange]);
 
-  const paginatedTxns = filteredTxns.slice((page - 1) * pageSize, page * pageSize);
+  const paginatedTxns = useMemo(() => {
+    return filteredTxns.slice((page - 1) * pageSize, page * pageSize);
+  }, [filteredTxns, page, pageSize]);
 
   const cellPad = isCompactMode ? 'px-2.5 py-1.5' : 'px-3.5 py-3';
   const headPad = isCompactMode ? 'px-2.5 py-2' : 'px-3.5 py-3';

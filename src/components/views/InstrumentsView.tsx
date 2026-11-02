@@ -3,7 +3,7 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useMemo, useRef } from 'react';
 import {
   Search,
   Filter,
@@ -30,15 +30,21 @@ export const InstrumentsView: React.FC = () => {
   const [pageSize, setPageSize] = useState(10);
   const [page, setPage] = useState(1);
   const [loading, setLoading] = useState(true);
+  const hasLoadedRef = useRef(false);
 
   useEffect(() => {
     setPage(1);
   }, [searchQuery, exchangeFilter]);
 
   useEffect(() => {
-    setLoading(true);
+    if (!hasLoadedRef.current) {
+      setLoading(true);
+    }
     api.getInstruments()
-      .then((data) => setInstruments(data))
+      .then((data) => {
+        setInstruments(data);
+        hasLoadedRef.current = true;
+      })
       .catch((err) => console.error('Failed to load instruments:', err))
       .finally(() => setLoading(false));
   }, [refreshTrigger]);
@@ -53,14 +59,18 @@ export const InstrumentsView: React.FC = () => {
     }
   };
 
-  const filteredInstruments = instruments.filter((i) => {
+  const filteredInstruments = useMemo(() => {
     const q = searchQuery.toLowerCase();
-    const matchesSearch = i.name.toLowerCase().includes(q) || i.symbol.toLowerCase().includes(q);
-    const matchesExchange = exchangeFilter === 'All' || i.exchange === exchangeFilter;
-    return matchesSearch && matchesExchange;
-  });
+    return instruments.filter((i) => {
+      const matchesSearch = i.name.toLowerCase().includes(q) || i.symbol.toLowerCase().includes(q);
+      const matchesExchange = exchangeFilter === 'All' || i.exchange === exchangeFilter;
+      return matchesSearch && matchesExchange;
+    });
+  }, [instruments, searchQuery, exchangeFilter]);
 
-  const paginated = filteredInstruments.slice((page - 1) * pageSize, page * pageSize);
+  const paginated = useMemo(() => {
+    return filteredInstruments.slice((page - 1) * pageSize, page * pageSize);
+  }, [filteredInstruments, page, pageSize]);
 
   const cellPad = isCompactMode ? 'px-3 py-1.5' : 'px-4 py-3';
   const headPad = isCompactMode ? 'px-3 py-2' : 'px-4 py-3';

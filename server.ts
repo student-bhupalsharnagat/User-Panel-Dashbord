@@ -1697,33 +1697,44 @@ function broadcastScopedEvent(eventType: string, data: any, scope?: { brokerId?:
   const eventId = `EVT-${++eventSequenceCounter}`;
   const payload = `id: ${eventId}\nevent: ${eventType}\ndata: ${JSON.stringify({ ...data, eventId, timestamp: new Date().toISOString() })}\n\n`;
 
-  sseClients.forEach((client) => {
+  sseClients = sseClients.filter((client) => {
     try {
+      if (client.res.writableEnded || client.res.destroyed) {
+        return false;
+      }
       // Tenant check
       if (scope?.tenantId && client.tenantId !== scope.tenantId && client.role !== 'super_admin') {
-        return;
+        return true;
       }
       // Broker hierarchy check
       if (scope?.brokerId && client.role === 'broker_admin' && client.brokerId !== scope.brokerId) {
-        return;
+        return true;
       }
       // Client check
       if (scope?.clientId && client.role === 'trader_client' && client.userId !== scope.clientId) {
-        return;
+        return true;
       }
       client.res.write(payload);
+      return true;
     } catch {
-      // disconnected
+      return false; // disconnected
     }
   });
 }
 
-// Periodic ping to keep SSE connection alive
+// Periodic ping to keep SSE connection alive and evict terminated connections
 setInterval(() => {
-  sseClients.forEach((client) => {
+  const pingPayload = `event: ping\ndata: ${JSON.stringify({ time: Date.now() })}\n\n`;
+  sseClients = sseClients.filter((client) => {
     try {
-      client.res.write(`event: ping\ndata: ${JSON.stringify({ time: Date.now() })}\n\n`);
-    } catch {}
+      if (client.res.writableEnded || client.res.destroyed) {
+        return false;
+      }
+      client.res.write(pingPayload);
+      return true;
+    } catch {
+      return false;
+    }
   });
 }, 15000);
 

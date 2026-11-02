@@ -3,7 +3,7 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useMemo, useRef } from 'react';
 import {
   Search,
   Filter,
@@ -40,6 +40,8 @@ export const OrdersView: React.FC = () => {
   const [pageSize, setPageSize] = useState(10);
   const [page, setPage] = useState(1);
   const [loading, setLoading] = useState(true);
+  const hasLoadedRef = useRef(false);
+  const activeReqIdRef = useRef(0);
 
   // Consume any target ordersFilter set from Notifications
   useEffect(() => {
@@ -56,11 +58,27 @@ export const OrdersView: React.FC = () => {
   }, [searchQuery, activeStatusTab, timeRange]);
 
   useEffect(() => {
-    setLoading(true);
+    const reqId = ++activeReqIdRef.current;
+    if (!hasLoadedRef.current) {
+      setLoading(true);
+    }
     api.getOrders({ status: activeStatusTab, q: searchQuery, timeRange })
-      .then((data) => setOrders(data))
-      .catch((err) => console.error('Failed to load orders:', err))
-      .finally(() => setLoading(false));
+      .then((data) => {
+        if (reqId === activeReqIdRef.current) {
+          setOrders(data);
+          hasLoadedRef.current = true;
+        }
+      })
+      .catch((err) => {
+        if (reqId === activeReqIdRef.current) {
+          console.error('Failed to load orders:', err);
+        }
+      })
+      .finally(() => {
+        if (reqId === activeReqIdRef.current) {
+          setLoading(false);
+        }
+      });
   }, [activeStatusTab, searchQuery, timeRange, refreshTrigger]);
 
   const handleCancelOrder = async (id: string) => {
@@ -73,8 +91,13 @@ export const OrdersView: React.FC = () => {
     }
   };
 
-  const filteredOrders = orders.filter((o) => matchesDateFilter(o.created, timeRange));
-  const paginatedOrders = filteredOrders.slice((page - 1) * pageSize, page * pageSize);
+  const filteredOrders = useMemo(() => {
+    return orders.filter((o) => matchesDateFilter(o.created, timeRange));
+  }, [orders, timeRange]);
+
+  const paginatedOrders = useMemo(() => {
+    return filteredOrders.slice((page - 1) * pageSize, page * pageSize);
+  }, [filteredOrders, page, pageSize]);
 
   const cellPad = isCompactMode ? 'px-2.5 py-1.5' : 'px-3.5 py-3';
   const headPad = isCompactMode ? 'px-2.5 py-2' : 'px-3.5 py-3';

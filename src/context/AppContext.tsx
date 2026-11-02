@@ -3,7 +3,7 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import React, { createContext, useContext, useState, useEffect, ReactNode, useCallback, useRef } from 'react';
+import React, { createContext, useContext, useState, useEffect, ReactNode, useCallback, useRef, useMemo } from 'react';
 import {
   AuthenticatedUser,
   Client,
@@ -259,7 +259,7 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
   }, []);
 
   const lastRefreshTimestampRef = useRef<number>(0);
-  const triggerRefresh = useCallback((force: boolean = true) => {
+  const triggerRefresh = useCallback((force: boolean = false) => {
     const now = Date.now();
     if (!force && now - lastRefreshTimestampRef.current < 500) return;
     lastRefreshTimestampRef.current = now;
@@ -427,293 +427,380 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
     return () => window.removeEventListener('keydown', handleKeyDown);
   }, []);
 
-  // Real-time EventSource connection
-  useEffect(() => {
-    let eventSource: EventSource | null = null;
-    try {
-      const token = getAuthToken();
-      const ssePath = token ? `/api/realtime/stream?token=${encodeURIComponent(token)}` : '/api/realtime/stream';
-      eventSource = new EventSource(resolveApiUrl(ssePath));
-      
-      eventSource.addEventListener('connected', () => {
-        setIsRealtimeConnected(true);
-        setIsLiveMode(true);
-      });
+  // Batched tick buffer to eliminate React state thrashing under high-frequency market ticks
+  const pendingTicksRef = useRef<Record<string, Partial<MarketInstrument>>>({});
+  const tickFlushTimerRef = useRef<any>(null);
 
-      eventSource.addEventListener('tick', (e: MessageEvent) => {
-        try {
-          const t = JSON.parse(e.data);
-          if (t && t.symbol) {
-            setLatestTicks((prev) => ({
-              ...prev,
-              [t.symbol]: {
-                lastPrice: Number(t.lastPrice ?? t.price ?? 0),
-                change: Number(t.change ?? 0),
-                changePercent: Number(t.changePercent ?? 0),
-                bid: Number(t.bid ?? 0),
-                ask: Number(t.ask ?? 0),
-                high: Number(t.highPrice ?? t.high ?? 0),
-                low: Number(t.lowPrice ?? t.low ?? 0),
-              },
-            }));
-          }
-        } catch {}
-        setLastTickTimestamp('Live streaming');
-        setIsLiveMode(true);
-      });
-
-      eventSource.addEventListener('market_tick', (e: MessageEvent) => {
-        try {
-          const parsed = JSON.parse(e.data);
-          const rawTicks = Array.isArray(parsed.ticks) ? parsed.ticks : (Array.isArray(parsed) ? parsed : []);
-          if (rawTicks.length > 0) {
-            setLatestTicks((prev) => {
-              const next = { ...prev };
-              for (const t of rawTicks) {
-                if (t.symbol) {
-                  next[t.symbol] = {
-                    lastPrice: Number(t.lastPrice ?? t.price ?? 0),
-                    change: Number(t.change ?? 0),
-                    changePercent: Number(t.changePercent ?? 0),
-                    bid: Number(t.bid ?? 0),
-                    ask: Number(t.ask ?? 0),
-                    high: Number(t.highPrice ?? t.high ?? 0),
-                    low: Number(t.lowPrice ?? t.low ?? 0),
-                  };
-                }
-              }
-              return next;
-            });
-          }
-        } catch {}
-        setLastTickTimestamp('Live streaming');
-        setIsLiveMode(true);
-      });
-
-      eventSource.addEventListener('client_created', () => {
-        triggerRefresh();
-      });
-
-      eventSource.addEventListener('clients_updated', () => {
-        triggerRefresh();
-      });
-
-      eventSource.addEventListener('client_updated', () => {
-        triggerRefresh();
-      });
-
-      eventSource.addEventListener('trade_executed', () => {
-        triggerRefresh();
-      });
-
-      eventSource.addEventListener('fund_created', () => {
-        triggerRefresh();
-      });
-
-      eventSource.addEventListener('fund_updated', () => {
-        triggerRefresh();
-      });
-
-      eventSource.addEventListener('order_placed', (e) => {
-        try {
-          const order = JSON.parse(e.data);
-          showToast(`Order ${order.id}: ${order.side} ${order.quantity} ${order.instrument} ${order.status}`, order.status === 'Executed' ? 'success' : 'info');
-          triggerRefresh();
-        } catch {}
-      });
-
-      eventSource.addEventListener('order_update', () => {
-        triggerRefresh();
-      });
-
-      eventSource.addEventListener('position_update', () => {
-        triggerRefresh();
-      });
-
-      eventSource.addEventListener('wallet_update', () => {
-        triggerRefresh();
-      });
-
-      eventSource.addEventListener('order_cancelled', (e) => {
-        try {
-          const order = JSON.parse(e.data);
-          showToast(`Order ${order.id} cancelled`, 'info');
-          triggerRefresh();
-        } catch {}
-      });
-
-      eventSource.addEventListener('fund_approved', (e) => {
-        try {
-          const txn = JSON.parse(e.data);
-          showToast(`Funds Approved: ₹${txn.amount.toLocaleString('en-IN')} for ${txn.clientName}`, 'success');
-          triggerRefresh();
-        } catch {}
-      });
-
-      eventSource.addEventListener('fund_rejected', (e) => {
-        try {
-          const txn = JSON.parse(e.data);
-          showToast(`Funds Rejected: ${txn.id} (${txn.clientName})`, 'error');
-          triggerRefresh();
-        } catch {}
-      });
-
-      eventSource.addEventListener('position_squared_off', () => {
-        triggerRefresh();
-      });
-
-      eventSource.addEventListener('emergency_alert', (e: MessageEvent) => {
-        try {
-          const alert = JSON.parse(e.data);
-          showToast(`Emergency Broadcast: ${alert.reason || 'Trading status update'}`, 'error');
-          triggerRefresh();
-        } catch {}
-      });
-
-      eventSource.addEventListener('branding_update', (e: MessageEvent) => {
-        try {
-          const branding = JSON.parse(e.data);
-          if (branding) setTenantBranding((prev) => ({ ...(prev || {}), ...branding }));
-        } catch {}
-      });
-
-      eventSource.addEventListener('branding_updated', (e: MessageEvent) => {
-        try {
-          const branding = JSON.parse(e.data);
-          if (branding) setTenantBranding((prev) => ({ ...(prev || {}), ...branding }));
-        } catch {}
-      });
-
-      eventSource.onerror = () => {
-        setIsRealtimeConnected(false);
-      };
-    } catch {
-      setIsRealtimeConnected(false);
+  const queueTickUpdates = useCallback((rawTicks: any[]) => {
+    if (!rawTicks || rawTicks.length === 0) return;
+    for (const t of rawTicks) {
+      if (t && t.symbol) {
+        pendingTicksRef.current[t.symbol] = {
+          lastPrice: Number(t.lastPrice ?? t.price ?? 0),
+          change: Number(t.change ?? 0),
+          changePercent: Number(t.changePercent ?? 0),
+          bid: Number(t.bid ?? 0),
+          ask: Number(t.ask ?? 0),
+          high: Number(t.highPrice ?? t.high ?? 0),
+          low: Number(t.lowPrice ?? t.low ?? 0),
+        };
+      }
     }
 
+    if (!tickFlushTimerRef.current) {
+      tickFlushTimerRef.current = setTimeout(() => {
+        tickFlushTimerRef.current = null;
+        const batch = pendingTicksRef.current;
+        pendingTicksRef.current = {};
+        if (Object.keys(batch).length > 0) {
+          setLatestTicks((prev) => ({ ...prev, ...batch }));
+          setLastTickTimestamp('Live streaming');
+          setIsLiveMode(true);
+        }
+      }, 80); // 80ms throttle delivers smooth 60fps UI updates without rendering freezes
+    }
+  }, []);
+
+  // Real-time EventSource connection with auto-reconnect & exponential backoff
+  useEffect(() => {
+    let eventSource: EventSource | null = null;
+    let reconnectTimer: any = null;
+    let reconnectAttempts = 0;
+    let isDisposed = false;
+
+    function connectSSE() {
+      if (isDisposed) return;
+      try {
+        const token = getAuthToken();
+        const ssePath = token ? `/api/realtime/stream?token=${encodeURIComponent(token)}` : '/api/realtime/stream';
+        eventSource = new EventSource(resolveApiUrl(ssePath));
+
+        eventSource.addEventListener('connected', () => {
+          reconnectAttempts = 0;
+          setIsRealtimeConnected(true);
+          setIsLiveMode(true);
+        });
+
+        eventSource.addEventListener('ping', () => {
+          setIsRealtimeConnected(true);
+          setIsLiveMode(true);
+        });
+
+        eventSource.addEventListener('tick', (e: MessageEvent) => {
+          try {
+            const t = JSON.parse(e.data);
+            if (t && t.symbol) {
+              queueTickUpdates([t]);
+            }
+          } catch {}
+        });
+
+        eventSource.addEventListener('market_tick', (e: MessageEvent) => {
+          try {
+            const parsed = JSON.parse(e.data);
+            const rawTicks = Array.isArray(parsed.ticks) ? parsed.ticks : (Array.isArray(parsed) ? parsed : []);
+            if (rawTicks.length > 0) {
+              queueTickUpdates(rawTicks);
+            }
+          } catch {}
+        });
+
+        eventSource.addEventListener('client_created', () => {
+          triggerRefresh(false);
+        });
+
+        eventSource.addEventListener('clients_updated', () => {
+          triggerRefresh(false);
+        });
+
+        eventSource.addEventListener('client_updated', () => {
+          triggerRefresh(false);
+        });
+
+        eventSource.addEventListener('trade_executed', () => {
+          triggerRefresh(false);
+        });
+
+        eventSource.addEventListener('fund_created', () => {
+          triggerRefresh(false);
+        });
+
+        eventSource.addEventListener('fund_updated', () => {
+          triggerRefresh(false);
+        });
+
+        eventSource.addEventListener('order_placed', (e) => {
+          try {
+            const order = JSON.parse(e.data);
+            showToast(`Order ${order.id}: ${order.side} ${order.quantity} ${order.instrument} ${order.status}`, order.status === 'Executed' ? 'success' : 'info');
+            triggerRefresh(false);
+          } catch {}
+        });
+
+        eventSource.addEventListener('order_update', () => {
+          triggerRefresh(false);
+        });
+
+        eventSource.addEventListener('position_update', () => {
+          triggerRefresh(false);
+        });
+
+        eventSource.addEventListener('wallet_update', () => {
+          triggerRefresh(false);
+        });
+
+        eventSource.addEventListener('order_cancelled', (e) => {
+          try {
+            const order = JSON.parse(e.data);
+            showToast(`Order ${order.id} cancelled`, 'info');
+            triggerRefresh(false);
+          } catch {}
+        });
+
+        eventSource.addEventListener('fund_approved', (e) => {
+          try {
+            const txn = JSON.parse(e.data);
+            showToast(`Funds Approved: ₹${txn.amount.toLocaleString('en-IN')} for ${txn.clientName}`, 'success');
+            triggerRefresh(false);
+          } catch {}
+        });
+
+        eventSource.addEventListener('fund_rejected', (e) => {
+          try {
+            const txn = JSON.parse(e.data);
+            showToast(`Funds Rejected: ${txn.id} (${txn.clientName})`, 'error');
+            triggerRefresh(false);
+          } catch {}
+        });
+
+        eventSource.addEventListener('position_squared_off', () => {
+          triggerRefresh(false);
+        });
+
+        eventSource.addEventListener('emergency_alert', (e: MessageEvent) => {
+          try {
+            const alert = JSON.parse(e.data);
+            showToast(`Emergency Broadcast: ${alert.reason || 'Trading status update'}`, 'error');
+            triggerRefresh(false);
+          } catch {}
+        });
+
+        eventSource.addEventListener('branding_update', (e: MessageEvent) => {
+          try {
+            const branding = JSON.parse(e.data);
+            if (branding) setTenantBranding((prev) => ({ ...(prev || {}), ...branding }));
+          } catch {}
+        });
+
+        eventSource.addEventListener('branding_updated', (e: MessageEvent) => {
+          try {
+            const branding = JSON.parse(e.data);
+            if (branding) setTenantBranding((prev) => ({ ...(prev || {}), ...branding }));
+          } catch {}
+        });
+
+        eventSource.onerror = () => {
+          setIsRealtimeConnected(false);
+          if (eventSource) {
+            eventSource.close();
+            eventSource = null;
+          }
+          if (!isDisposed) {
+            clearTimeout(reconnectTimer);
+            const delay = Math.min(1000 * Math.pow(1.5, reconnectAttempts) + Math.random() * 400, 10000);
+            reconnectAttempts++;
+            reconnectTimer = setTimeout(connectSSE, delay);
+          }
+        };
+      } catch {
+        setIsRealtimeConnected(false);
+        if (!isDisposed) {
+          clearTimeout(reconnectTimer);
+          const delay = Math.min(1000 * Math.pow(1.5, reconnectAttempts) + Math.random() * 400, 10000);
+          reconnectAttempts++;
+          reconnectTimer = setTimeout(connectSSE, delay);
+        }
+      }
+    }
+
+    connectSSE();
+
     return () => {
+      isDisposed = true;
+      clearTimeout(reconnectTimer);
+      clearTimeout(tickFlushTimerRef.current);
       eventSource?.close();
     };
-  }, [showToast, triggerRefresh, currentUser]);
+  }, [showToast, triggerRefresh, currentUser, queueTickUpdates]);
 
-  // Continuous real-time authoritative polling: refreshes data every 5s
-  // so any new user, deposit, position, or order on Trading Platform shows up immediately
+  // Adaptive real-time polling:
+  // When live push stream is active, relax polling to 30s to prevent query congestion.
+  // When disconnected or recovering, fallback to 10s polling.
   useEffect(() => {
+    const pollInterval = isRealtimeConnected ? 30000 : 10000;
     const poll = setInterval(() => {
-      triggerRefresh();
-    }, 5000);
+      triggerRefresh(false);
+    }, pollInterval);
     return () => clearInterval(poll);
-  }, [triggerRefresh]);
+  }, [isRealtimeConnected, triggerRefresh]);
 
-  // Modal actions
-  const openOrderModal = (instrument?: MarketInstrument | null, side: 'BUY' | 'SELL' = 'BUY', existingOrder?: Order | null) => {
+  // Memoized modal actions
+  const openOrderModal = useCallback((instrument?: MarketInstrument | null, side: 'BUY' | 'SELL' = 'BUY', existingOrder?: Order | null) => {
     setOrderModalState({
       isOpen: true,
       instrument: instrument || null,
       defaultSide: side,
       existingOrder: existingOrder || null,
     });
-  };
+  }, []);
 
-  const closeOrderModal = () => {
+  const closeOrderModal = useCallback(() => {
     setOrderModalState({ isOpen: false });
-  };
+  }, []);
 
-  const openClientDetail = (client: Client) => {
+  const openClientDetail = useCallback((client: Client) => {
     setSelectedClientForDetail(client);
-  };
+  }, []);
 
-  const closeClientDetail = () => {
+  const closeClientDetail = useCallback(() => {
     setSelectedClientForDetail(null);
-  };
+  }, []);
 
-  const openFundActionModal = (transaction: FundTransaction, actionType: 'approve' | 'reject') => {
+  const openFundActionModal = useCallback((transaction: FundTransaction, actionType: 'approve' | 'reject') => {
     setFundActionModal({ isOpen: true, transaction, actionType });
-  };
+  }, []);
 
-  const closeFundActionModal = () => {
+  const closeFundActionModal = useCallback(() => {
     setFundActionModal({ isOpen: false, transaction: null, actionType: 'approve' });
-  };
+  }, []);
 
-  const openSquareOffModal = (position: Position) => {
+  const openSquareOffModal = useCallback((position: Position) => {
     setSquareOffModal({ isOpen: true, position });
-  };
+  }, []);
 
-  const closeSquareOffModal = () => {
+  const closeSquareOffModal = useCallback(() => {
     setSquareOffModal({ isOpen: false, position: null });
-  };
+  }, []);
 
-  const openReportPreview = (report: ReportItem, period?: string) => {
+  const openReportPreview = useCallback((report: ReportItem, period?: string) => {
     setReportPreviewModal({ isOpen: true, report, period });
-  };
+  }, []);
 
-  const closeReportPreview = () => {
+  const closeReportPreview = useCallback(() => {
     setReportPreviewModal({ isOpen: false, report: null });
-  };
+  }, []);
+
+  const contextValue = useMemo(() => ({
+    activeTab,
+    setActiveTab: handleSetActiveTab,
+    currentUser,
+    isAuthenticated,
+    login,
+    register,
+    logout,
+    switchRole,
+    tenantBranding,
+    updateBranding,
+    settings,
+    updateUserSettings,
+    ordersFilter,
+    setOrdersFilter,
+    fundsFilter,
+    setFundsFilter,
+    positionsFilter,
+    setPositionsFilter,
+    isLiveMode,
+    setIsLiveMode,
+    isCompactMode,
+    setIsCompactMode,
+    refreshTrigger,
+    triggerRefresh,
+    isRealtimeConnected,
+    lastTickTimestamp,
+    latestTicks,
+    isSearchOpen,
+    setIsSearchOpen,
+    globalSearchQuery,
+    setGlobalSearchQuery,
+    isNotificationsOpen,
+    setIsNotificationsOpen,
+    unreadNotificationsCount,
+    isMobileMenuOpen,
+    setIsMobileMenuOpen,
+    orderModalState,
+    openOrderModal,
+    closeOrderModal,
+    selectedClientForDetail,
+    openClientDetail,
+    closeClientDetail,
+    isAddClientOpen,
+    setIsAddClientOpen,
+    fundActionModal,
+    openFundActionModal,
+    closeFundActionModal,
+    squareOffModal,
+    openSquareOffModal,
+    closeSquareOffModal,
+    reportPreviewModal,
+    openReportPreview,
+    closeReportPreview,
+    isSupportModalOpen,
+    setIsSupportModalOpen,
+    toasts,
+    showToast,
+    removeToast,
+  }), [
+    activeTab,
+    handleSetActiveTab,
+    currentUser,
+    isAuthenticated,
+    tenantBranding,
+    settings,
+    ordersFilter,
+    fundsFilter,
+    positionsFilter,
+    isLiveMode,
+    isCompactMode,
+    refreshTrigger,
+    triggerRefresh,
+    isRealtimeConnected,
+    lastTickTimestamp,
+    latestTicks,
+    isSearchOpen,
+    globalSearchQuery,
+    isNotificationsOpen,
+    unreadNotificationsCount,
+    isMobileMenuOpen,
+    orderModalState,
+    openOrderModal,
+    closeOrderModal,
+    selectedClientForDetail,
+    openClientDetail,
+    closeClientDetail,
+    isAddClientOpen,
+    fundActionModal,
+    openFundActionModal,
+    closeFundActionModal,
+    squareOffModal,
+    openSquareOffModal,
+    closeSquareOffModal,
+    reportPreviewModal,
+    openReportPreview,
+    closeReportPreview,
+    isSupportModalOpen,
+    toasts,
+    showToast,
+    removeToast,
+    login,
+    register,
+    logout,
+    switchRole,
+    updateBranding,
+    updateUserSettings,
+  ]);
 
   return (
-    <AppContext.Provider
-      value={{
-        activeTab,
-        setActiveTab: handleSetActiveTab,
-        currentUser,
-        isAuthenticated,
-        login,
-        register,
-        logout,
-        switchRole,
-        tenantBranding,
-        updateBranding,
-        settings,
-        updateUserSettings,
-        ordersFilter,
-        setOrdersFilter,
-        fundsFilter,
-        setFundsFilter,
-        positionsFilter,
-        setPositionsFilter,
-        isLiveMode,
-        setIsLiveMode,
-        isCompactMode,
-        setIsCompactMode,
-        refreshTrigger,
-        triggerRefresh,
-        isRealtimeConnected,
-        lastTickTimestamp,
-        latestTicks,
-        isSearchOpen,
-        setIsSearchOpen,
-        globalSearchQuery,
-        setGlobalSearchQuery,
-        isNotificationsOpen,
-        setIsNotificationsOpen,
-        unreadNotificationsCount,
-        isMobileMenuOpen,
-        setIsMobileMenuOpen,
-        orderModalState,
-        openOrderModal,
-        closeOrderModal,
-        selectedClientForDetail,
-        openClientDetail,
-        closeClientDetail,
-        isAddClientOpen,
-        setIsAddClientOpen,
-        fundActionModal,
-        openFundActionModal,
-        closeFundActionModal,
-        squareOffModal,
-        openSquareOffModal,
-        closeSquareOffModal,
-        reportPreviewModal,
-        openReportPreview,
-        closeReportPreview,
-        isSupportModalOpen,
-        setIsSupportModalOpen,
-        toasts,
-        showToast,
-        removeToast,
-      }}
-    >
+    <AppContext.Provider value={contextValue}>
       {children}
     </AppContext.Provider>
   );

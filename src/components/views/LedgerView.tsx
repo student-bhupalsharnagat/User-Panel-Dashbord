@@ -3,7 +3,7 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useMemo, useRef } from 'react';
 import {
   Search,
   Download,
@@ -31,33 +31,53 @@ export const LedgerView: React.FC = () => {
   const [pageSize, setPageSize] = useState(10);
   const [page, setPage] = useState(1);
   const [loading, setLoading] = useState(true);
+  const hasLoadedRef = useRef(false);
+  const activeReqIdRef = useRef(0);
 
   useEffect(() => {
     setPage(1);
   }, [searchQuery, timeRange]);
 
   useEffect(() => {
-    setLoading(true);
+    const reqId = ++activeReqIdRef.current;
+    if (!hasLoadedRef.current) {
+      setLoading(true);
+    }
     api.getLedger(timeRange)
       .then((data) => {
-        setLedgerEntries(data.entries);
-        setSummary(data.summary);
+        if (reqId === activeReqIdRef.current) {
+          setLedgerEntries(data.entries);
+          setSummary(data.summary);
+          hasLoadedRef.current = true;
+        }
       })
-      .catch((err) => console.error('Failed to load ledger:', err))
-      .finally(() => setLoading(false));
+      .catch((err) => {
+        if (reqId === activeReqIdRef.current) {
+          console.error('Failed to load ledger:', err);
+        }
+      })
+      .finally(() => {
+        if (reqId === activeReqIdRef.current) {
+          setLoading(false);
+        }
+      });
   }, [timeRange, refreshTrigger]);
 
-  const filteredEntries = ledgerEntries.filter((e) => {
+  const filteredEntries = useMemo(() => {
     const q = searchQuery.toLowerCase();
-    const matchesSearch = (
-      e.id.toLowerCase().includes(q) ||
-      e.referenceId.toLowerCase().includes(q) ||
-      e.description.toLowerCase().includes(q)
-    );
-    return matchesSearch && matchesDateFilter(e.date, timeRange);
-  });
+    return ledgerEntries.filter((e) => {
+      const matchesSearch = (
+        e.id.toLowerCase().includes(q) ||
+        e.referenceId.toLowerCase().includes(q) ||
+        e.description.toLowerCase().includes(q)
+      );
+      return matchesSearch && matchesDateFilter(e.date, timeRange);
+    });
+  }, [ledgerEntries, searchQuery, timeRange]);
 
-  const paginatedEntries = filteredEntries.slice((page - 1) * pageSize, page * pageSize);
+  const paginatedEntries = useMemo(() => {
+    return filteredEntries.slice((page - 1) * pageSize, page * pageSize);
+  }, [filteredEntries, page, pageSize]);
 
   const cellPad = isCompactMode ? 'px-3 py-1.5' : 'px-4 py-3';
   const headPad = isCompactMode ? 'px-3 py-2' : 'px-4 py-3';

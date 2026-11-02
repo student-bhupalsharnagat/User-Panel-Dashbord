@@ -3,7 +3,7 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useMemo, useRef } from 'react';
 import {
   Search,
   Filter,
@@ -39,17 +39,41 @@ export const MarketWatchView: React.FC = () => {
   const [pageSize, setPageSize] = useState<number>(10);
   const [page, setPage] = useState<number>(1);
   const [loading, setLoading] = useState<boolean>(true);
+  const hasLoadedRef = useRef<boolean>(false);
+  const latestTicksRef = useRef(latestTicks);
+
+  useEffect(() => {
+    latestTicksRef.current = latestTicks;
+  }, [latestTicks]);
 
   useEffect(() => {
     setPage(1);
   }, [searchQuery, selectedType, timeRange]);
 
-  // Load instruments
+  // Load instruments with snapshot delta merge to prevent stale overwrites
   useEffect(() => {
-    setLoading(true);
+    if (!hasLoadedRef.current) {
+      setLoading(true);
+    }
     api.getMarketWatch()
       .then((data) => {
-        setInstruments(data);
+        const ticks = latestTicksRef.current || {};
+        const merged = data.map((inst) => {
+          const update = ticks[inst.symbol];
+          if (!update) return inst;
+          return {
+            ...inst,
+            lastPrice: update.lastPrice ?? inst.lastPrice,
+            change: update.change !== undefined ? update.change : inst.change,
+            changePercent: update.changePercent !== undefined ? update.changePercent : inst.changePercent,
+            bid: update.bid ?? inst.bid,
+            ask: update.ask ?? inst.ask,
+            high: update.high ?? inst.high,
+            low: update.low ?? inst.low,
+          };
+        });
+        setInstruments(merged);
+        hasLoadedRef.current = true;
       })
       .catch((err) => {
         console.error('Failed to load market instruments:', err);
@@ -57,16 +81,18 @@ export const MarketWatchView: React.FC = () => {
       .finally(() => setLoading(false));
   }, [refreshTrigger]);
 
-  // Merge live streaming ticks without requiring a page refresh
+  // Merge live streaming ticks selectively only when prices actually mutate
   useEffect(() => {
     if (!latestTicks || Object.keys(latestTicks).length === 0) return;
-    setInstruments((prev) =>
-      prev.map((inst) => {
+    setInstruments((prev) => {
+      let hasChange = false;
+      const next = prev.map((inst) => {
         const update = latestTicks[inst.symbol];
-        if (!update) return inst;
+        if (!update || update.lastPrice === undefined || update.lastPrice === inst.lastPrice) return inst;
+        hasChange = true;
         return {
           ...inst,
-          lastPrice: update.lastPrice ?? inst.lastPrice,
+          lastPrice: update.lastPrice,
           change: update.change !== undefined ? update.change : inst.change,
           changePercent: update.changePercent !== undefined ? update.changePercent : inst.changePercent,
           bid: update.bid ?? inst.bid,
@@ -74,19 +100,25 @@ export const MarketWatchView: React.FC = () => {
           high: update.high ?? inst.high,
           low: update.low ?? inst.low,
         };
-      })
-    );
+      });
+      return hasChange ? next : prev;
+    });
   }, [latestTicks]);
 
-  const filteredInstruments = instruments.filter((inst) => {
-    const matchesSearch =
-      inst.symbol.toLowerCase().includes(searchQuery.toLowerCase()) ||
-      inst.name.toLowerCase().includes(searchQuery.toLowerCase());
-    const matchesType = selectedType === 'All' || inst.type === selectedType;
-    return matchesSearch && matchesType;
-  });
+  const filteredInstruments = useMemo(() => {
+    const q = searchQuery.toLowerCase();
+    return instruments.filter((inst) => {
+      const matchesSearch =
+        inst.symbol.toLowerCase().includes(q) ||
+        inst.name.toLowerCase().includes(q);
+      const matchesType = selectedType === 'All' || inst.type === selectedType;
+      return matchesSearch && matchesType;
+    });
+  }, [instruments, searchQuery, selectedType]);
 
-  const paginatedInstruments = filteredInstruments.slice((page - 1) * pageSize, page * pageSize);
+  const paginatedInstruments = useMemo(() => {
+    return filteredInstruments.slice((page - 1) * pageSize, page * pageSize);
+  }, [filteredInstruments, page, pageSize]);
   const cellPad = isCompactMode ? 'px-3 py-1.5' : 'px-4 py-3';
   const headPad = isCompactMode ? 'px-3 py-2' : 'px-4 py-3';
 
