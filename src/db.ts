@@ -963,7 +963,11 @@ export const dbRepo = {
           id, client_id, client_name, instrument, exchange, side, type, quantity,
           order_price, executed_qty, avg_price, status, created, broker_id, rejection_reason, created_at
         ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, NOW())
-        ON CONFLICT (id) DO NOTHING;
+        ON CONFLICT (id) DO UPDATE SET
+          status = EXCLUDED.status,
+          executed_qty = EXCLUDED.executed_qty,
+          avg_price = EXCLUDED.avg_price,
+          rejection_reason = EXCLUDED.rejection_reason;
       `, [
         order.id, order.clientId, order.clientName, order.instrument, order.exchange,
         order.side, order.type, order.quantity, String(order.orderPrice),
@@ -973,6 +977,10 @@ export const dbRepo = {
     } catch (e: any) {
       console.warn('[Database dbRepo.insertOrder] notice:', e.message);
     }
+  },
+
+  async upsertOrder(order: Order): Promise<void> {
+    return this.insertOrder(order);
   },
 
   async updateOrderStatus(id: string, status: string, rejectionReason?: string): Promise<void> {
@@ -1118,17 +1126,19 @@ export const dbRepo = {
       await pgPool.query(`
         INSERT INTO user_panel_fund_transactions (
           id, client_id, client_name, type, amount, method, request_date,
-          reference_id, status, verification, approved_by, rejection_reason, broker_id, created_at
-        ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, NOW())
+          reference_id, status, verification, proof_document, approved_by, rejection_reason, broker_id, created_at
+        ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, NOW())
         ON CONFLICT (id) DO UPDATE SET
           status = EXCLUDED.status,
           verification = EXCLUDED.verification,
+          reference_id = COALESCE(EXCLUDED.reference_id, user_panel_fund_transactions.reference_id),
+          proof_document = COALESCE(EXCLUDED.proof_document, user_panel_fund_transactions.proof_document),
           approved_by = EXCLUDED.approved_by,
           rejection_reason = EXCLUDED.rejection_reason;
       `, [
         txn.id, txn.clientId, txn.clientName, txn.type, txn.amount, txn.method,
         txn.requestDate, txn.referenceId, txn.status, txn.verification,
-        txn.approvedBy || null, txn.rejectionReason || null, txn.brokerId || 'BRK-ROHAN-01'
+        txn.proofDocument || null, txn.approvedBy || null, txn.rejectionReason || null, txn.brokerId || 'BRK-ROHAN-01'
       ]);
     } catch (e: any) {
       console.warn('[Database dbRepo.insertFundTransaction] notice:', e.message);

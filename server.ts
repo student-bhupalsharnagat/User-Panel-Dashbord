@@ -1537,7 +1537,7 @@ export async function syncAuthoritativeData(requestedTenantId?: string, force = 
       const incomingFunds: FundTransaction[] = fundsList.map((rf: any): FundTransaction => {
         const id = String(rf.id || rf.transactionId || rf.transaction_id || `TXN-${Date.now()}`);
         const tType = (String(rf.type || rf.transaction_type || rf.category || '').toUpperCase().includes('WITHDRAW')) ? 'Withdrawal' : 'Deposit';
-        const methodStr = String(rf.method || rf.paymentMethod || '').toLowerCase();
+        const methodStr = String(rf.method || rf.paymentMethod || rf.payment_method || '').toLowerCase();
         const method: 'Bank transfer' | 'UPI' | 'Net banking' = methodStr.includes('upi') ? 'UPI' : (methodStr.includes('net') ? 'Net banking' : 'Bank transfer');
         const statusRaw = String(rf.status || '').toUpperCase();
         const mappedStatus: 'Pending' | 'Approved' | 'Completed' | 'Rejected' = statusRaw === 'PENDING' ? 'Pending' : (statusRaw === 'REJECTED' ? 'Rejected' : (statusRaw === 'APPROVED' ? 'Approved' : 'Completed'));
@@ -1556,10 +1556,10 @@ export async function syncAuthoritativeData(requestedTenantId?: string, force = 
           amount: Math.abs(parseFloat(rf.amount || '0')),
           method,
           requestDate: rf.createdAt || rf.created_at ? new Date(rf.createdAt || rf.created_at).toISOString().split('T')[0] : '2026-03-29',
-          referenceId: rf.referenceId || rf.reference || rf.refNo || id,
+          referenceId: rf.utr_number || rf.utr || rf.referenceId || rf.reference || rf.refNo || id,
           status: mappedStatus,
           verification: 'Verified',
-          proofDocument: undefined,
+          proofDocument: rf.proof_image_url || rf.proof_image || rf.proofUrl || rf.proofDocument || undefined,
           approvedBy: rf.approvedBy || rf.approved_by || 'Trading Platform S2S',
           rejectionReason: rf.rejectionReason || rf.failureReason || undefined,
           brokerId: rf.brokerId || rf.broker_id || 'BRK-ROHAN-01',
@@ -1858,24 +1858,53 @@ export function filterByHierarchy<T extends { clientId?: string; id?: string; us
   user?: TokenPayload
 ): T[] {
   if (!user || !user.role) return items;
-  // super_admin, master, broker_admin, operations see ALL live records from Trading Platform
-  if (['super_admin', 'master', 'broker_admin', 'operations'].includes(user.role)) {
+
+  // super_admin sees records within their tenant scope (or all if platform super admin)
+  if (user.role === 'super_admin') {
+    if (user.tenantId && user.tenantId !== 'all' && user.tenantId !== 'vertex-default') {
+      return items.filter(item => !item.tenantId || item.tenantId === user.tenantId);
+    }
     return items;
   }
-  // sub_broker sees their assigned records PLUS unassigned/default records
+
+  // master sees records strictly scoped to their masterId and tenantId
+  if (user.role === 'master') {
+    const mId = (user as any).masterId || user.sub;
+    return items.filter(item => {
+      const matchTenant = !user.tenantId || !item.tenantId || item.tenantId === user.tenantId;
+      const matchMaster = !mId || !item.masterId || item.masterId === mId || item.brokerId === user.brokerId;
+      return matchTenant && matchMaster;
+    });
+  }
+
+  // broker_admin / operations sees records strictly scoped to their brokerId and tenantId
+  if (user.role === 'broker_admin' || user.role === 'operations') {
+    return items.filter(item => {
+      const matchTenant = !user.tenantId || !item.tenantId || item.tenantId === user.tenantId;
+      const matchBroker = user.brokerId ? (item.brokerId === user.brokerId || (item as any).broker_id === user.brokerId) : true;
+      return matchTenant && matchBroker;
+    });
+  }
+
+  // sub_broker sees only records belonging to their assigned subBrokerId
   if (user.role === 'sub_broker') {
+    const sId = (user as any).subBrokerId || user.sub;
     return items.filter(item => {
-      const sId = item.subBrokerId;
-      return !sId || sId === 'SUB-BRK-001' || sId === user.sub || sId === user.brokerId || item.brokerId === 'BRK-ROHAN-01' || item.tenantId === 'TNT-001';
+      const matchTenant = !user.tenantId || !item.tenantId || item.tenantId === user.tenantId;
+      const matchSub = sId ? (item.subBrokerId === sId || (item as any).sub_broker_id === sId) : true;
+      return matchTenant && matchSub;
     });
   }
+
   // trader_client sees only their own records
-  if (user.role === 'trader_client') {
+  if (user.role === 'trader_client' || (user.role as any) === 'client') {
+    const cId = (user as any).clientId || user.sub;
     return items.filter(item => {
-      const cId = item.clientId || item.id || item.userId;
-      return cId === user.sub || (clients[0] && cId === clients[0].id);
+      const itemId = item.clientId || item.id || item.userId || (item as any).client_id;
+      return itemId === cId;
     });
   }
+
   return items;
 }
 
@@ -2631,6 +2660,36 @@ app.get('/api/market-watch', authMiddleware, (_req: Request, res: Response) => {
   });
 });
 
+// Brokers API with Strict Multi-Tenant Hierarchy Scoping
+app.get(['/api/brokers', '/api/admin/brokers'], authMiddleware, (req: AuthenticatedRequest, res: Response) => {
+  const user = req.user!;
+  const allBrokers = userAccounts.filter(acc => acc.role === 'broker_admin' || acc.role === 'master');
+
+  let filtered: any[] = [];
+  if (user.role === 'super_admin') {
+    filtered = allBrokers.filter(b => !user.tenantId || b.tenantId === user.tenantId);
+  } else if (user.role === 'master') {
+    const mId = (user as any).masterId || user.sub;
+    filtered = allBrokers.filter(b => (b.masterId === mId || b.brokerId === user.brokerId) && (!user.tenantId || b.tenantId === user.tenantId));
+  } else if (user.role === 'broker_admin') {
+    filtered = allBrokers.filter(b => b.brokerId === user.brokerId && (!user.tenantId || b.tenantId === user.tenantId));
+  } else {
+    // sub_broker and trader_client cannot view higher-tier brokers
+    filtered = [];
+  }
+
+  res.json({ success: true, brokers: filtered, total: filtered.length });
+});
+
+// Trades API with Strict Multi-Tenant Hierarchy Scoping
+app.get(['/api/trades', '/api/admin/trades'], authMiddleware, (req: AuthenticatedRequest, res: Response) => {
+  const user = req.user!;
+  const executedOrders = orders.filter(o => !isDummyRecord(o) && (o.status === 'Executed' || (o.executedQty && o.executedQty > 0)));
+  const scopedTrades = filterByHierarchy(executedOrders, user);
+
+  res.json({ success: true, trades: scopedTrades, total: scopedTrades.length });
+});
+
 // Clients API with Hierarchy & Authoritative Real-Time Data
 app.get(['/api/clients', '/api/admin/clients'], authMiddleware, async (req: AuthenticatedRequest, res: Response) => {
   const user = req.user!;
@@ -3069,13 +3128,14 @@ app.post('/api/orders', authMiddleware, async (req: AuthenticatedRequest, res: R
 
   // Attempt upstream proxy to authoritative Trading Platform engine
   let upstreamOrderId: string | undefined;
+  const normalizedProduct = (product === 'CNC' || product === 'HOLDING' || product === 'DELIVERY') ? 'CNC' : 'INTRADAY';
   try {
     const upstreamResult = await tradingPlatformClient.placeOrder({
       symbol: targetInst.symbol,
       type: side as 'BUY' | 'SELL',
       lots: Math.max(1, Math.round(qty / (targetInst.lotSize || 1))),
       orderType: type as string,
-      product: product || 'INTRADAY',
+      product: normalizedProduct,
       price,
     });
 
@@ -3103,6 +3163,7 @@ app.post('/api/orders', authMiddleware, async (req: AuthenticatedRequest, res: R
     exchange: targetInst.exchange,
     side: side as 'BUY' | 'SELL',
     type: type as 'LIMIT' | 'MARKET' | 'SL-M',
+    product: normalizedProduct,
     quantity: qty,
     orderPrice: type === 'MARKET' ? 'Market' : price,
     executedQty: isExecuted ? qty : 0,
@@ -3425,6 +3486,19 @@ app.post('/api/positions/:id/square-off', authMiddleware, (req: AuthenticatedReq
   pos.marginUsed = 0;
   persistentLocalPositions.set(pos.id, pos);
   persistentLocalPositions.set(pos.clientId + '_' + pos.instrument, pos);
+
+  // Auto-cancel associated pending OCO/GTT trigger orders for this instrument
+  for (const ord of orders) {
+    if (ord.clientId === pos.clientId && ord.instrument === pos.instrument && (ord.status === 'Open' || ord.status === 'Pending')) {
+      ord.status = 'Cancelled';
+      ord.rejectionReason = 'Auto-cancelled: Position squared off (OCO/GTT cleanup)';
+      broadcastScopedEvent('order_cancelled', { id: ord.id, status: 'Cancelled' }, { brokerId: ord.brokerId, clientId: ord.clientId });
+      if (isUsingPostgres()) {
+        dbRepo.upsertOrder(ord).catch(console.warn);
+      }
+    }
+  }
+
   savePersistence();
 
   tradingPlatformClient.clearCache();
@@ -3460,12 +3534,28 @@ app.get('/api/funds', authMiddleware, async (req: AuthenticatedRequest, res: Res
   try {
     const liveFundsRes = await tradingPlatformClient.fetchAllLiveFunds(user.tenantId);
     if (liveFundsRes.success && Array.isArray(liveFundsRes.funds) && liveFundsRes.funds.length > 0) {
-      const existingIds = new Set(fundTransactions.map(f => f.id));
       for (const rf of liveFundsRes.funds) {
-        const id = String(rf.id || rf.transactionId || `TXN-${Date.now()}`);
-        if (!existingIds.has(id)) {
-          existingIds.add(id);
-          const tType = (rf.type || rf.transaction_type || '').toUpperCase().includes('WITHDRAW') ? 'Withdrawal' : 'Deposit';
+        const id = String(rf.id || rf.transactionId || rf.transaction_id || `TXN-${Date.now()}`);
+        const tType = (String(rf.type || rf.transaction_type || rf.category || '').toUpperCase().includes('WITHDRAW')) ? 'Withdrawal' : 'Deposit';
+        const methodStr = String(rf.method || rf.paymentMethod || rf.payment_method || '').toLowerCase();
+        const method: 'Bank transfer' | 'UPI' | 'Net banking' = methodStr.includes('upi') ? 'UPI' : (methodStr.includes('net') ? 'Net banking' : 'Bank transfer');
+        const statusRaw = String(rf.status || '').toUpperCase();
+        const mappedStatus: 'Pending' | 'Approved' | 'Completed' | 'Rejected' =
+          statusRaw === 'PENDING' ? 'Pending' : (statusRaw === 'REJECTED' ? 'Rejected' : (statusRaw === 'APPROVED' ? 'Approved' : 'Completed'));
+        const refId = rf.utr_number || rf.utr || rf.referenceId || rf.reference || rf.refNo || id;
+        const proofDoc = rf.proof_image_url || rf.proof_image || rf.proofUrl || rf.proofDocument || undefined;
+
+        const existingTxn = fundTransactions.find(f => f.id === id);
+        if (existingTxn) {
+          existingTxn.status = mappedStatus;
+          if (refId) existingTxn.referenceId = refId;
+          if (proofDoc) existingTxn.proofDocument = proofDoc;
+          if (rf.approvedBy || rf.approved_by) existingTxn.approvedBy = rf.approvedBy || rf.approved_by;
+          if (rf.rejectionReason || rf.failureReason) existingTxn.rejectionReason = rf.rejectionReason || rf.failureReason;
+          if (isUsingPostgres()) {
+            dbRepo.insertFundTransaction(existingTxn).catch(() => {});
+          }
+        } else {
           const { clientId, clientName } = resolveClientForRecord(
             rf.clientId || rf.client_id || rf.user_id || rf.userId || rf.clientCode,
             rf.clientName || rf.client_name,
@@ -3477,22 +3567,25 @@ app.get('/api/funds', authMiddleware, async (req: AuthenticatedRequest, res: Res
             clientId,
             clientName,
             type: tType as 'Deposit' | 'Withdrawal',
-            amount: parseFloat(rf.amount || '0'),
-            method: (rf.method || 'Bank transfer') as 'Bank transfer' | 'UPI' | 'Net banking',
-            requestDate: rf.createdAt ? new Date(rf.createdAt).toISOString().split('T')[0] : '2026-03-29',
-            referenceId: rf.reference || rf.refNo || id,
-            status: (rf.status || 'Completed').toUpperCase() === 'PENDING' ? 'Pending' : 'Completed',
+            amount: Math.abs(parseFloat(rf.amount || '0')),
+            method,
+            requestDate: rf.createdAt || rf.created_at ? new Date(rf.createdAt || rf.created_at).toISOString().split('T')[0] : '2026-03-29',
+            referenceId: refId,
+            status: mappedStatus,
             verification: 'Verified',
-            proofDocument: undefined,
-            approvedBy: rf.approvedBy || 'Trading Platform S2S',
-            rejectionReason: undefined,
-            brokerId: rf.brokerId || 'BRK-ROHAN-01',
+            proofDocument: proofDoc,
+            approvedBy: rf.approvedBy || rf.approved_by || 'Trading Platform S2S',
+            rejectionReason: rf.rejectionReason || rf.failureReason || undefined,
+            brokerId: rf.brokerId || rf.broker_id || 'BRK-ROHAN-01',
             subBrokerId: rf.subBrokerId || 'SUB-BRK-001',
             masterId: rf.masterId || 'MST-ALPHA-01',
-            tenantId: rf.tenantId || 'TNT-001',
+            tenantId: rf.tenantId || rf.tenant_id || 'TNT-001',
           };
           if (!isDummyRecord(fundObj)) {
             fundTransactions.unshift(fundObj);
+            if (isUsingPostgres()) {
+              dbRepo.insertFundTransaction(fundObj).catch(() => {});
+            }
           }
         }
       }
@@ -3966,7 +4059,7 @@ app.all(['/api/settings', '/api/user/settings'], authMiddleware, (req: Authentic
   if (req.method !== 'PATCH' && req.method !== 'PUT') {
     return next();
   }
-  if (!['broker_admin', 'super_admin', 'operations'].includes(req.user?.role || '')) {
+  if (!['broker_admin', 'super_admin', 'operations', 'master', 'sub_broker', 'trader_client', 'client'].includes(req.user?.role || '')) {
     return res.status(403).json({ success: false, message: 'Forbidden' });
   }
 
