@@ -18,6 +18,7 @@ import {
   TenantBranding,
 } from '../types';
 import { api, getAuthToken, setAuthToken, resolveApiUrl } from '../services/api';
+import { parseCleanNumber } from '../utils/cleanNumber';
 
 export interface ToastItem {
   id: string;
@@ -435,15 +436,26 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
     if (!rawTicks || rawTicks.length === 0) return;
     for (const t of rawTicks) {
       if (t && t.symbol) {
-        pendingTicksRef.current[t.symbol] = {
-          lastPrice: Number(t.lastPrice ?? t.price ?? 0),
-          change: Number(t.change ?? 0),
-          changePercent: Number(t.changePercent ?? 0),
-          bid: Number(t.bid ?? 0),
-          ask: Number(t.ask ?? 0),
-          high: Number(t.highPrice ?? t.high ?? 0),
-          low: Number(t.lowPrice ?? t.low ?? 0),
+        const lastPrice = parseCleanNumber(t.lastPrice ?? t.price ?? t.ltp ?? 0);
+        const change = parseCleanNumber(t.change ?? 0);
+        const changePercent = parseCleanNumber(t.changePercent ?? 0);
+        const bid = parseCleanNumber(t.bid ?? (lastPrice > 0 ? +(lastPrice - 0.5).toFixed(2) : 0));
+        const ask = parseCleanNumber(t.ask ?? (lastPrice > 0 ? +(lastPrice + 0.5).toFixed(2) : 0));
+        const high = parseCleanNumber(t.highPrice ?? t.high ?? lastPrice);
+        const low = parseCleanNumber(t.lowPrice ?? t.low ?? lastPrice);
+        const tickObj = {
+          lastPrice,
+          change,
+          changePercent,
+          bid,
+          ask,
+          high,
+          low,
         };
+        const sym = String(t.symbol);
+        pendingTicksRef.current[sym] = tickObj;
+        pendingTicksRef.current[sym.toUpperCase()] = tickObj;
+        pendingTicksRef.current[sym.toUpperCase().replace(/[\s_\-/]/g, '')] = tickObj;
       }
     }
 
@@ -545,6 +557,24 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
           triggerRefresh(false);
         });
 
+        eventSource.addEventListener('position.updated', () => {
+          triggerRefresh(false);
+        });
+
+        eventSource.addEventListener('portfolio.mtm', () => {
+          triggerRefresh(false);
+        });
+
+        eventSource.addEventListener('market.ticks', (e: MessageEvent) => {
+          try {
+            const parsed = JSON.parse(e.data);
+            const rawTicks = Array.isArray(parsed.ticks) ? parsed.ticks : (Array.isArray(parsed) ? parsed : []);
+            if (rawTicks.length > 0) {
+              queueTickUpdates(rawTicks);
+            }
+          } catch {}
+        });
+
         eventSource.addEventListener('wallet_update', () => {
           triggerRefresh(false);
         });
@@ -625,11 +655,33 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
 
     connectSSE();
 
+    let ws: WebSocket | null = null;
+    try {
+      const wsProtocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
+      const wsUrl = `${wsProtocol}//${window.location.hostname}:4000/ws`;
+      ws = new WebSocket(wsUrl);
+      ws.onmessage = (event) => {
+        try {
+          const msg = JSON.parse(event.data);
+          if (msg.type === 'tick' || msg.eventType === 'market.ticks' || msg.type === 'market.ticks') {
+            const ticks = Array.isArray(msg.data) ? msg.data : (msg.data ? [msg.data] : (Array.isArray(msg.payload) ? msg.payload : [msg.payload || msg]));
+            queueTickUpdates(ticks);
+          } else if (msg.type === 'position.updated' || msg.eventType === 'position.updated' || msg.type === 'portfolio.mtm') {
+            triggerRefresh(false);
+          }
+        } catch {}
+      };
+      ws.onerror = () => {};
+    } catch {}
+
     return () => {
       isDisposed = true;
       clearTimeout(reconnectTimer);
       clearTimeout(tickFlushTimerRef.current);
       eventSource?.close();
+      if (ws) {
+        try { ws.close(); } catch {}
+      }
     };
   }, [showToast, triggerRefresh, currentUser, queueTickUpdates]);
 

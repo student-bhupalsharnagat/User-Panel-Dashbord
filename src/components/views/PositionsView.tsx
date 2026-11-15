@@ -18,6 +18,7 @@ import {
 import { useApp } from '../../context/AppContext';
 import { api } from '../../services/api';
 import { Position } from '../../types';
+import { parseCleanNumber, liveLtpLookup } from '../../utils/cleanNumber';
 
 export const PositionsView: React.FC = () => {
   const {
@@ -63,18 +64,62 @@ export const PositionsView: React.FC = () => {
     }
     api.getPositions()
       .then((data) => {
-        const activeOnly = (data.positions || []).filter((p: Position) => p.netQty !== 0);
+        const activeOnly = (data.positions || []).filter((p: any) => parseCleanNumber(p.netQty) !== 0);
         const ticks = latestTicksRef.current || {};
-        const merged = activeOnly.map((pos: Position) => {
-          const update = ticks[pos.instrument];
-          if (!update || !update.lastPrice) return pos;
-          const currentPrice = update.lastPrice;
-          const unrealisedPnL = Math.round((currentPrice - pos.avgPrice) * pos.netQty);
+        const merged = activeOnly.map((rawPos: any) => {
+          const instrument = rawPos.instrument || rawPos.symbol || '';
+          const isForex = ['USD/INR', 'EUR/INR', 'GBP/INR', 'JPY/INR'].includes(instrument.toUpperCase());
+          let currentPrice = parseCleanNumber(rawPos.currentPrice || rawPos.current_price || rawPos.ltp);
+          if (currentPrice <= 0 || (!isForex && currentPrice < 25)) {
+            const lookedUp = liveLtpLookup(instrument);
+            if (lookedUp > 0) currentPrice = lookedUp;
+          }
+
+          const instUpper = instrument.toUpperCase();
+          const instClean = instUpper.replace(/[\s_\-/]/g, '');
+          const tickKey = Object.keys(ticks).find(k => k.toUpperCase() === instUpper || k.toUpperCase().replace(/[\s_\-/]/g, '') === instClean);
+          const update = tickKey ? ticks[tickKey] : null;
+          if (update && update.lastPrice && update.lastPrice > 0) {
+            currentPrice = update.lastPrice;
+          }
+
+          const buyQty = parseCleanNumber(rawPos.buyQty);
+          const sellQty = parseCleanNumber(rawPos.sellQty);
+          const netQty = parseCleanNumber(rawPos.netQty || (buyQty - sellQty));
+          let avgPrice = parseCleanNumber(rawPos.avgPrice || rawPos.average_price || rawPos.buyPrice || rawPos.price);
+          let unrealisedPnL = parseCleanNumber(rawPos.unrealisedPnL || rawPos.unrealizedPnl || rawPos.pnl);
+
+          if (avgPrice <= 0) {
+            if (currentPrice > 0 && unrealisedPnL !== 0 && netQty !== 0) {
+              avgPrice = netQty > 0 ? currentPrice - (unrealisedPnL / netQty) : currentPrice + (unrealisedPnL / Math.abs(netQty));
+            } else if (currentPrice > 0) {
+              avgPrice = currentPrice;
+            }
+          }
+
+          const isBuy = netQty >= 0;
+          if (currentPrice > 0 && avgPrice > 0 && netQty !== 0) {
+            unrealisedPnL = Number((isBuy ? (currentPrice - avgPrice) * netQty : (avgPrice - currentPrice) * Math.abs(netQty)).toFixed(2));
+          }
+
+          const realisedPnL = parseCleanNumber(rawPos.realisedPnL || rawPos.realizedPnl || 0);
+          let marginUsed = parseCleanNumber(rawPos.marginUsed || rawPos.margin);
+          if (marginUsed <= 0 && avgPrice > 0 && netQty !== 0) {
+            marginUsed = Number((avgPrice * Math.abs(netQty) * 0.2).toFixed(2));
+          }
+
           return {
-            ...pos,
+            ...rawPos,
+            instrument,
+            buyQty,
+            sellQty,
+            netQty,
+            avgPrice,
             currentPrice,
+            realisedPnL,
             unrealisedPnL,
-            totalPnL: pos.realisedPnL + unrealisedPnL,
+            totalPnL: Number((realisedPnL + unrealisedPnL).toFixed(2)),
+            marginUsed,
           };
         });
         setPositions(merged);
@@ -91,16 +136,24 @@ export const PositionsView: React.FC = () => {
     setPositions((prev) => {
       let changed = false;
       const next = prev.map((pos) => {
-        const update = latestTicks[pos.instrument];
+        const instUpper = pos.instrument.toUpperCase();
+        const instClean = instUpper.replace(/[\s_\-/]/g, '');
+        const tickKey = Object.keys(latestTicks).find(
+          k => k.toUpperCase() === instUpper || k.toUpperCase().replace(/[\s_\-/]/g, '') === instClean
+        );
+        const update = tickKey ? latestTicks[tickKey] : null;
         if (!update || !update.lastPrice || update.lastPrice === pos.currentPrice) return pos;
         changed = true;
         const currentPrice = update.lastPrice;
-        const unrealisedPnL = Math.round((currentPrice - pos.avgPrice) * pos.netQty);
+        const isBuy = pos.netQty >= 0;
+        const unrealisedPnL = Number(
+          (isBuy ? (currentPrice - pos.avgPrice) * pos.netQty : (pos.avgPrice - currentPrice) * Math.abs(pos.netQty)).toFixed(2)
+        );
         return {
           ...pos,
           currentPrice,
           unrealisedPnL,
-          totalPnL: pos.realisedPnL + unrealisedPnL,
+          totalPnL: Number((pos.realisedPnL + unrealisedPnL).toFixed(2)),
         };
       });
       return changed ? next : prev;
@@ -353,27 +406,27 @@ export const PositionsView: React.FC = () => {
                     </td>
 
                     <td className={`${cellPad} text-right text-slate-200`}>
-                      ₹{pos.avgPrice.toFixed(2)}
+                      ₹{pos.avgPrice.toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
                     </td>
 
                     <td className={`${cellPad} text-right font-bold text-white`}>
-                      ₹{pos.currentPrice.toFixed(2)}
+                      ₹{pos.currentPrice.toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
                     </td>
 
                     <td className={`${cellPad} text-right ${pos.realisedPnL >= 0 ? 'text-slate-300' : 'text-rose-400'}`}>
-                      {pos.realisedPnL !== 0 ? `₹${pos.realisedPnL.toLocaleString('en-IN')}` : '₹0'}
+                      {pos.realisedPnL !== 0 ? `₹${pos.realisedPnL.toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}` : '₹0.00'}
                     </td>
 
                     <td className={`${cellPad} text-right font-medium ${pos.unrealisedPnL >= 0 ? 'text-emerald-400' : 'text-rose-400'}`}>
-                      {pos.unrealisedPnL >= 0 ? '+' : ''}₹{pos.unrealisedPnL.toLocaleString('en-IN')}
+                      {pos.unrealisedPnL >= 0 ? '+' : ''}₹{pos.unrealisedPnL.toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
                     </td>
 
                     <td className={`${cellPad} text-right font-bold ${isPositiveTotal ? 'text-emerald-400' : 'text-rose-400'}`}>
-                      {isPositiveTotal ? '+' : ''}₹{pos.totalPnL.toLocaleString('en-IN')}
+                      {isPositiveTotal ? '+' : ''}₹{pos.totalPnL.toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
                     </td>
 
                     <td className={`${cellPad} text-right text-slate-300`}>
-                      ₹{pos.marginUsed.toLocaleString('en-IN')}
+                      ₹{pos.marginUsed.toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
                     </td>
 
                     <td className={`${cellPad} text-center font-sans`}>

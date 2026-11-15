@@ -36,6 +36,7 @@ import {
 } from './src/db.ts';
 import { tradingPlatformClient } from './src/services/tradingPlatformClient.ts';
 import { matchesDateFilter } from './src/utils/dateUtils.ts';
+import { parseCleanNumber, liveLtpLookup } from './src/utils/cleanNumber.ts';
 
 dotenv.config();
 
@@ -1386,8 +1387,8 @@ export async function syncAuthoritativeData(requestedTenantId?: string, force = 
     if (ordersList.length > 0) {
       const incomingOrders: Order[] = ordersList.map((ro: any): Order => {
         const orderId = String(ro.id || ro.order_id || ro.client_order_id || `ORD-${Date.now()}`).trim();
-        const qty = Number(ro.quantity || ro.qty || ro.lots || ro.filled_quantity || 1);
-        const price = Number(ro.price || ro.orderPrice || ro.average_fill_price || 0);
+        const qty = parseCleanNumber(ro.quantity || ro.qty || ro.lots || ro.filled_quantity || 1) || 1;
+        const price = parseCleanNumber(ro.price || ro.orderPrice || ro.average_fill_price || 0);
         const statusMap: Record<string, Order['status']> = {
           EXECUTED: 'Executed',
           FILLED: 'Executed',
@@ -1416,8 +1417,8 @@ export async function syncAuthoritativeData(requestedTenantId?: string, force = 
           type,
           quantity: qty,
           orderPrice: price > 0 ? price : 'Market',
-          executedQty: mappedStatus === 'Executed' ? qty : Number(ro.filled_quantity || ro.executed_qty || 0),
-          avgPrice: Number(ro.average_fill_price || ro.avg_price || ro.avgPrice || price),
+          executedQty: mappedStatus === 'Executed' ? qty : parseCleanNumber(ro.filled_quantity || ro.executed_qty || 0),
+          avgPrice: parseCleanNumber(ro.average_fill_price || ro.avg_price || ro.avgPrice || price),
           status: mappedStatus,
           created: ro.created_at ? new Date(ro.created_at).toLocaleTimeString('en-GB') : (ro.time ? `${ro.time}, ${ro.date || 'Today'}` : new Date().toLocaleTimeString('en-GB')),
           brokerId: ro.brokerId || ro.broker_id || 'BRK-ROHAN-01',
@@ -1460,13 +1461,39 @@ export async function syncAuthoritativeData(requestedTenantId?: string, force = 
     if (positionsList.length > 0) {
       const incomingPositions: Position[] = positionsList.map((rp: any): Position => {
         const posId = String(rp.id || rp.position_id || rp.positionId || `POS-${rp.symbol}`).trim();
-        const buyQty = Number(rp.buyQty || rp.buy_qty || (rp.side === 'BUY' ? (rp.quantity || rp.raw_quantity) : 0));
-        const sellQty = Number(rp.sellQty || rp.sell_qty || (rp.side === 'SELL' ? (rp.quantity || rp.raw_quantity) : 0));
-        const netQty = Number(rp.netQty ?? rp.net_qty ?? (rp.side === 'SELL' ? -(rp.quantity || rp.raw_quantity) : (rp.quantity || rp.raw_quantity || (buyQty - sellQty))));
-        const avgPrice = Number(rp.average_price || rp.buyPrice || rp.avgPrice || rp.avg_price || rp.price || 0);
-        const currentPrice = Number(rp.current_price || rp.currentPrice || rp.markPrice || rp.ltp || avgPrice);
-        const realisedPnL = Number(rp.realized_pnl || rp.realisedPnL || 0);
-        const unrealisedPnL = Number(rp.unrealized_pnl || rp.pnl || rp.unrealisedPnL || (netQty * (currentPrice - avgPrice)));
+        const buyQty = parseCleanNumber(rp.buyQty || rp.buy_qty || (rp.side === 'BUY' ? (rp.quantity || rp.raw_quantity) : 0));
+        const sellQty = parseCleanNumber(rp.sellQty || rp.sell_qty || (rp.side === 'SELL' ? (rp.quantity || rp.raw_quantity) : 0));
+        const netQty = parseCleanNumber(rp.netQty ?? rp.net_qty ?? (rp.side === 'SELL' ? -(rp.quantity || rp.raw_quantity) : (rp.quantity || rp.raw_quantity || (buyQty - sellQty))));
+        const symbol = String(rp.symbol || rp.instrument || 'RELIANCE').trim();
+
+        let currentPrice = parseCleanNumber(rp.current_price || rp.currentPrice || rp.markPrice || rp.ltp || rp.lastPrice);
+        const isForex = ['USD/INR', 'EUR/INR', 'GBP/INR', 'JPY/INR'].includes(symbol.toUpperCase());
+        if (currentPrice <= 0 || (!isForex && currentPrice < 25)) {
+          const lookedUp = liveLtpLookup(symbol);
+          if (lookedUp > 0) currentPrice = lookedUp;
+        }
+
+        let avgPrice = parseCleanNumber(rp.average_price || rp.buyPrice || rp.avgPrice || rp.avg_price || rp.entry_price || rp.entryPrice || rp.price || 0);
+        let unrealisedPnL = parseCleanNumber(rp.unrealized_pnl || rp.pnl || rp.unrealisedPnL);
+
+        if (avgPrice <= 0) {
+          if (currentPrice > 0 && unrealisedPnL !== 0 && netQty !== 0) {
+            avgPrice = netQty > 0 ? currentPrice - (unrealisedPnL / netQty) : currentPrice + (unrealisedPnL / Math.abs(netQty));
+          } else if (currentPrice > 0) {
+            avgPrice = currentPrice;
+          }
+        }
+
+        if (unrealisedPnL === 0 && currentPrice > 0 && avgPrice > 0 && netQty !== 0) {
+          unrealisedPnL = netQty > 0 ? (currentPrice - avgPrice) * netQty : (avgPrice - currentPrice) * Math.abs(netQty);
+          unrealisedPnL = Number(unrealisedPnL.toFixed(2));
+        }
+
+        const realisedPnL = parseCleanNumber(rp.realized_pnl || rp.realisedPnL || 0);
+        let marginUsed = parseCleanNumber(rp.used_margin || rp.margin_used || rp.margin || rp.marginUsed);
+        if (marginUsed <= 0 && avgPrice > 0 && netQty !== 0) {
+          marginUsed = Number((avgPrice * Math.abs(netQty) * 0.2).toFixed(2));
+        }
 
         const { clientId, clientName } = resolveClientForRecord(
           rp.clientId || rp.userId || rp.user_id || rp.client_id || rp.clientCode || rp.client_code,
@@ -1478,8 +1505,8 @@ export async function syncAuthoritativeData(requestedTenantId?: string, force = 
           id: posId,
           clientId,
           clientName,
-          instrument: rp.symbol || rp.instrument || 'RELIANCE',
-          exchange: rp.exchange || (String(rp.symbol).includes('FUT') ? 'NFO' : (String(rp.symbol).includes('/') ? 'MCX' : 'NSE')),
+          instrument: symbol,
+          exchange: rp.exchange || (symbol.includes('FUT') ? 'NFO' : (symbol.includes('/') ? 'MCX' : 'NSE')),
           product: (rp.product === 'CNC' || rp.product === 'NRML') ? rp.product : 'MIS',
           buyQty,
           sellQty,
@@ -1488,8 +1515,8 @@ export async function syncAuthoritativeData(requestedTenantId?: string, force = 
           currentPrice,
           realisedPnL,
           unrealisedPnL,
-          totalPnL: realisedPnL + unrealisedPnL,
-          marginUsed: Number(rp.used_margin || rp.margin_used || rp.margin || rp.marginUsed || 0),
+          totalPnL: Number((realisedPnL + unrealisedPnL).toFixed(2)),
+          marginUsed,
           brokerId: rp.brokerId || rp.broker_id || 'BRK-ROHAN-01',
           subBrokerId: rp.subBrokerId || 'SUB-BRK-001',
           masterId: rp.masterId || 'MST-ALPHA-01',
@@ -3361,27 +3388,53 @@ app.get('/api/positions', authMiddleware, async (req: AuthenticatedRequest, res:
     const livePosRes = await tradingPlatformClient.fetchAllLivePositions(user.tenantId);
     if (livePosRes.success && Array.isArray(livePosRes.positions) && livePosRes.positions.length > 0) {
       livePosRes.positions.forEach((remotePos: any) => {
-        const posId = String(remotePos.id || remotePos.positionId || `POS-${remotePos.symbol}`).trim();
+        const symbol = String(remotePos.symbol || remotePos.instrument || 'RELIANCE').trim();
+        const posId = String(remotePos.id || remotePos.positionId || `POS-${symbol}`).trim();
         const { clientId, clientName } = resolveClientForRecord(
           remotePos.clientId || remotePos.userId || remotePos.user_id || remotePos.client_id || remotePos.clientCode,
           remotePos.clientName || remotePos.client_name,
           clients
         );
-        const match = positions.find(p => p.id === posId || (p.clientId === clientId && p.instrument === remotePos.symbol));
-        const buyQty = Number(remotePos.buyQty || (remotePos.side === 'BUY' ? remotePos.quantity : 0));
-        const sellQty = Number(remotePos.sellQty || (remotePos.side === 'SELL' ? remotePos.quantity : 0));
-        const netQty = Number(remotePos.netQty ?? (remotePos.side === 'SELL' ? -remotePos.quantity : (remotePos.quantity || (buyQty - sellQty))));
-        const avgPrice = Number(remotePos.buyPrice || remotePos.avgPrice || remotePos.price || 0);
-        const currentPrice = Number(remotePos.currentPrice || remotePos.markPrice || remotePos.ltp || avgPrice);
-        const realisedPnL = Number(remotePos.realisedPnL !== undefined && remotePos.realisedPnL !== null && remotePos.realisedPnL !== 0 ? remotePos.realisedPnL : (match?.realisedPnL || 0));
-        const unrealisedPnL = Number(remotePos.pnl || remotePos.unrealisedPnL || (netQty * (currentPrice - avgPrice)));
+        const match = positions.find(p => p.id === posId || (p.clientId === clientId && p.instrument.toUpperCase() === symbol.toUpperCase()));
+        const buyQty = parseCleanNumber(remotePos.buyQty || (remotePos.side === 'BUY' ? remotePos.quantity : 0));
+        const sellQty = parseCleanNumber(remotePos.sellQty || (remotePos.side === 'SELL' ? remotePos.quantity : 0));
+        const netQty = parseCleanNumber(remotePos.netQty ?? (remotePos.side === 'SELL' ? -remotePos.quantity : (remotePos.quantity || (buyQty - sellQty))));
+
+        let currentPrice = parseCleanNumber(remotePos.currentPrice || remotePos.current_price || remotePos.markPrice || remotePos.ltp || remotePos.lastPrice);
+        const isForex = ['USD/INR', 'EUR/INR', 'GBP/INR', 'JPY/INR'].includes(symbol.toUpperCase());
+        if (currentPrice <= 0 || (!isForex && currentPrice < 25)) {
+          const lookedUp = liveLtpLookup(symbol);
+          if (lookedUp > 0) currentPrice = lookedUp;
+        }
+
+        let avgPrice = parseCleanNumber(remotePos.buyPrice || remotePos.average_price || remotePos.avgPrice || remotePos.avg_price || remotePos.entry_price || remotePos.price || 0);
+        let unrealisedPnL = parseCleanNumber(remotePos.pnl || remotePos.unrealized_pnl || remotePos.unrealisedPnL);
+
+        if (avgPrice <= 0) {
+          if (currentPrice > 0 && unrealisedPnL !== 0 && netQty !== 0) {
+            avgPrice = netQty > 0 ? currentPrice - (unrealisedPnL / netQty) : currentPrice + (unrealisedPnL / Math.abs(netQty));
+          } else if (currentPrice > 0) {
+            avgPrice = currentPrice;
+          }
+        }
+
+        if (unrealisedPnL === 0 && currentPrice > 0 && avgPrice > 0 && netQty !== 0) {
+          unrealisedPnL = netQty > 0 ? (currentPrice - avgPrice) * netQty : (avgPrice - currentPrice) * Math.abs(netQty);
+          unrealisedPnL = Number(unrealisedPnL.toFixed(2));
+        }
+
+        const realisedPnL = parseCleanNumber(remotePos.realisedPnL ?? remotePos.realized_pnl ?? (match?.realisedPnL || 0));
+        let marginUsed = parseCleanNumber(remotePos.margin || remotePos.marginUsed || remotePos.used_margin);
+        if (marginUsed <= 0 && avgPrice > 0 && netQty !== 0) {
+          marginUsed = Number((avgPrice * Math.abs(netQty) * 0.2).toFixed(2));
+        }
 
         const posObj: Position = {
           id: posId,
           clientId,
           clientName,
-          instrument: remotePos.symbol || 'RELIANCE',
-          exchange: remotePos.symbol?.includes('FUT') ? 'NFO' : (remotePos.symbol?.includes('/') ? 'MCX' : 'NSE'),
+          instrument: symbol,
+          exchange: remotePos.exchange || (symbol.includes('FUT') ? 'NFO' : (symbol.includes('/') ? 'MCX' : 'NSE')),
           product: remotePos.product === 'CNC' ? 'CNC' : 'MIS',
           buyQty,
           sellQty,
@@ -3390,8 +3443,8 @@ app.get('/api/positions', authMiddleware, async (req: AuthenticatedRequest, res:
           currentPrice,
           realisedPnL,
           unrealisedPnL,
-          totalPnL: realisedPnL + unrealisedPnL,
-          marginUsed: Number(remotePos.margin || remotePos.marginUsed || 0),
+          totalPnL: Number((realisedPnL + unrealisedPnL).toFixed(2)),
+          marginUsed,
           brokerId: remotePos.brokerId || 'BRK-ROHAN-01',
           subBrokerId: remotePos.subBrokerId || 'SUB-BRK-001',
           masterId: remotePos.masterId || 'MST-ALPHA-01',
@@ -4487,10 +4540,15 @@ async function startServer() {
 
           // Recalculate open positions MTM for this instrument
           positions.forEach((pos) => {
-            if (pos.instrument === symbol) {
+            const posSym = pos.instrument.toUpperCase().replace(/[\s_\-/]/g, '');
+            const tickSym = symbol.toUpperCase().replace(/[\s_\-/]/g, '');
+            if (posSym === tickSym || pos.instrument.toUpperCase() === symbol.toUpperCase()) {
               pos.currentPrice = lastPrice;
-              pos.unrealisedPnL = Math.round((pos.currentPrice - pos.avgPrice) * pos.netQty);
-              pos.totalPnL = pos.realisedPnL + pos.unrealisedPnL;
+              if (pos.avgPrice <= 0) {
+                pos.avgPrice = lastPrice;
+              }
+              pos.unrealisedPnL = Number(((pos.netQty >= 0 ? (pos.currentPrice - pos.avgPrice) * pos.netQty : (pos.avgPrice - pos.currentPrice) * Math.abs(pos.netQty))).toFixed(2));
+              pos.totalPnL = Number((pos.realisedPnL + pos.unrealisedPnL).toFixed(2));
             }
           });
         }

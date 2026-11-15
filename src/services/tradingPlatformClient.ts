@@ -1,30 +1,104 @@
 
+import { parseCleanNumber, liveLtpLookup } from '../utils/cleanNumber.ts';
+
 export function extractOrders(res: any): any[] {
+  let list: any[] = [];
   if (!res) return [];
-  if (Array.isArray(res)) return res;
-  if (Array.isArray(res.orders)) return res.orders;
-  if (Array.isArray(res.items)) return res.items;
-  if (Array.isArray(res.data)) return res.data;
-  if (res.data) {
-    if (Array.isArray(res.data.orders)) return res.data.orders;
-    if (Array.isArray(res.data.items)) return res.data.items;
-    if (Array.isArray(res.data.data)) return res.data.data;
+  if (Array.isArray(res)) list = res;
+  else if (Array.isArray(res.orders)) list = res.orders;
+  else if (Array.isArray(res.items)) list = res.items;
+  else if (Array.isArray(res.data)) list = res.data;
+  else if (res.data) {
+    if (Array.isArray(res.data.orders)) list = res.data.orders;
+    else if (Array.isArray(res.data.items)) list = res.data.items;
+    else if (Array.isArray(res.data.data)) list = res.data.data;
   }
-  return [];
+  return list.map((o: any) => {
+    if (!o || typeof o !== 'object') return o;
+    const qty = parseCleanNumber(o.quantity ?? o.qty ?? o.lots ?? 1);
+    const price = parseCleanNumber(o.price ?? o.orderPrice ?? 0);
+    const avgPrice = parseCleanNumber(o.avgPrice ?? o.average_fill_price ?? o.avg_price ?? price);
+    return {
+      ...o,
+      quantity: qty,
+      qty,
+      price,
+      avgPrice,
+      avg_price: avgPrice,
+      executedQty: parseCleanNumber(o.executedQty ?? o.executed_quantity ?? o.filled_quantity ?? 0),
+    };
+  });
 }
 
 export function extractPositions(res: any): any[] {
+  let list: any[] = [];
   if (!res) return [];
-  if (Array.isArray(res)) return res;
-  if (Array.isArray(res.positions)) return res.positions;
-  if (Array.isArray(res.items)) return res.items;
-  if (Array.isArray(res.data)) return res.data;
-  if (res.data) {
-    if (Array.isArray(res.data.positions)) return res.data.positions;
-    if (Array.isArray(res.data.items)) return res.data.items;
-    if (Array.isArray(res.data.data)) return res.data.data;
+  if (Array.isArray(res)) list = res;
+  else if (Array.isArray(res.positions)) list = res.positions;
+  else if (Array.isArray(res.items)) list = res.items;
+  else if (Array.isArray(res.data)) list = res.data;
+  else if (res.data) {
+    if (Array.isArray(res.data.positions)) list = res.data.positions;
+    else if (Array.isArray(res.data.items)) list = res.data.items;
+    else if (Array.isArray(res.data.data)) list = res.data.data;
   }
-  return [];
+
+  return list.map((p: any) => {
+    if (!p || typeof p !== 'object') return p;
+    const symbol = p.symbol || p.instrument || '';
+    const isForex = ['USD/INR', 'EUR/INR', 'GBP/INR', 'JPY/INR'].includes(String(symbol).toUpperCase());
+    let currentPrice = parseCleanNumber(p.currentPrice ?? p.current_price ?? p.markPrice ?? p.ltp ?? p.lastPrice);
+    if (currentPrice <= 0 || (!isForex && currentPrice < 25)) {
+      const ltp = liveLtpLookup(symbol);
+      if (ltp > 0) currentPrice = ltp;
+    }
+    const buyQty = parseCleanNumber(p.buyQty ?? p.buy_qty ?? (p.side === 'BUY' ? p.quantity : 0));
+    const sellQty = parseCleanNumber(p.sellQty ?? p.sell_qty ?? (p.side === 'SELL' ? p.quantity : 0));
+    const netQty = parseCleanNumber(p.netQty ?? p.net_qty ?? (p.side === 'SELL' ? -p.quantity : (p.quantity || (buyQty - sellQty))));
+    let avgPrice = parseCleanNumber(p.avgPrice ?? p.average_price ?? p.avg_price ?? p.buyPrice ?? p.buy_price ?? p.entryPrice ?? p.price ?? 0);
+    let unrealizedPnl = parseCleanNumber(p.unrealizedPnl ?? p.unrealized_pnl ?? p.pnl ?? p.unrealisedPnL);
+
+    if (avgPrice <= 0) {
+      if (currentPrice > 0 && unrealizedPnl !== 0 && netQty !== 0) {
+        avgPrice = netQty > 0 ? currentPrice - (unrealizedPnl / netQty) : currentPrice + (unrealizedPnl / Math.abs(netQty));
+      } else if (currentPrice > 0) {
+        avgPrice = currentPrice;
+      }
+    }
+
+    if (unrealizedPnl === 0 && currentPrice > 0 && avgPrice > 0 && netQty !== 0) {
+      unrealizedPnl = netQty > 0 ? (currentPrice - avgPrice) * netQty : (avgPrice - currentPrice) * Math.abs(netQty);
+      unrealizedPnl = Number(unrealizedPnl.toFixed(2));
+    }
+
+    let margin = parseCleanNumber(p.margin ?? p.marginUsed ?? p.used_margin ?? p.margin_used);
+    if (margin <= 0 && avgPrice > 0 && netQty !== 0) {
+      margin = Number((avgPrice * Math.abs(netQty) * 0.2).toFixed(2));
+    }
+
+    return {
+      ...p,
+      symbol,
+      buyQty,
+      sellQty,
+      netQty,
+      avgPrice,
+      average_price: avgPrice,
+      buyPrice: avgPrice,
+      currentPrice,
+      current_price: currentPrice,
+      ltp: currentPrice,
+      unrealizedPnl,
+      unrealized_pnl: unrealizedPnl,
+      pnl: unrealizedPnl,
+      unrealisedPnL: unrealizedPnl,
+      realizedPnl: parseCleanNumber(p.realizedPnl ?? p.realized_pnl ?? p.realisedPnL),
+      realisedPnL: parseCleanNumber(p.realizedPnl ?? p.realized_pnl ?? p.realisedPnL),
+      margin,
+      marginUsed: margin,
+      used_margin: margin,
+    };
+  });
 }
 
 export function extractFunds(res: any): any[] {

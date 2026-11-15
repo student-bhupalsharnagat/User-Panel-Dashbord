@@ -18,6 +18,7 @@ import {
   LedgerEntry,
   UserAccount,
 } from './types/index.ts';
+import { parseCleanNumber, liveLtpLookup } from './utils/cleanNumber.ts';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -858,19 +859,19 @@ export const dbRepo = {
       pan: r.pan,
       status: r.status,
       isDemo: r.is_demo,
-      ledgerBalance: parseFloat(r.ledger_balance || '0'),
-      openPnL: parseFloat(r.open_pnl || '0'),
-      peakLedger: parseFloat(r.peak_ledger || '0'),
-      marginUsed: parseFloat(r.margin_used || '0'),
-      income: parseFloat(r.income || '0'),
-      marginAvailable: parseFloat(r.margin_available || '0'),
+      ledgerBalance: parseCleanNumber(r.ledger_balance),
+      openPnL: parseCleanNumber(r.open_pnl),
+      peakLedger: parseCleanNumber(r.peak_ledger),
+      marginUsed: parseCleanNumber(r.margin_used),
+      income: parseCleanNumber(r.income),
+      marginAvailable: parseCleanNumber(r.margin_available),
       brokerId: r.broker_id || 'BRK-ROHAN-01',
       brokerName: r.broker_name || 'NexTrade Broker',
       kycStatus: r.kyc_status || 'Verified',
       kycDocuments: r.kyc_documents,
       createdDate: r.created_date || (r.created_at ? new Date(r.created_at).toISOString().split('T')[0] : '2026-03-29'),
       lastActive: r.last_active || 'Just now',
-      riskLimit: parseFloat(r.risk_limit || '500000'),
+      riskLimit: parseCleanNumber(r.risk_limit || '500000'),
     }));
   },
 
@@ -944,10 +945,10 @@ export const dbRepo = {
       exchange: r.exchange,
       side: r.side,
       type: r.type,
-      quantity: parseFloat(r.quantity || '0'),
-      orderPrice: isNaN(Number(r.order_price)) ? r.order_price : parseFloat(r.order_price),
-      executedQty: parseFloat(r.executed_qty || '0'),
-      avgPrice: parseFloat(r.avg_price || '0'),
+      quantity: parseCleanNumber(r.quantity),
+      orderPrice: isNaN(Number(String(r.order_price).replace(/[₹$,\s]/g, ''))) ? r.order_price : parseCleanNumber(r.order_price),
+      executedQty: parseCleanNumber(r.executed_qty),
+      avgPrice: parseCleanNumber(r.avg_price),
       status: r.status,
       created: r.created,
       brokerId: r.broker_id || 'BRK-ROHAN-01',
@@ -1016,24 +1017,54 @@ export const dbRepo = {
       console.warn('[Database dbRepo.getPositions] query notice:', err.message);
       return [];
     }
-    return rows.map(r => ({
-      id: r.id,
-      clientId: r.client_id,
-      clientName: r.client_name,
-      instrument: r.instrument,
-      exchange: r.exchange,
-      product: r.product,
-      buyQty: parseFloat(r.buy_qty || '0'),
-      sellQty: parseFloat(r.sell_qty || '0'),
-      netQty: parseFloat(r.net_qty || '0'),
-      avgPrice: parseFloat(r.avg_price || '0'),
-      currentPrice: parseFloat(r.current_price || '0'),
-      realisedPnL: parseFloat(r.realised_pnl || '0'),
-      unrealisedPnL: parseFloat(r.unrealised_pnl || '0'),
-      totalPnL: parseFloat(r.total_pnl || '0'),
-      marginUsed: parseFloat(r.margin_used || '0'),
-      brokerId: r.broker_id || 'BRK-ROHAN-01',
-    }));
+    return rows.map(r => {
+      const buyQty = parseCleanNumber(r.buy_qty);
+      const sellQty = parseCleanNumber(r.sell_qty);
+      const netQty = parseCleanNumber(r.net_qty || (buyQty - sellQty));
+      let currentPrice = parseCleanNumber(r.current_price);
+      const isForex = ['USD/INR', 'EUR/INR', 'GBP/INR', 'JPY/INR'].includes(String(r.instrument).toUpperCase());
+      if (currentPrice <= 0 || (!isForex && currentPrice < 25)) {
+        const livePrice = liveLtpLookup(r.instrument);
+        if (livePrice > 0) currentPrice = livePrice;
+      }
+      let avgPrice = parseCleanNumber(r.avg_price || r.buy_price || r.price);
+      let unrealisedPnL = parseCleanNumber(r.unrealised_pnl || r.pnl);
+      if (avgPrice <= 0) {
+        if (currentPrice > 0 && unrealisedPnL !== 0 && netQty !== 0) {
+          avgPrice = netQty > 0 ? currentPrice - (unrealisedPnL / netQty) : currentPrice + (unrealisedPnL / Math.abs(netQty));
+        } else if (currentPrice > 0) {
+          avgPrice = currentPrice;
+        }
+      }
+      if (unrealisedPnL === 0 && currentPrice > 0 && avgPrice > 0 && netQty !== 0) {
+        unrealisedPnL = netQty > 0 ? (currentPrice - avgPrice) * netQty : (avgPrice - currentPrice) * Math.abs(netQty);
+        unrealisedPnL = Number(unrealisedPnL.toFixed(2));
+      }
+      const realisedPnL = parseCleanNumber(r.realised_pnl);
+      let marginUsed = parseCleanNumber(r.margin_used || r.margin);
+      if (marginUsed <= 0 && avgPrice > 0 && netQty !== 0) {
+        marginUsed = Number((avgPrice * Math.abs(netQty) * 0.2).toFixed(2));
+      }
+
+      return {
+        id: r.id,
+        clientId: r.client_id,
+        clientName: r.client_name,
+        instrument: r.instrument,
+        exchange: r.exchange,
+        product: r.product,
+        buyQty,
+        sellQty,
+        netQty,
+        avgPrice,
+        currentPrice,
+        realisedPnL,
+        unrealisedPnL,
+        totalPnL: Number((realisedPnL + unrealisedPnL).toFixed(2)),
+        marginUsed,
+        brokerId: r.broker_id || 'BRK-ROHAN-01',
+      };
+    });
   },
 
   async upsertPosition(position: Position): Promise<void> {
@@ -1107,7 +1138,7 @@ export const dbRepo = {
       clientId: r.client_id,
       clientName: r.client_name,
       type: r.type,
-      amount: parseFloat(r.amount || '0'),
+      amount: parseCleanNumber(r.amount),
       method: r.method,
       requestDate: r.request_date,
       referenceId: r.reference_id,
@@ -1187,9 +1218,9 @@ export const dbRepo = {
       date: r.date,
       referenceId: r.reference_id,
       description: r.description,
-      debit: parseFloat(r.debit || '0'),
-      credit: parseFloat(r.credit || '0'),
-      runningBalance: parseFloat(r.running_balance || '0'),
+      debit: parseCleanNumber(r.debit),
+      credit: parseCleanNumber(r.credit),
+      runningBalance: parseCleanNumber(r.running_balance),
       status: (r.status || 'Completed') as 'Completed' | 'Pending',
       type: (r.type || 'Trade Settlement') as 'Brokerage' | 'Deposit' | 'Withdrawal' | 'Margin Funding' | 'Trade Settlement',
     }));
