@@ -30,6 +30,7 @@ export const PositionsView: React.FC = () => {
     latestTicks,
     positionsFilter,
     setPositionsFilter,
+    currentUser,
   } = useApp();
 
   const [positions, setPositions] = useState<Position[]>([]);
@@ -430,12 +431,16 @@ export const PositionsView: React.FC = () => {
                     </td>
 
                     <td className={`${cellPad} text-center font-sans`}>
-                      <button
-                        onClick={() => openSquareOffModal(pos)}
-                        className="px-2.5 py-1 bg-rose-600/20 hover:bg-rose-600 border border-rose-500/40 text-rose-300 hover:text-white rounded text-[11px] font-bold transition-all"
-                      >
-                        Square Off
-                      </button>
+                      {currentUser?.role === 'sub_broker' || (currentUser?.role as any) === 'Sub-Broker' ? (
+                        <span className="text-slate-500 text-xs italic font-sans" title="Read-only monitoring">—</span>
+                      ) : (
+                        <button
+                          onClick={() => openSquareOffModal(pos)}
+                          className="px-2.5 py-1 bg-rose-600/20 hover:bg-rose-600 border border-rose-500/40 text-rose-300 hover:text-white rounded text-[11px] font-bold transition-all cursor-pointer"
+                        >
+                          Square Off
+                        </button>
+                      )}
                     </td>
                   </tr>
                 );

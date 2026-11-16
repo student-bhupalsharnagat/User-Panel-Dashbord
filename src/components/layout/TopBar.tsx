@@ -232,7 +232,7 @@ export const TopBar: React.FC = () => {
                       setIsProfileOpen(false);
                     }}
                     className={`w-full text-left px-2.5 py-1.5 rounded-md text-xs flex items-center justify-between cursor-pointer ${
-                      currentUser?.role === 'super_admin'
+                      currentUser?.role === 'super_admin' || currentUser?.role === 'Super Admin'
                         ? 'bg-indigo-600/30 text-indigo-300 font-medium'
                         : 'text-slate-300 hover:bg-slate-800'
                     }`}
@@ -241,7 +241,7 @@ export const TopBar: React.FC = () => {
                       <Zap className="w-3.5 h-3.5 text-purple-400 shrink-0" />
                       <span className="truncate">Super Admin (Central)</span>
                     </div>
-                    {currentUser?.role === 'super_admin' && <span className="text-[10px] text-indigo-400 shrink-0">Active</span>}
+                    {(currentUser?.role === 'super_admin' || currentUser?.role === 'Super Admin') && <span className="text-[10px] text-indigo-400 shrink-0">Active</span>}
                   </button>
 
                   <button
@@ -250,16 +250,16 @@ export const TopBar: React.FC = () => {
                       setIsProfileOpen(false);
                     }}
                     className={`w-full text-left px-2.5 py-1.5 rounded-md text-xs flex items-center justify-between cursor-pointer ${
-                      currentUser?.role === 'master'
+                      currentUser?.role === 'master' || currentUser?.role === 'master_admin' || currentUser?.role === 'Master Admin'
                         ? 'bg-indigo-600/30 text-indigo-300 font-medium'
                         : 'text-slate-300 hover:bg-slate-800'
                     }`}
                   >
                     <div className="flex items-center gap-2">
                       <Zap className="w-3.5 h-3.5 text-amber-400 shrink-0" />
-                      <span className="truncate">Master Broker (Vikramaditya)</span>
+                      <span className="truncate">Master Admin (Vikramaditya)</span>
                     </div>
-                    {currentUser?.role === 'master' && <span className="text-[10px] text-indigo-400 shrink-0">Active</span>}
+                    {(currentUser?.role === 'master' || currentUser?.role === 'master_admin' || currentUser?.role === 'Master Admin') && <span className="text-[10px] text-indigo-400 shrink-0">Active</span>}
                   </button>
 
                   <button
@@ -268,7 +268,7 @@ export const TopBar: React.FC = () => {
                       setIsProfileOpen(false);
                     }}
                     className={`w-full text-left px-2.5 py-1.5 rounded-md text-xs flex items-center justify-between cursor-pointer ${
-                      currentUser?.role === 'broker_admin'
+                      currentUser?.role === 'broker_admin' || currentUser?.role === 'Broker Admin'
                         ? 'bg-indigo-600/30 text-indigo-300 font-medium'
                         : 'text-slate-300 hover:bg-slate-800'
                     }`}
@@ -277,7 +277,7 @@ export const TopBar: React.FC = () => {
                       <Shield className="w-3.5 h-3.5 text-indigo-400 shrink-0" />
                       <span className="truncate">Broker Admin (Rohan Sen)</span>
                     </div>
-                    {currentUser?.role === 'broker_admin' && <span className="text-[10px] text-indigo-400 shrink-0">Active</span>}
+                    {(currentUser?.role === 'broker_admin' || currentUser?.role === 'Broker Admin') && <span className="text-[10px] text-indigo-400 shrink-0">Active</span>}
                   </button>
 
                   <button
@@ -286,7 +286,7 @@ export const TopBar: React.FC = () => {
                       setIsProfileOpen(false);
                     }}
                     className={`w-full text-left px-2.5 py-1.5 rounded-md text-xs flex items-center justify-between cursor-pointer ${
-                      currentUser?.role === 'sub_broker'
+                      currentUser?.role === 'sub_broker' || currentUser?.role === 'Sub-Broker'
                         ? 'bg-indigo-600/30 text-indigo-300 font-medium'
                         : 'text-slate-300 hover:bg-slate-800'
                     }`}
@@ -295,7 +295,7 @@ export const TopBar: React.FC = () => {
                       <Shield className="w-3.5 h-3.5 text-emerald-400 shrink-0" />
                       <span className="truncate">Sub-Broker (Karan Mehra)</span>
                     </div>
-                    {currentUser?.role === 'sub_broker' && <span className="text-[10px] text-indigo-400 shrink-0">Active</span>}
+                    {(currentUser?.role === 'sub_broker' || currentUser?.role === 'Sub-Broker') && <span className="text-[10px] text-indigo-400 shrink-0">Active</span>}
                   </button>
 
                   <button
@@ -304,16 +304,16 @@ export const TopBar: React.FC = () => {
                       setIsProfileOpen(false);
                     }}
                     className={`w-full text-left px-2.5 py-1.5 rounded-md text-xs flex items-center justify-between cursor-pointer ${
-                      currentUser?.role === 'operations'
+                      currentUser?.role === 'operations' || currentUser?.role === 'Staff / Ops'
                         ? 'bg-indigo-600/30 text-indigo-300 font-medium'
                         : 'text-slate-300 hover:bg-slate-800'
                     }`}
                   >
                     <div className="flex items-center gap-2">
                       <Shield className="w-3.5 h-3.5 text-cyan-400 shrink-0" />
-                      <span className="truncate">Operations Desk (Pooja Nair)</span>
+                      <span className="truncate">Staff / Ops (Pooja Nair)</span>
                     </div>
-                    {currentUser?.role === 'operations' && <span className="text-[10px] text-indigo-400 shrink-0">Active</span>}
+                    {(currentUser?.role === 'operations' || currentUser?.role === 'Staff / Ops') && <span className="text-[10px] text-indigo-400 shrink-0">Active</span>}
                   </button>
 
                   <button

@@ -17,8 +17,16 @@ export const AddClientModal: React.FC = () => {
   const [pan, setPan] = useState('');
   const [initialMargin, setInitialMargin] = useState<number | string>(0);
   const [isDemo, setIsDemo] = useState(false);
+  const [subBrokerId, setSubBrokerId] = useState('');
+  const [subBrokers, setSubBrokers] = useState<any[]>([]);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const [isSubmitting, setIsSubmitting] = useState(false);
+
+  React.useEffect(() => {
+    if (isAddClientOpen) {
+      api.getSubBrokers().then(data => setSubBrokers(data)).catch(() => {});
+    }
+  }, [isAddClientOpen]);
 
   if (!isAddClientOpen) return null;
 
@@ -75,6 +83,7 @@ export const AddClientModal: React.FC = () => {
         initialMargin: parsedMargin,
         ledgerBalance: parsedMargin,
         isDemo,
+        subBrokerId: subBrokerId || undefined,
       });
 
       showToast(`Client ${newClient.name} (${newClient.id}) created and assigned!`, 'success');
@@ -84,6 +93,7 @@ export const AddClientModal: React.FC = () => {
       setEmail('');
       setPhone('');
       setPan('');
+      setSubBrokerId('');
       setInitialMargin(0);
       setErrorMessage(null);
     } catch (err: any) {
@@ -204,6 +214,26 @@ export const AddClientModal: React.FC = () => {
               />
             </div>
           </div>
+
+          {subBrokers.length > 0 && (
+            <div>
+              <label className="block text-[11px] font-semibold text-slate-400 uppercase tracking-wider mb-1">
+                Assign Sub-Broker / Franchise (Optional)
+              </label>
+              <select
+                value={subBrokerId}
+                onChange={(e) => setSubBrokerId(e.target.value)}
+                className="w-full bg-[#131b2e] border border-slate-700/80 rounded-lg px-3 py-2 text-xs text-white focus:outline-none focus:border-indigo-500"
+              >
+                <option value="">Direct Broker Account (No Sub-Broker)</option>
+                {subBrokers.map((sb) => (
+                  <option key={sb.id} value={sb.id}>
+                    {sb.name} ({sb.id})
+                  </option>
+                ))}
+              </select>
+            </div>
+          )}
 
           {/* Account Mode Checkbox */}
           <div className="p-3 rounded-lg bg-slate-900 border border-slate-800 flex items-center justify-between">

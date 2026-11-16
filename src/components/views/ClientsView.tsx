@@ -34,6 +34,7 @@ export const ClientsView: React.FC = () => {
     showToast,
     isLiveMode,
     isCompactMode,
+    currentUser,
   } = useApp();
 
   const [clients, setClients] = useState<Client[]>([]);
@@ -147,13 +148,15 @@ export const ClientsView: React.FC = () => {
             <FileText className="w-3.5 h-3.5 text-slate-400" />
             <span>Export PDF</span>
           </button>
-          <button
-            onClick={() => setIsAddClientOpen(true)}
-            className="px-3.5 py-1.5 sm:py-2 rounded-lg bg-indigo-600 hover:bg-indigo-500 text-xs font-bold text-white transition-colors flex items-center gap-2 cursor-pointer shadow-md shadow-indigo-900/30"
-          >
-            <UserPlus className="w-3.5 h-3.5" />
-            <span>+ New client</span>
-          </button>
+          {currentUser?.role !== 'sub_broker' && (currentUser?.role as any) !== 'Sub-Broker' && currentUser?.role !== 'trader_client' && (
+            <button
+              onClick={() => setIsAddClientOpen(true)}
+              className="px-3.5 py-1.5 sm:py-2 rounded-lg bg-indigo-600 hover:bg-indigo-500 text-xs font-bold text-white transition-colors flex items-center gap-2 cursor-pointer shadow-md shadow-indigo-900/30"
+            >
+              <UserPlus className="w-3.5 h-3.5" />
+              <span>+ New client</span>
+            </button>
+          )}
         </div>
       </div>
 

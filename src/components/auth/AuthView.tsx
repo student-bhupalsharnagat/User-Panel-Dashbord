@@ -63,8 +63,8 @@ const QUICK_CARDS: QuickCard[] = [
   },
   {
     role: 'master',
-    title: 'Master Broker',
-    subtitle: 'Rajesh Sharma',
+    title: 'Master Admin',
+    subtitle: 'Vikramaditya Singhania',
     email: 'master@nextrade.example',
     id: 'MST-ALPHA-01',
     color: 'text-amber-400',
@@ -74,7 +74,7 @@ const QUICK_CARDS: QuickCard[] = [
   },
   {
     role: 'sub_broker',
-    title: 'Sub-Broker Desk',
+    title: 'Sub-Broker',
     subtitle: 'Vikram Joshi',
     email: 'subbroker@nextrade.example',
     id: 'SUB-BRK-001',
@@ -85,7 +85,7 @@ const QUICK_CARDS: QuickCard[] = [
   },
   {
     role: 'operations',
-    title: 'Operations Desk',
+    title: 'Staff / Ops',
     subtitle: 'Pooja Nair',
     email: 'operations@nextrade.example',
     id: 'OPS-DESK-01',

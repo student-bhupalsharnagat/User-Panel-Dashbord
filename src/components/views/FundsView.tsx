@@ -31,6 +31,7 @@ export const FundsView: React.FC = () => {
     isCompactMode,
     fundsFilter,
     setFundsFilter,
+    currentUser,
   } = useApp();
 
   const [transactions, setTransactions] = useState<FundTransaction[]>([]);
@@ -303,22 +304,26 @@ export const FundsView: React.FC = () => {
                   </td>
 
                   <td className={`${cellPad} text-center font-sans`}>
-                    <div className="flex items-center justify-center gap-1.5">
-                      <button
-                        onClick={() => openFundActionModal(txn, 'approve')}
-                        className="p-1.5 rounded-lg bg-emerald-600/20 hover:bg-emerald-600 border border-emerald-500/40 text-emerald-300 hover:text-white transition-colors"
-                        title="Approve Transaction"
-                      >
-                        <CheckCircle className="w-3.5 h-3.5" />
-                      </button>
-                      <button
-                        onClick={() => openFundActionModal(txn, 'reject')}
-                        className="p-1.5 rounded-lg bg-rose-600/20 hover:bg-rose-600 border border-rose-500/40 text-rose-300 hover:text-white transition-colors"
-                        title="Reject with Reason"
-                      >
-                        <XCircle className="w-3.5 h-3.5" />
-                      </button>
-                    </div>
+                    {currentUser?.role === 'sub_broker' || (currentUser?.role as any) === 'Sub-Broker' || currentUser?.role === 'trader_client' ? (
+                      <span className="text-slate-500 text-xs italic font-sans" title="Read-only access">—</span>
+                    ) : (
+                      <div className="flex items-center justify-center gap-1.5">
+                        <button
+                          onClick={() => openFundActionModal(txn, 'approve')}
+                          className="p-1.5 rounded-lg bg-emerald-600/20 hover:bg-emerald-600 border border-emerald-500/40 text-emerald-300 hover:text-white transition-colors cursor-pointer"
+                          title="Approve Transaction"
+                        >
+                          <CheckCircle className="w-3.5 h-3.5" />
+                        </button>
+                        <button
+                          onClick={() => openFundActionModal(txn, 'reject')}
+                          className="p-1.5 rounded-lg bg-rose-600/20 hover:bg-rose-600 border border-rose-500/40 text-rose-300 hover:text-white transition-colors cursor-pointer"
+                          title="Reject with Reason"
+                        >
+                          <XCircle className="w-3.5 h-3.5" />
+                        </button>
+                      </div>
+                    )}
                   </td>
                 </tr>
               ))}

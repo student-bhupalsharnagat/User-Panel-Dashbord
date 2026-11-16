@@ -733,6 +733,28 @@ async function runMigrations(pool: Pool) {
       console.log('[Database Migration] Migration 5 successfully committed.');
     }
 
+    // Migration 6: Ensure sub_broker_id and master_id columns exist on clients, orders, positions, and funds
+    if (!appliedVersions.has(6)) {
+      console.log('[Database Migration] Running Migration 6: Hierarchy columns (sub_broker_id, master_id, tenant_id)...');
+      const hierarchyTables = [
+        'user_panel_clients', 'user_panel_orders', 'user_panel_positions', 'user_panel_fund_transactions'
+      ];
+      for (const tbl of hierarchyTables) {
+        try {
+          await client.query(`ALTER TABLE "${tbl}" ADD COLUMN IF NOT EXISTS sub_broker_id TEXT;`);
+          await client.query(`ALTER TABLE "${tbl}" ADD COLUMN IF NOT EXISTS master_id TEXT;`);
+          await client.query(`ALTER TABLE "${tbl}" ADD COLUMN IF NOT EXISTS tenant_id TEXT;`);
+        } catch {}
+      }
+      try {
+        await client.query(
+          'INSERT INTO user_panel_schema_migrations (version, name) VALUES (6, $1) ON CONFLICT (version) DO NOTHING',
+          ['Add sub_broker_id, master_id, and tenant_id to clients, orders, positions, and fund transactions']
+        );
+      } catch {}
+      console.log('[Database Migration] Migration 6 successfully committed.');
+    }
+
     // Guarantee created_at columns exist unconditionally on primary tables
     const coreTables = ['user_panel_accounts', 'user_panel_clients', 'user_panel_positions', 'user_panel_orders', 'user_panel_fund_transactions', 'user_panel_ledger_entries'];
     for (const tbl of coreTables) {
@@ -872,6 +894,9 @@ export const dbRepo = {
       createdDate: r.created_date || (r.created_at ? new Date(r.created_at).toISOString().split('T')[0] : '2026-03-29'),
       lastActive: r.last_active || 'Just now',
       riskLimit: parseCleanNumber(r.risk_limit || '500000'),
+      subBrokerId: r.sub_broker_id || undefined,
+      masterId: r.master_id || undefined,
+      tenantId: r.tenant_id || undefined,
     }));
   },
 
@@ -883,11 +908,11 @@ export const dbRepo = {
           id, name, email, phone, pan, status, is_demo, ledger_balance, open_pnl,
           peak_ledger, margin_used, income, margin_available, broker_id, broker_name,
           kyc_status, kyc_documents, created_date, last_active, risk_limit,
-          user_id, client_code, updated_at, created_at
+          user_id, client_code, sub_broker_id, master_id, tenant_id, updated_at, created_at
         ) VALUES (
           $1, $2, $3, $4, $5, $6, $7, $8, $9, $10,
           $11, $12, $13, $14, $15, $16, $17, $18, $19, $20,
-          $21, $22, NOW(), NOW()
+          $21, $22, $23, $24, $25, NOW(), NOW()
         )
         ON CONFLICT (id) DO UPDATE SET
           name = EXCLUDED.name,
@@ -898,13 +923,17 @@ export const dbRepo = {
           margin_available = EXCLUDED.margin_available,
           user_id = COALESCE(EXCLUDED.user_id, user_panel_clients.user_id),
           client_code = COALESCE(EXCLUDED.client_code, user_panel_clients.client_code),
+          sub_broker_id = COALESCE(EXCLUDED.sub_broker_id, user_panel_clients.sub_broker_id),
+          master_id = COALESCE(EXCLUDED.master_id, user_panel_clients.master_id),
+          tenant_id = COALESCE(EXCLUDED.tenant_id, user_panel_clients.tenant_id),
           updated_at = NOW();
       `, [
         client.id, client.name, client.email, client.phone, client.pan, client.status,
         client.isDemo, client.ledgerBalance, client.openPnL, client.peakLedger,
         client.marginUsed, client.income, client.marginAvailable, client.brokerId,
         client.brokerName, client.kycStatus, JSON.stringify(client.kycDocuments || []),
-        client.createdDate, client.lastActive, client.riskLimit, client.userId || client.id, client.clientCode || client.id
+        client.createdDate, client.lastActive, client.riskLimit, client.userId || client.id, client.clientCode || client.id,
+        client.subBrokerId || null, client.masterId || null, client.tenantId || null
       ]);
     } catch (e: any) {
       console.warn('[Database dbRepo.insertClient] insert notice:', e.message);
@@ -953,6 +982,9 @@ export const dbRepo = {
       created: r.created,
       brokerId: r.broker_id || 'BRK-ROHAN-01',
       rejectionReason: r.rejection_reason,
+      subBrokerId: r.sub_broker_id || undefined,
+      masterId: r.master_id || undefined,
+      tenantId: r.tenant_id || undefined,
     }));
   },
 
@@ -962,18 +994,23 @@ export const dbRepo = {
       await pgPool.query(`
         INSERT INTO user_panel_orders (
           id, client_id, client_name, instrument, exchange, side, type, quantity,
-          order_price, executed_qty, avg_price, status, created, broker_id, rejection_reason, created_at
-        ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, NOW())
+          order_price, executed_qty, avg_price, status, created, broker_id, rejection_reason,
+          sub_broker_id, master_id, tenant_id, created_at
+        ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, NOW())
         ON CONFLICT (id) DO UPDATE SET
           status = EXCLUDED.status,
           executed_qty = EXCLUDED.executed_qty,
           avg_price = EXCLUDED.avg_price,
-          rejection_reason = EXCLUDED.rejection_reason;
+          rejection_reason = EXCLUDED.rejection_reason,
+          sub_broker_id = COALESCE(EXCLUDED.sub_broker_id, user_panel_orders.sub_broker_id),
+          master_id = COALESCE(EXCLUDED.master_id, user_panel_orders.master_id),
+          tenant_id = COALESCE(EXCLUDED.tenant_id, user_panel_orders.tenant_id);
       `, [
         order.id, order.clientId, order.clientName, order.instrument, order.exchange,
         order.side, order.type, order.quantity, String(order.orderPrice),
         order.executedQty, order.avgPrice, order.status, order.created,
-        order.brokerId, order.rejectionReason || null
+        order.brokerId, order.rejectionReason || null,
+        order.subBrokerId || null, order.masterId || null, order.tenantId || null
       ]);
     } catch (e: any) {
       console.warn('[Database dbRepo.insertOrder] notice:', e.message);
@@ -1063,6 +1100,9 @@ export const dbRepo = {
         totalPnL: Number((realisedPnL + unrealisedPnL).toFixed(2)),
         marginUsed,
         brokerId: r.broker_id || 'BRK-ROHAN-01',
+        subBrokerId: r.sub_broker_id || undefined,
+        masterId: r.master_id || undefined,
+        tenantId: r.tenant_id || undefined,
       };
     });
   },
@@ -1074,8 +1114,9 @@ export const dbRepo = {
         INSERT INTO user_panel_positions (
           id, client_id, client_name, instrument, exchange, product,
           buy_qty, sell_qty, net_qty, avg_price, current_price,
-          realised_pnl, unrealised_pnl, total_pnl, margin_used, broker_id, updated_at
-        ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, NOW())
+          realised_pnl, unrealised_pnl, total_pnl, margin_used, broker_id,
+          sub_broker_id, master_id, tenant_id, updated_at
+        ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, NOW())
         ON CONFLICT (id) DO UPDATE SET
           buy_qty = EXCLUDED.buy_qty,
           sell_qty = EXCLUDED.sell_qty,
@@ -1086,12 +1127,16 @@ export const dbRepo = {
           unrealised_pnl = EXCLUDED.unrealised_pnl,
           total_pnl = EXCLUDED.total_pnl,
           margin_used = EXCLUDED.margin_used,
+          sub_broker_id = COALESCE(EXCLUDED.sub_broker_id, user_panel_positions.sub_broker_id),
+          master_id = COALESCE(EXCLUDED.master_id, user_panel_positions.master_id),
+          tenant_id = COALESCE(EXCLUDED.tenant_id, user_panel_positions.tenant_id),
           updated_at = NOW();
       `, [
         position.id, position.clientId, position.clientName, position.instrument, position.exchange,
         position.product, position.buyQty, position.sellQty, position.netQty, position.avgPrice,
         position.currentPrice, position.realisedPnL, position.unrealisedPnL, position.totalPnL,
-        position.marginUsed, position.brokerId
+        position.marginUsed, position.brokerId,
+        position.subBrokerId || null, position.masterId || null, position.tenantId || null
       ]);
     } catch (e: any) {
       console.warn('[Database dbRepo.upsertPosition] notice:', e.message);
@@ -1148,6 +1193,9 @@ export const dbRepo = {
       approvedBy: r.approved_by,
       rejectionReason: r.rejection_reason,
       brokerId: r.broker_id || 'BRK-ROHAN-01',
+      subBrokerId: r.sub_broker_id || undefined,
+      masterId: r.master_id || undefined,
+      tenantId: r.tenant_id || undefined,
     }));
   },
 
@@ -1157,19 +1205,24 @@ export const dbRepo = {
       await pgPool.query(`
         INSERT INTO user_panel_fund_transactions (
           id, client_id, client_name, type, amount, method, request_date,
-          reference_id, status, verification, proof_document, approved_by, rejection_reason, broker_id, created_at
-        ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, NOW())
+          reference_id, status, verification, proof_document, approved_by, rejection_reason, broker_id,
+          sub_broker_id, master_id, tenant_id, created_at
+        ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, NOW())
         ON CONFLICT (id) DO UPDATE SET
           status = EXCLUDED.status,
           verification = EXCLUDED.verification,
           reference_id = COALESCE(EXCLUDED.reference_id, user_panel_fund_transactions.reference_id),
           proof_document = COALESCE(EXCLUDED.proof_document, user_panel_fund_transactions.proof_document),
           approved_by = EXCLUDED.approved_by,
-          rejection_reason = EXCLUDED.rejection_reason;
+          rejection_reason = EXCLUDED.rejection_reason,
+          sub_broker_id = COALESCE(EXCLUDED.sub_broker_id, user_panel_fund_transactions.sub_broker_id),
+          master_id = COALESCE(EXCLUDED.master_id, user_panel_fund_transactions.master_id),
+          tenant_id = COALESCE(EXCLUDED.tenant_id, user_panel_fund_transactions.tenant_id);
       `, [
         txn.id, txn.clientId, txn.clientName, txn.type, txn.amount, txn.method,
         txn.requestDate, txn.referenceId, txn.status, txn.verification,
-        txn.proofDocument || null, txn.approvedBy || null, txn.rejectionReason || null, txn.brokerId || 'BRK-ROHAN-01'
+        txn.proofDocument || null, txn.approvedBy || null, txn.rejectionReason || null, txn.brokerId || 'BRK-ROHAN-01',
+        txn.subBrokerId || null, txn.masterId || null, txn.tenantId || null
       ]);
     } catch (e: any) {
       console.warn('[Database dbRepo.insertFundTransaction] notice:', e.message);

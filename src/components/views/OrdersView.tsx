@@ -31,6 +31,7 @@ export const OrdersView: React.FC = () => {
     isCompactMode,
     ordersFilter,
     setOrdersFilter,
+    currentUser,
   } = useApp();
 
   const [orders, setOrders] = useState<Order[]>([]);
@@ -171,13 +172,15 @@ export const OrdersView: React.FC = () => {
             <FileText className="w-3.5 h-3.5 text-slate-400" />
             <span>Export PDF</span>
           </button>
-          <button
-            onClick={() => openOrderModal(null, 'BUY')}
-            className="px-3.5 py-1.5 sm:py-2 rounded-lg bg-indigo-600 hover:bg-indigo-500 text-xs font-bold text-white transition-colors flex items-center gap-2 cursor-pointer shadow-md shadow-indigo-900/30"
-          >
-            <Plus className="w-3.5 h-3.5" />
-            <span>+ Place Order</span>
-          </button>
+          {currentUser?.role !== 'sub_broker' && (currentUser?.role as any) !== 'Sub-Broker' && (
+            <button
+              onClick={() => openOrderModal(null, 'BUY')}
+              className="px-3.5 py-1.5 sm:py-2 rounded-lg bg-indigo-600 hover:bg-indigo-500 text-xs font-bold text-white transition-colors flex items-center gap-2 cursor-pointer shadow-md shadow-indigo-900/30"
+            >
+              <Plus className="w-3.5 h-3.5" />
+              <span>+ Place Order</span>
+            </button>
+          )}
         </div>
       </div>
 
@@ -335,10 +338,10 @@ export const OrdersView: React.FC = () => {
                   </td>
 
                   <td className={`${cellPad} text-center font-sans`}>
-                    {order.status === 'Open' || order.status === 'Pending' ? (
+                    {(order.status === 'Open' || order.status === 'Pending') && currentUser?.role !== 'sub_broker' && (currentUser?.role as any) !== 'Sub-Broker' ? (
                       <button
                         onClick={() => handleCancelOrder(order.id)}
-                        className="px-2 py-1 bg-rose-600/20 hover:bg-rose-600 border border-rose-500/40 text-rose-300 hover:text-white rounded text-[11px] font-bold transition-all"
+                        className="px-2 py-1 bg-rose-600/20 hover:bg-rose-600 border border-rose-500/40 text-rose-300 hover:text-white rounded text-[11px] font-bold transition-all cursor-pointer"
                       >
                         Cancel
                       </button>

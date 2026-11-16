@@ -380,6 +380,45 @@ export const api = {
     return data.client;
   },
 
+  // Brokers & Hierarchy Nodes
+  async getBrokers(): Promise<any[]> {
+    const res = await authenticatedFetch('/api/brokers');
+    const data = await res.json();
+    return Array.isArray(data?.brokers) ? data.brokers : [];
+  },
+
+  async createBroker(payload: any): Promise<any> {
+    const res = await authenticatedFetch('/api/brokers', {
+      method: 'POST',
+      headers: {
+        'X-Idempotency-Key': generateIdempotencyKey(),
+      },
+      body: JSON.stringify(payload),
+    });
+    const data = await res.json();
+    if (!data.success) throw new Error(data.message || 'Failed to create broker');
+    return data.broker;
+  },
+
+  async getSubBrokers(): Promise<any[]> {
+    const res = await authenticatedFetch('/api/sub-brokers');
+    const data = await res.json();
+    return Array.isArray(data?.subBrokers) ? data.subBrokers : [];
+  },
+
+  async createSubBroker(payload: any): Promise<any> {
+    const res = await authenticatedFetch('/api/sub-brokers', {
+      method: 'POST',
+      headers: {
+        'X-Idempotency-Key': generateIdempotencyKey(),
+      },
+      body: JSON.stringify(payload),
+    });
+    const data = await res.json();
+    if (!data.success) throw new Error(data.message || 'Failed to create sub-broker');
+    return data.subBroker;
+  },
+
   // Orders
   async getOrders(params?: { status?: string; q?: string; timeRange?: string }): Promise<Order[]> {
     const query = new URLSearchParams();

@@ -394,9 +394,11 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
           ? 'Switched active role to Trader Client (Aarav Mehta)'
           : targetRole === 'super_admin'
             ? 'Switched role to Central Super Admin'
-            : targetRole === 'sub_broker'
-              ? 'Switched role to Sub-Broker'
-              : `Switched active workspace role to ${res.user.roleTitle || 'Administrator'}`;
+            : targetRole === 'master' || targetRole === 'master_admin'
+              ? 'Switched role to Master Admin (Vikramaditya)'
+              : targetRole === 'sub_broker'
+                ? 'Switched role to Sub-Broker'
+                : `Switched active workspace role to ${res.user.roleTitle || 'Administrator'}`;
         showToast(roleMsg, 'info');
       }
     } catch (err: any) {

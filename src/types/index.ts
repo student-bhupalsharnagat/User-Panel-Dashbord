@@ -3,7 +3,27 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-export type UserRole = 'broker_admin' | 'super_admin' | 'sub_broker' | 'master' | 'trader_client' | 'operations';
+export type UserRole =
+  | 'broker_admin'
+  | 'super_admin'
+  | 'sub_broker'
+  | 'master'
+  | 'master_admin'
+  | 'trader_client'
+  | 'operations'
+  | 'Super Admin'
+  | 'Master Admin'
+  | 'Broker Admin'
+  | 'Sub-Broker'
+  | 'Staff / Ops';
+
+export type Role =
+  | 'Super Admin'
+  | 'Master Admin'
+  | 'Broker Admin'
+  | 'Sub-Broker'
+  | 'Staff / Ops'
+  | UserRole;
 
 export interface AuthenticatedUser {
   id: string;
@@ -12,6 +32,8 @@ export interface AuthenticatedUser {
   role: UserRole;
   roleTitle: string;
   brokerId: string;
+  subBrokerId?: string;
+  masterId?: string;
   tenantId: string;
   organization: string;
   phone: string;

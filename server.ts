@@ -23,6 +23,7 @@ import {
   AuthenticatedUser,
   SettingsState,
   UserAccount,
+  UserRole,
 } from './src/types/index.ts';
 import {
   initDatabase,
@@ -93,9 +94,11 @@ export interface TokenPayload {
   sub: string;
   name: string;
   email: string;
-  role: 'broker_admin' | 'super_admin' | 'sub_broker' | 'master' | 'trader_client' | 'operations';
+  role: UserRole;
   roleTitle: string;
   brokerId: string;
+  subBrokerId?: string;
+  masterId?: string;
   tenantId: string;
   organization: string;
   phone: string;
@@ -236,12 +239,12 @@ export function getSeededDefaultAccounts(): UserAccount[] {
     {
       id: 'MST-ALPHA-01',
       userId: 'MST-ALPHA-01',
-      name: 'Rajesh Sharma',
+      name: 'Vikramaditya Singhania',
       email: 'master@nextrade.example',
       phone: '+91 98205 99887',
       passwordHash: defaultPasswordHash,
       role: 'master',
-      roleTitle: 'Master Broker / Partner',
+      roleTitle: 'Master Admin',
       brokerId: 'BRK-MASTER-01',
       masterId: 'MST-ALPHA-01',
       tenantId: DEFAULT_TENANT_ID,
@@ -346,17 +349,33 @@ const systemUsers: Record<string, AuthenticatedUser> = {
   },
   'master': {
     id: 'USR-MASTER-01',
-    name: 'Rajesh Sharma',
-    email: 'rajesh.sharma@nextrade.master',
+    name: 'Vikramaditya Singhania',
+    email: 'master@nextrade.example',
     role: 'master',
-    roleTitle: 'Master Broker / Partner',
+    roleTitle: 'Master Admin',
     brokerId: 'BRK-MASTER-01',
+    masterId: 'MST-ALPHA-01',
     tenantId: DEFAULT_TENANT_ID,
     organization: 'NexTrade Prime Institutional',
     phone: '+91 98205 99887',
     timezone: 'IST (UTC +05:30)',
     currency: 'INR - Indian Rupee',
-    avatar: 'RS',
+    avatar: 'VS',
+  },
+  'master_admin': {
+    id: 'USR-MASTER-01',
+    name: 'Vikramaditya Singhania',
+    email: 'master@nextrade.example',
+    role: 'master_admin',
+    roleTitle: 'Master Admin',
+    brokerId: 'BRK-MASTER-01',
+    masterId: 'MST-ALPHA-01',
+    tenantId: DEFAULT_TENANT_ID,
+    organization: 'NexTrade Prime Institutional',
+    phone: '+91 98205 99887',
+    timezone: 'IST (UTC +05:30)',
+    currency: 'INR - Indian Rupee',
+    avatar: 'VS',
   },
   'trader_client': {
     id: 'USR-TRADER-01',
@@ -1856,7 +1875,16 @@ function authMiddleware(req: AuthenticatedRequest, res: Response, next: NextFunc
 
 function requireRole(allowedRoles: string[]) {
   return (req: AuthenticatedRequest, res: Response, next: NextFunction) => {
-    if (!req.user || !allowedRoles.includes(req.user.role)) {
+    const userRole = (req.user?.role || '').toLowerCase().replace(/[\s\-_/]+/g, '_');
+    const normalizedAllowed = allowedRoles.map(r => r.toLowerCase().replace(/[\s\-_/]+/g, '_'));
+    if (normalizedAllowed.includes('master') && !normalizedAllowed.includes('master_admin')) {
+      normalizedAllowed.push('master_admin');
+    }
+    if (normalizedAllowed.includes('operations') && !normalizedAllowed.includes('staff_ops')) {
+      normalizedAllowed.push('staff_ops');
+    }
+
+    if (!req.user || (!allowedRoles.includes(req.user.role) && !normalizedAllowed.includes(userRole))) {
       pushAudit({
         id: `LOG-${Date.now().toString().slice(-4)}`,
         timestamp: new Date().toLocaleTimeString('en-GB') + ', Today',
@@ -1886,17 +1914,19 @@ export function filterByHierarchy<T extends { clientId?: string; id?: string; us
 ): T[] {
   if (!user || !user.role) return items;
 
+  const role = user.role.toLowerCase().replace(/[\s\-_/]+/g, '_');
+
   // super_admin sees records within their tenant scope (or all if platform super admin)
-  if (user.role === 'super_admin') {
+  if (role === 'super_admin') {
     if (user.tenantId && user.tenantId !== 'all' && user.tenantId !== 'vertex-default') {
       return items.filter(item => !item.tenantId || item.tenantId === user.tenantId);
     }
     return items;
   }
 
-  // master sees records strictly scoped to their masterId and tenantId
-  if (user.role === 'master') {
-    const mId = (user as any).masterId || user.sub;
+  // master / master_admin sees records strictly scoped to their masterId and tenantId
+  if (role === 'master' || role === 'master_admin') {
+    const mId = user.masterId || (user as any).master_id || user.sub;
     return items.filter(item => {
       const matchTenant = !user.tenantId || !item.tenantId || item.tenantId === user.tenantId;
       const matchMaster = !mId || !item.masterId || item.masterId === mId || item.brokerId === user.brokerId;
@@ -1905,7 +1935,7 @@ export function filterByHierarchy<T extends { clientId?: string; id?: string; us
   }
 
   // broker_admin / operations sees records strictly scoped to their brokerId and tenantId
-  if (user.role === 'broker_admin' || user.role === 'operations') {
+  if (role === 'broker_admin' || role === 'operations' || role === 'staff_ops') {
     return items.filter(item => {
       const matchTenant = !user.tenantId || !item.tenantId || item.tenantId === user.tenantId;
       const matchBroker = user.brokerId ? (item.brokerId === user.brokerId || (item as any).broker_id === user.brokerId) : true;
@@ -1914,8 +1944,8 @@ export function filterByHierarchy<T extends { clientId?: string; id?: string; us
   }
 
   // sub_broker sees only records belonging to their assigned subBrokerId
-  if (user.role === 'sub_broker') {
-    const sId = (user as any).subBrokerId || user.sub;
+  if (role === 'sub_broker') {
+    const sId = user.subBrokerId || (user as any).sub_broker_id || user.sub;
     return items.filter(item => {
       const matchTenant = !user.tenantId || !item.tenantId || item.tenantId === user.tenantId;
       const matchSub = sId ? (item.subBrokerId === sId || (item as any).sub_broker_id === sId) : true;
@@ -1924,7 +1954,7 @@ export function filterByHierarchy<T extends { clientId?: string; id?: string; us
   }
 
   // trader_client sees only their own records
-  if (user.role === 'trader_client' || (user.role as any) === 'client') {
+  if (role === 'trader_client' || role === 'client') {
     const cId = (user as any).clientId || user.sub;
     return items.filter(item => {
       const itemId = item.clientId || item.id || item.userId || (item as any).client_id;
@@ -2029,6 +2059,8 @@ app.get('/api/auth/me', authMiddleware, (req: AuthenticatedRequest, res: Respons
     role: user.role,
     roleTitle: user.roleTitle,
     brokerId: user.brokerId,
+    subBrokerId: user.subBrokerId,
+    masterId: user.masterId,
     tenantId: user.tenantId,
     organization: user.organization,
     phone: user.phone,
@@ -2044,6 +2076,8 @@ app.get('/api/auth/me', authMiddleware, (req: AuthenticatedRequest, res: Respons
     role: fullUser.role,
     roleTitle: fullUser.roleTitle,
     brokerId: fullUser.brokerId,
+    subBrokerId: fullUser.subBrokerId,
+    masterId: fullUser.masterId,
     tenantId: fullUser.tenantId,
     organization: fullUser.organization,
     phone: fullUser.phone,
@@ -2561,10 +2595,12 @@ app.post(['/api/role', '/api/auth/switch-role'], (req: Request, res: Response) =
     });
   }
   let rawRole = req.body?.role || req.body?.targetRole;
-  let normalizedRole = rawRole ? String(rawRole).trim().toLowerCase().replace(/-/g, '_') : 'broker_admin';
+  let normalizedRole = rawRole ? String(rawRole).trim().toLowerCase().replace(/-/g, '_').replace(/\s+/g, '_') : 'broker_admin';
   if (normalizedRole === 'subbroker') normalizedRole = 'sub_broker';
   if (normalizedRole === 'superadmin') normalizedRole = 'super_admin';
   if (normalizedRole === 'brokeradmin') normalizedRole = 'broker_admin';
+  if (normalizedRole === 'masteradmin' || normalizedRole === 'master_admin') normalizedRole = 'master';
+  if (normalizedRole === 'staff' || normalizedRole === 'staff_/_ops' || normalizedRole === 'staff_ops') normalizedRole = 'operations';
 
   const baseUser = systemUsers[normalizedRole] || systemUsers['broker_admin'];
   const targetUser = { ...baseUser };
@@ -2582,6 +2618,8 @@ app.post(['/api/role', '/api/auth/switch-role'], (req: Request, res: Response) =
     tenantId: targetUser.tenantId,
     organization: targetUser.organization,
     phone: targetUser.phone,
+    masterId: (targetUser as any).masterId,
+    subBrokerId: (targetUser as any).subBrokerId,
   });
 
   pushAudit({
@@ -2690,22 +2728,306 @@ app.get('/api/market-watch', authMiddleware, (_req: Request, res: Response) => {
 // Brokers API with Strict Multi-Tenant Hierarchy Scoping
 app.get(['/api/brokers', '/api/admin/brokers'], authMiddleware, (req: AuthenticatedRequest, res: Response) => {
   const user = req.user!;
-  const allBrokers = userAccounts.filter(acc => acc.role === 'broker_admin' || acc.role === 'master');
+  const allBrokers = userAccounts.filter(acc => acc.role === 'broker_admin' || acc.role === 'master' || (acc.role as any) === 'master_admin');
 
   let filtered: any[] = [];
   if (user.role === 'super_admin') {
     filtered = allBrokers.filter(b => !user.tenantId || b.tenantId === user.tenantId);
-  } else if (user.role === 'master') {
-    const mId = (user as any).masterId || user.sub;
-    filtered = allBrokers.filter(b => (b.masterId === mId || b.brokerId === user.brokerId) && (!user.tenantId || b.tenantId === user.tenantId));
+  } else if (user.role === 'master' || user.role === 'master_admin') {
+    const mId = user.masterId || (user as any).master_id || user.sub;
+    filtered = allBrokers.filter(b => (b.masterId === mId || b.brokerId === user.brokerId || b.id === user.sub) && (!user.tenantId || b.tenantId === user.tenantId));
   } else if (user.role === 'broker_admin') {
-    filtered = allBrokers.filter(b => b.brokerId === user.brokerId && (!user.tenantId || b.tenantId === user.tenantId));
+    filtered = allBrokers.filter(b => (b.brokerId === user.brokerId || b.id === user.sub) && (!user.tenantId || b.tenantId === user.tenantId));
   } else {
     // sub_broker and trader_client cannot view higher-tier brokers
     filtered = [];
   }
 
   res.json({ success: true, brokers: filtered, total: filtered.length });
+});
+
+app.post(['/api/brokers', '/api/admin/brokers'], authMiddleware, requireRole(['super_admin', 'master', 'master_admin']), async (req: AuthenticatedRequest, res: Response) => {
+  if (checkIdempotency(req, res)) return;
+  const user = req.user!;
+  const { name, fullName, email, phone, password, masterId, brokerId, company, organization, commissionRate, markup } = req.body;
+  const brokerName = name || fullName;
+  if (!brokerName || !email) {
+    return res.status(400).json({ success: false, message: 'Name and email are required for broker provisioning' });
+  }
+
+  const assignedMasterId = (user.role === 'master' || user.role === 'master_admin')
+    ? (user.masterId || user.sub)
+    : (masterId || user.masterId || 'MST-ALPHA-01');
+  const newBrokerId = brokerId || `BRK-${Date.now().toString().slice(-6)}`;
+  const passwordHash = hashPassword(password || 'Password@123');
+
+  const newBrokerAccount: UserAccount = {
+    id: newBrokerId,
+    userId: newBrokerId,
+    name: brokerName,
+    email: email.trim().toLowerCase(),
+    phone: phone || '',
+    passwordHash,
+    role: 'broker_admin',
+    roleTitle: 'Broker Administrator',
+    brokerId: newBrokerId,
+    masterId: assignedMasterId,
+    tenantId: user.tenantId || DEFAULT_TENANT_ID,
+    organization: organization || company || `${brokerName} Securities`,
+    createdAt: new Date().toISOString(),
+  };
+
+  const existingIdx = userAccounts.findIndex(u => u.email.toLowerCase() === newBrokerAccount.email || u.id === newBrokerAccount.id);
+  if (existingIdx !== -1) {
+    userAccounts[existingIdx] = newBrokerAccount;
+  } else {
+    userAccounts.push(newBrokerAccount);
+  }
+
+  if (isUsingPostgres()) {
+    await dbRepo.insertAccount(newBrokerAccount).catch(console.warn);
+  } else {
+    savePersistence();
+  }
+
+  // S2S sync to Trading Platform & Central Admin
+  tradingPlatformClient.s2sRequest({
+    method: 'POST',
+    path: '/api/internal/v1/hierarchy/sync',
+    tenantId: user.tenantId || DEFAULT_TENANT_ID,
+    body: {
+      type: 'broker',
+      nodeType: 'broker',
+      id: newBrokerId,
+      brokerId: newBrokerId,
+      name: brokerName,
+      fullName: brokerName,
+      email,
+      phone,
+      masterId: assignedMasterId,
+      tenantId: user.tenantId || DEFAULT_TENANT_ID,
+      commissionRate: commissionRate ?? markup ?? 12,
+      status: 'active',
+    },
+  }).catch((e: any) => console.warn('[AddBroker S2S] Upstream sync notice:', e.message));
+
+  pushAudit({
+    id: `LOG-${Date.now().toString().slice(-4)}`,
+    timestamp: new Date().toLocaleTimeString('en-GB') + ', Today',
+    user: user.name,
+    role: user.roleTitle,
+    action: 'Created Broker Admin',
+    relatedEntity: newBrokerId,
+    ipAddress: req.ip || '127.0.0.1',
+    result: 'Success',
+    details: `Provisioned Broker ${brokerName} (${newBrokerId}) under Master ${assignedMasterId}`,
+  });
+
+  res.json({ success: true, broker: newBrokerAccount });
+});
+
+// Sub-Brokers API with Strict Multi-Tenant Hierarchy Scoping
+app.get(['/api/sub-brokers', '/api/admin/sub-brokers'], authMiddleware, (req: AuthenticatedRequest, res: Response) => {
+  const user = req.user!;
+  const allSubBrokers = userAccounts.filter(acc => acc.role === 'sub_broker');
+
+  let filtered: any[] = [];
+  if (user.role === 'super_admin') {
+    filtered = allSubBrokers.filter(b => !user.tenantId || b.tenantId === user.tenantId);
+  } else if (user.role === 'master' || user.role === 'master_admin') {
+    const mId = user.masterId || (user as any).master_id || user.sub;
+    filtered = allSubBrokers.filter(b => (b.masterId === mId || b.brokerId === user.brokerId) && (!user.tenantId || b.tenantId === user.tenantId));
+  } else if (user.role === 'broker_admin') {
+    filtered = allSubBrokers.filter(b => b.brokerId === user.brokerId && (!user.tenantId || b.tenantId === user.tenantId));
+  } else if (user.role === 'sub_broker') {
+    filtered = allSubBrokers.filter(b => b.id === user.sub || b.subBrokerId === user.subBrokerId);
+  } else {
+    filtered = [];
+  }
+
+  res.json({ success: true, subBrokers: filtered, total: filtered.length });
+});
+
+app.post(['/api/sub-brokers', '/api/admin/sub-brokers'], authMiddleware, requireRole(['super_admin', 'master', 'master_admin', 'broker_admin']), async (req: AuthenticatedRequest, res: Response) => {
+  if (checkIdempotency(req, res)) return;
+  const user = req.user!;
+  const { name, fullName, email, phone, password, brokerId, subBrokerId, company, organization, commissionRate, markup } = req.body;
+  const subBrokerName = name || fullName;
+  if (!subBrokerName || !email) {
+    return res.status(400).json({ success: false, message: 'Name and email are required for sub-broker provisioning' });
+  }
+
+  const assignedBrokerId = user.role === 'broker_admin' ? user.brokerId : (brokerId || user.brokerId || 'BRK-ROHAN-01');
+  const parentBroker = userAccounts.find(u => u.brokerId === assignedBrokerId || u.id === assignedBrokerId);
+  const assignedMasterId = parentBroker?.masterId || user.masterId || 'MST-ALPHA-01';
+  const newSubBrokerId = subBrokerId || `SUB-${Date.now().toString().slice(-6)}`;
+  const passwordHash = hashPassword(password || 'Password@123');
+
+  const newSubBrokerAccount: UserAccount = {
+    id: newSubBrokerId,
+    userId: newSubBrokerId,
+    name: subBrokerName,
+    email: email.trim().toLowerCase(),
+    phone: phone || '',
+    passwordHash,
+    role: 'sub_broker',
+    roleTitle: 'Sub-Broker / Franchisee',
+    brokerId: assignedBrokerId,
+    subBrokerId: newSubBrokerId,
+    masterId: assignedMasterId,
+    tenantId: user.tenantId || DEFAULT_TENANT_ID,
+    organization: organization || company || `${subBrokerName} Franchise`,
+    createdAt: new Date().toISOString(),
+  };
+
+  const existingIdx = userAccounts.findIndex(u => u.email.toLowerCase() === newSubBrokerAccount.email || u.id === newSubBrokerAccount.id);
+  if (existingIdx !== -1) {
+    userAccounts[existingIdx] = newSubBrokerAccount;
+  } else {
+    userAccounts.push(newSubBrokerAccount);
+  }
+
+  if (isUsingPostgres()) {
+    await dbRepo.insertAccount(newSubBrokerAccount).catch(console.warn);
+  } else {
+    savePersistence();
+  }
+
+  // S2S sync to Trading Platform & Central Admin
+  tradingPlatformClient.s2sRequest({
+    method: 'POST',
+    path: '/api/internal/v1/hierarchy/sync',
+    tenantId: user.tenantId || DEFAULT_TENANT_ID,
+    body: {
+      type: 'sub_broker',
+      nodeType: 'sub_broker',
+      id: newSubBrokerId,
+      subBrokerId: newSubBrokerId,
+      name: subBrokerName,
+      fullName: subBrokerName,
+      email,
+      phone,
+      brokerId: assignedBrokerId,
+      masterId: assignedMasterId,
+      tenantId: user.tenantId || DEFAULT_TENANT_ID,
+      commissionRate: commissionRate ?? markup ?? 8,
+      status: 'active',
+    },
+  }).catch((e: any) => console.warn('[AddSubBroker S2S] Upstream sync notice:', e.message));
+
+  pushAudit({
+    id: `LOG-${Date.now().toString().slice(-4)}`,
+    timestamp: new Date().toLocaleTimeString('en-GB') + ', Today',
+    user: user.name,
+    role: user.roleTitle,
+    action: 'Created Sub-Broker',
+    relatedEntity: newSubBrokerId,
+    ipAddress: req.ip || '127.0.0.1',
+    result: 'Success',
+    details: `Provisioned Sub-Broker ${subBrokerName} (${newSubBrokerId}) under Broker ${assignedBrokerId}`,
+  });
+
+  res.json({ success: true, subBroker: newSubBrokerAccount });
+});
+
+// Authoritative Cross-Platform Hierarchy S2S Receiver
+app.post(['/api/internal/v1/hierarchy/sync', '/api/internal/hierarchy/sync'], async (req: Request, res: Response) => {
+  const secretHeader = (req.headers['x-internal-secret'] || req.headers['x-api-key'] || req.headers['authorization']) as string;
+  const signature = req.headers['x-signature'] as string;
+  const timestamp = Number(req.headers['x-timestamp']) || 0;
+
+  if (signature) {
+    const rawBody = JSON.stringify(req.body);
+    const valid = verifyHmacSignature(rawBody, signature, timestamp);
+    if (!valid && APP_ENV === 'production') {
+      return res.status(401).json({ success: false, message: 'Invalid HMAC signature' });
+    }
+  } else if (secretHeader && !secretHeader.includes(INTERNAL_API_SECRET) && APP_ENV === 'production') {
+    return res.status(401).json({ success: false, message: 'Invalid internal secret' });
+  }
+
+  const payload = req.body;
+  const nodeType = (payload.nodeType || payload.type || payload.role || '').toLowerCase();
+  const id = payload.id || payload.userId || payload.brokerId || payload.subBrokerId || payload.masterId || payload.clientId;
+  if (!id) {
+    return res.json({ success: true, message: 'Empty hierarchy sync payload ignored' });
+  }
+  const name = payload.name || payload.fullName || id;
+  const email = (payload.email || `${id}@nextrade.example`).toLowerCase();
+  const tenantId = payload.tenantId || DEFAULT_TENANT_ID;
+
+  if (nodeType.includes('master')) {
+    const acc: UserAccount = {
+      id,
+      userId: id,
+      name,
+      email,
+      phone: payload.phone || '',
+      passwordHash: hashPassword(payload.password || 'Password@123'),
+      role: 'master',
+      roleTitle: 'Master Admin',
+      brokerId: payload.brokerId || 'BRK-MASTER-01',
+      masterId: id,
+      tenantId,
+      organization: payload.organization || payload.company || `${name} Prime`,
+      createdAt: payload.createdAt || new Date().toISOString(),
+    };
+    const idx = userAccounts.findIndex(u => u.id === id || u.email === email);
+    if (idx !== -1) userAccounts[idx] = acc; else userAccounts.push(acc);
+    if (isUsingPostgres()) dbRepo.insertAccount(acc).catch(console.warn);
+  } else if (nodeType.includes('broker') && !nodeType.includes('sub')) {
+    const acc: UserAccount = {
+      id,
+      userId: id,
+      name,
+      email,
+      phone: payload.phone || '',
+      passwordHash: hashPassword(payload.password || 'Password@123'),
+      role: 'broker_admin',
+      roleTitle: 'Broker Administrator',
+      brokerId: id,
+      masterId: payload.masterId || 'MST-ALPHA-01',
+      tenantId,
+      organization: payload.organization || payload.company || `${name} Securities`,
+      createdAt: payload.createdAt || new Date().toISOString(),
+    };
+    const idx = userAccounts.findIndex(u => u.id === id || u.email === email);
+    if (idx !== -1) userAccounts[idx] = acc; else userAccounts.push(acc);
+    if (isUsingPostgres()) dbRepo.insertAccount(acc).catch(console.warn);
+  } else if (nodeType.includes('sub')) {
+    const acc: UserAccount = {
+      id,
+      userId: id,
+      name,
+      email,
+      phone: payload.phone || '',
+      passwordHash: hashPassword(payload.password || 'Password@123'),
+      role: 'sub_broker',
+      roleTitle: 'Sub-Broker / Franchisee',
+      brokerId: payload.brokerId || 'BRK-ROHAN-01',
+      subBrokerId: id,
+      masterId: payload.masterId || 'MST-ALPHA-01',
+      tenantId,
+      organization: payload.organization || payload.company || `${name} Franchise`,
+      createdAt: payload.createdAt || new Date().toISOString(),
+    };
+    const idx = userAccounts.findIndex(u => u.id === id || u.email === email);
+    if (idx !== -1) userAccounts[idx] = acc; else userAccounts.push(acc);
+    if (isUsingPostgres()) dbRepo.insertAccount(acc).catch(console.warn);
+  } else if (nodeType.includes('client')) {
+    const existing = clients.find(c => c.id === id || (c.userId && c.userId === id));
+    if (existing) {
+      if (payload.brokerId) existing.brokerId = payload.brokerId;
+      if (payload.subBrokerId) existing.subBrokerId = payload.subBrokerId;
+      if (payload.masterId) existing.masterId = payload.masterId;
+      if (payload.status) existing.status = payload.status;
+      if (isUsingPostgres()) dbRepo.insertClient(existing).catch(console.warn);
+    }
+  }
+
+  savePersistence();
+  broadcastScopedEvent('hierarchy_synced', { nodeType, id, name, timestamp: new Date().toISOString() });
+  res.json({ success: true, message: `Hierarchy node ${id} (${nodeType}) synced successfully` });
 });
 
 // Trades API with Strict Multi-Tenant Hierarchy Scoping
@@ -2789,7 +3111,7 @@ app.get('/api/clients/:id', authMiddleware, (req: AuthenticatedRequest, res: Res
   });
 });
 
-app.post('/api/clients', authMiddleware, requireRole(['broker_admin', 'super_admin', 'operations']), (req: AuthenticatedRequest, res: Response) => {
+app.post('/api/clients', authMiddleware, requireRole(['broker_admin', 'super_admin', 'operations', 'master', 'master_admin']), (req: AuthenticatedRequest, res: Response) => {
   if (checkIdempotency(req, res)) return;
 
   const user = req.user!;
@@ -2815,6 +3137,24 @@ app.post('/api/clients', authMiddleware, requireRole(['broker_admin', 'super_adm
   const newId = isDemo ? `CLT-DM-${Date.now()}` : `CLT-LIVE-${Date.now()}`;
   const margin = req.body.initialMargin !== undefined ? Math.max(0, Number(req.body.initialMargin)) : (req.body.ledgerBalance !== undefined ? Math.max(0, Number(req.body.ledgerBalance)) : 0);
 
+  let assignedBrokerId = user.brokerId || 'BRK-ROHAN-01';
+  let assignedMasterId = user.masterId || (user as any).master_id || null;
+  let assignedSubBrokerId = req.body.subBrokerId || user.subBrokerId || (user as any).sub_broker_id || null;
+
+  if (user.role === 'super_admin') {
+    assignedBrokerId = req.body.brokerId || user.brokerId || 'BRK-ROHAN-01';
+    assignedMasterId = req.body.masterId || null;
+    assignedSubBrokerId = req.body.subBrokerId || null;
+  } else if (user.role === 'master' || user.role === 'master_admin') {
+    assignedMasterId = user.masterId || user.sub;
+    assignedBrokerId = req.body.brokerId || user.brokerId || 'BRK-MASTER-01';
+    assignedSubBrokerId = req.body.subBrokerId || null;
+  } else if (user.role === 'broker_admin') {
+    assignedBrokerId = user.brokerId;
+    assignedSubBrokerId = req.body.subBrokerId || user.subBrokerId || null;
+    assignedMasterId = user.masterId || null;
+  }
+
   const newClient: Client = {
     id: newId,
     userId: newId,
@@ -2831,10 +3171,11 @@ app.post('/api/clients', authMiddleware, requireRole(['broker_admin', 'super_adm
     marginUsed: 0,
     income: 0,
     marginAvailable: margin,
-    brokerId: user.brokerId || 'BRK-ROHAN-01',
+    brokerId: assignedBrokerId,
     brokerName: user.name || 'Rohan Sen',
     tenantId: user.tenantId || DEFAULT_TENANT_ID,
-    subBrokerId: (user as any).subBrokerId || 'SUB-BRK-001',
+    subBrokerId: assignedSubBrokerId || undefined,
+    masterId: assignedMasterId || undefined,
     kycStatus: 'Verified',
     kycDocuments: ['PAN Card', 'Aadhaar Card', 'Client Agreement'],
     createdDate: new Date().toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' }),
@@ -2850,6 +3191,30 @@ app.post('/api/clients', authMiddleware, requireRole(['broker_admin', 'super_adm
     savePersistence();
   }
 
+  // Provision user login account in userAccounts & PostgreSQL
+  const defaultPassword = req.body.password || 'Password@123';
+  const clientAccount: UserAccount = {
+    id: newId,
+    userId: newId,
+    name,
+    email: email.trim().toLowerCase(),
+    phone: phoneClean,
+    passwordHash: hashPassword(defaultPassword),
+    role: 'trader_client',
+    roleTitle: 'Trader Client',
+    brokerId: assignedBrokerId,
+    subBrokerId: assignedSubBrokerId || undefined,
+    masterId: assignedMasterId || undefined,
+    tenantId: user.tenantId || DEFAULT_TENANT_ID,
+    organization: newClient.brokerName,
+    pan: panClean,
+    createdAt: new Date().toISOString(),
+  };
+  userAccounts.push(clientAccount);
+  if (isUsingPostgres()) {
+    dbRepo.insertAccount(clientAccount).catch(() => {});
+  }
+
   // Authoritative S2S sync to Trading Platform
   tradingPlatformClient.s2sRequest({
     method: 'POST',
@@ -2861,7 +3226,9 @@ app.post('/api/clients', authMiddleware, requireRole(['broker_admin', 'super_adm
       phone,
       pan: pan || 'ABCDE1234F',
       tenantId: user.tenantId || DEFAULT_TENANT_ID,
-      brokerId: newClient.brokerId,
+      brokerId: assignedBrokerId,
+      subBrokerId: assignedSubBrokerId || undefined,
+      masterId: assignedMasterId || undefined,
       initialBalance: margin,
     },
   }).catch((e: any) => console.warn('[AddClient S2S] Upstream sync notice:', e.message));
@@ -2974,6 +3341,10 @@ app.post('/api/orders', authMiddleware, async (req: AuthenticatedRequest, res: R
   if (checkIdempotency(req, res)) return;
 
   const user = req.user!;
+  if (user.role === 'sub_broker' || (user.role as any) === 'Sub-Broker') {
+    return res.status(403).json({ success: false, message: 'Forbidden: Sub-Brokers have read-only monitoring access and cannot place orders' });
+  }
+
   const { clientId, instrument, side, type, quantity, orderPrice, product } = req.body;
 
   if (!instrument || !side || !quantity) {
@@ -3317,11 +3688,17 @@ app.patch(['/api/orders/:id/cancel', '/api/orders/:id/cancel-order'], authMiddle
     return res.status(404).json({ success: false, message: 'Order not found' });
   }
 
+  if (user.role === 'sub_broker' || (user.role as any) === 'Sub-Broker') {
+    return res.status(403).json({ success: false, message: 'Forbidden: Sub-Brokers have read-only monitoring access and cannot cancel orders' });
+  }
   if (user.role === 'trader_client' && order.clientId !== user.sub) {
     return res.status(403).json({ success: false, message: 'Forbidden: You cannot cancel another client order' });
   }
   if (user.role === 'broker_admin' && order.brokerId !== user.brokerId) {
     return res.status(403).json({ success: false, message: 'Forbidden: Order is outside your broker hierarchy' });
+  }
+  if ((user.role === 'master' || user.role === 'master_admin') && order.masterId && order.masterId !== (user as any).masterId && order.brokerId !== user.brokerId) {
+    return res.status(403).json({ success: false, message: 'Forbidden: Order is outside your master hierarchy' });
   }
 
   if (order.status !== 'Open' && order.status !== 'Pending') {
@@ -3494,11 +3871,17 @@ app.post('/api/positions/:id/square-off', authMiddleware, (req: AuthenticatedReq
   const pos = positions[positionIndex];
 
   // Hierarchy validation
+  if (user.role === 'sub_broker' || (user.role as any) === 'Sub-Broker') {
+    return res.status(403).json({ success: false, message: 'Forbidden: Sub-Brokers have read-only monitoring access and cannot square-off positions' });
+  }
   if (user.role === 'trader_client' && pos.clientId !== user.sub) {
     return res.status(403).json({ success: false, message: 'Forbidden: Cannot square-off another client position' });
   }
   if (user.role === 'broker_admin' && pos.brokerId !== user.brokerId) {
     return res.status(403).json({ success: false, message: 'Forbidden: Position is outside your broker hierarchy' });
+  }
+  if ((user.role === 'master' || user.role === 'master_admin') && pos.masterId && pos.masterId !== (user as any).masterId && pos.brokerId !== user.brokerId) {
+    return res.status(403).json({ success: false, message: 'Forbidden: Position is outside your master hierarchy' });
   }
 
   const squaredPnL = pos.totalPnL;
@@ -3661,7 +4044,7 @@ app.get('/api/funds', authMiddleware, async (req: AuthenticatedRequest, res: Res
   res.json({ success: true, transactions: result });
 });
 
-app.post('/api/funds/:id/approve', authMiddleware, requireRole(['broker_admin', 'super_admin', 'operations']), (req: AuthenticatedRequest, res: Response) => {
+app.post('/api/funds/:id/approve', authMiddleware, requireRole(['broker_admin', 'super_admin', 'operations', 'master', 'master_admin']), (req: AuthenticatedRequest, res: Response) => {
   if (checkIdempotency(req, res)) return;
 
   const user = req.user!;
@@ -3673,6 +4056,9 @@ app.post('/api/funds/:id/approve', authMiddleware, requireRole(['broker_admin', 
 
   if (user.role === 'broker_admin' && txn.brokerId !== user.brokerId) {
     return res.status(403).json({ success: false, message: 'Forbidden: Transaction is outside your broker hierarchy' });
+  }
+  if ((user.role === 'master' || user.role === 'master_admin') && txn.masterId && txn.masterId !== (user as any).masterId && txn.brokerId !== user.brokerId) {
+    return res.status(403).json({ success: false, message: 'Forbidden: Transaction is outside your master hierarchy' });
   }
 
   if (txn.status === 'Completed' || txn.status === 'Approved') {
@@ -3745,7 +4131,7 @@ app.post('/api/funds/:id/approve', authMiddleware, requireRole(['broker_admin', 
   res.json({ success: true, transaction: txn });
 });
 
-app.post('/api/funds/:id/reject', authMiddleware, requireRole(['broker_admin', 'super_admin', 'operations']), (req: AuthenticatedRequest, res: Response) => {
+app.post('/api/funds/:id/reject', authMiddleware, requireRole(['broker_admin', 'super_admin', 'operations', 'master', 'master_admin']), (req: AuthenticatedRequest, res: Response) => {
   if (checkIdempotency(req, res)) return;
 
   const user = req.user!;
@@ -3758,6 +4144,9 @@ app.post('/api/funds/:id/reject', authMiddleware, requireRole(['broker_admin', '
 
   if (user.role === 'broker_admin' && txn.brokerId !== user.brokerId) {
     return res.status(403).json({ success: false, message: 'Forbidden: Transaction is outside your broker hierarchy' });
+  }
+  if ((user.role === 'master' || user.role === 'master_admin') && txn.masterId && txn.masterId !== (user as any).masterId && txn.brokerId !== user.brokerId) {
+    return res.status(403).json({ success: false, message: 'Forbidden: Transaction is outside your master hierarchy' });
   }
 
   txn.status = 'Rejected';
@@ -4112,7 +4501,10 @@ app.all(['/api/settings', '/api/user/settings'], authMiddleware, (req: Authentic
   if (req.method !== 'PATCH' && req.method !== 'PUT') {
     return next();
   }
-  if (!['broker_admin', 'super_admin', 'operations', 'master', 'sub_broker', 'trader_client', 'client'].includes(req.user?.role || '')) {
+  if (req.user?.role === 'sub_broker' || (req.user?.role as any) === 'Sub-Broker') {
+    return res.status(403).json({ success: false, message: 'Forbidden: Sub-Brokers have read-only monitoring access and cannot modify system settings' });
+  }
+  if (!['broker_admin', 'super_admin', 'operations', 'master', 'master_admin', 'trader_client', 'client'].includes(req.user?.role || '')) {
     return res.status(403).json({ success: false, message: 'Forbidden' });
   }
 
