@@ -575,14 +575,29 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
           triggerRefresh(false);
         });
 
-        eventSource.addEventListener('market.ticks', (e: MessageEvent) => {
+        const handleTickEvent = (e: MessageEvent) => {
           try {
             const parsed = JSON.parse(e.data);
-            const rawTicks = Array.isArray(parsed.ticks) ? parsed.ticks : (Array.isArray(parsed) ? parsed : []);
+            const rawTicks = Array.isArray(parsed.ticks)
+              ? parsed.ticks
+              : Array.isArray(parsed)
+              ? parsed
+              : [parsed.data || parsed.payload || parsed];
             if (rawTicks.length > 0) {
               queueTickUpdates(rawTicks);
             }
           } catch {}
+        };
+
+        eventSource.addEventListener('market.ticks', handleTickEvent);
+        eventSource.addEventListener('market_tick', handleTickEvent);
+        eventSource.addEventListener('market_ticks', handleTickEvent);
+        eventSource.addEventListener('tick', handleTickEvent);
+        eventSource.addEventListener('price.update', handleTickEvent);
+        eventSource.addEventListener('price_update', handleTickEvent);
+
+        eventSource.addEventListener('ledger_update', () => {
+          triggerRefresh(false);
         });
 
         eventSource.addEventListener('wallet_update', () => {
@@ -701,10 +716,31 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
         ws.onmessage = (event) => {
           try {
             const msg = JSON.parse(event.data);
-            if (msg.type === 'tick' || msg.eventType === 'market.ticks' || msg.type === 'market.ticks') {
-              const ticks = Array.isArray(msg.data) ? msg.data : (msg.data ? [msg.data] : (Array.isArray(msg.payload) ? msg.payload : [msg.payload || msg]));
+            if (
+              msg.type === 'tick' ||
+              msg.eventType === 'market.ticks' ||
+              msg.type === 'market.ticks' ||
+              msg.type === 'market_tick' ||
+              msg.type === 'price.update' ||
+              msg.type === 'price_update' ||
+              msg.event === 'price.update' ||
+              msg.event === 'market.ticks'
+            ) {
+              const ticks = Array.isArray(msg.data)
+                ? msg.data
+                : msg.data
+                ? [msg.data]
+                : Array.isArray(msg.payload)
+                ? msg.payload
+                : [msg.payload || msg];
               queueTickUpdates(ticks);
-            } else if (msg.type === 'position.updated' || msg.eventType === 'position.updated' || msg.type === 'portfolio.mtm') {
+            } else if (
+              msg.type === 'position.updated' ||
+              msg.eventType === 'position.updated' ||
+              msg.type === 'position_update' ||
+              msg.event === 'position.updated' ||
+              msg.type === 'portfolio.mtm'
+            ) {
               triggerRefresh(false);
             } else if (msg.type === 'connected') {
               setIsRealtimeConnected(true);
@@ -754,10 +790,10 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
   }, [showToast, triggerRefresh, currentUser, queueTickUpdates]);
 
   // Adaptive real-time polling:
-  // When live push stream is active, relax polling to 30s to prevent query congestion.
-  // When disconnected or recovering, fallback to 10s polling.
+  // When live push stream is active, relax polling to 10s to prevent query congestion.
+  // When disconnected or recovering, fallback to 4s polling.
   useEffect(() => {
-    const pollInterval = isRealtimeConnected ? 30000 : 10000;
+    const pollInterval = isRealtimeConnected ? 10000 : 4000;
     const poll = setInterval(() => {
       triggerRefresh(false);
     }, pollInterval);
