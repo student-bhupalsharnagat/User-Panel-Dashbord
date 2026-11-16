@@ -846,7 +846,7 @@ async function migrateFromJsonIfEmpty(pool: Pool) {
  */
 export const dbRepo = {
   // Clients
-  async getClients(brokerId?: string, clientId?: string): Promise<Client[]> {
+  async getClients(brokerId?: string, clientId?: string, subBrokerId?: string, masterId?: string, tenantId?: string): Promise<Client[]> {
     if (!pgPool || !isPostgresReady) return [];
     const dummyList = DUMMY_CLIENT_IDS.map(id => `'${id}'`).join(',');
     let query = `SELECT * FROM user_panel_clients WHERE id NOT IN (${dummyList})`;
@@ -854,9 +854,23 @@ export const dbRepo = {
     if (clientId) {
       params.push(clientId);
       query += ` AND id = $${params.length}`;
-    } else if (brokerId) {
-      params.push(brokerId);
-      query += ` AND broker_id = $${params.length}`;
+    } else {
+      if (brokerId) {
+        params.push(brokerId);
+        query += ` AND broker_id = $${params.length}`;
+      }
+      if (subBrokerId) {
+        params.push(subBrokerId);
+        query += ` AND sub_broker_id = $${params.length}`;
+      }
+      if (masterId) {
+        params.push(masterId);
+        query += ` AND master_id = $${params.length}`;
+      }
+      if (tenantId) {
+        params.push(tenantId);
+        query += ` AND tenant_id = $${params.length}`;
+      }
     }
     let rows: any[] = [];
     try {
@@ -941,7 +955,7 @@ export const dbRepo = {
   },
 
   // Orders
-  async getOrders(brokerId?: string, clientId?: string): Promise<Order[]> {
+  async getOrders(brokerId?: string, clientId?: string, subBrokerId?: string, masterId?: string, tenantId?: string): Promise<Order[]> {
     if (!pgPool || !isPostgresReady) return [];
     const dummyList = DUMMY_CLIENT_IDS.map(id => `'${id}'`).join(',');
     let query = `SELECT * FROM user_panel_orders WHERE id NOT LIKE 'ORD-984%' AND (client_id IS NULL OR client_id NOT IN (${dummyList}))`;
@@ -949,9 +963,23 @@ export const dbRepo = {
     if (clientId) {
       params.push(clientId);
       query += ` AND client_id = $${params.length}`;
-    } else if (brokerId) {
-      params.push(brokerId);
-      query += ` AND broker_id = $${params.length}`;
+    } else {
+      if (brokerId) {
+        params.push(brokerId);
+        query += ` AND broker_id = $${params.length}`;
+      }
+      if (subBrokerId) {
+        params.push(subBrokerId);
+        query += ` AND sub_broker_id = $${params.length}`;
+      }
+      if (masterId) {
+        params.push(masterId);
+        query += ` AND master_id = $${params.length}`;
+      }
+      if (tenantId) {
+        params.push(tenantId);
+        query += ` AND tenant_id = $${params.length}`;
+      }
     }
     let rows: any[] = [];
     try {
@@ -1039,7 +1067,7 @@ export const dbRepo = {
   },
 
   // Positions
-  async getPositions(brokerId?: string, clientId?: string): Promise<Position[]> {
+  async getPositions(brokerId?: string, clientId?: string, subBrokerId?: string, masterId?: string, tenantId?: string): Promise<Position[]> {
     if (!pgPool || !isPostgresReady) return [];
     const dummyList = DUMMY_CLIENT_IDS.map(id => `'${id}'`).join(',');
     let query = `SELECT * FROM user_panel_positions WHERE id NOT LIKE 'POS-77%' AND id NOT IN ('POS-77102', 'POS-77103') AND (client_id IS NULL OR client_id NOT IN (${dummyList}))`;
@@ -1047,9 +1075,23 @@ export const dbRepo = {
     if (clientId) {
       params.push(clientId);
       query += ` AND client_id = $${params.length}`;
-    } else if (brokerId) {
-      params.push(brokerId);
-      query += ` AND broker_id = $${params.length}`;
+    } else {
+      if (brokerId) {
+        params.push(brokerId);
+        query += ` AND broker_id = $${params.length}`;
+      }
+      if (subBrokerId) {
+        params.push(subBrokerId);
+        query += ` AND sub_broker_id = $${params.length}`;
+      }
+      if (masterId) {
+        params.push(masterId);
+        query += ` AND master_id = $${params.length}`;
+      }
+      if (tenantId) {
+        params.push(tenantId);
+        query += ` AND tenant_id = $${params.length}`;
+      }
     }
     let rows: any[] = [];
     try {
@@ -1163,7 +1205,7 @@ export const dbRepo = {
   },
 
   // Fund transactions
-  async getFundTransactions(brokerId?: string, clientId?: string): Promise<FundTransaction[]> {
+  async getFundTransactions(brokerId?: string, clientId?: string, subBrokerId?: string, masterId?: string, tenantId?: string): Promise<FundTransaction[]> {
     if (!pgPool || !isPostgresReady) return [];
     const dummyList = DUMMY_CLIENT_IDS.map(id => `'${id}'`).join(',');
     let query = `SELECT * FROM user_panel_fund_transactions WHERE id NOT LIKE 'TXN-804%' AND (client_id IS NULL OR client_id NOT IN (${dummyList}))`;
@@ -1171,9 +1213,23 @@ export const dbRepo = {
     if (clientId) {
       params.push(clientId);
       query += ` AND client_id = $${params.length}`;
-    } else if (brokerId) {
-      params.push(brokerId);
-      query += ` AND broker_id = $${params.length}`;
+    } else {
+      if (brokerId) {
+        params.push(brokerId);
+        query += ` AND broker_id = $${params.length}`;
+      }
+      if (subBrokerId) {
+        params.push(subBrokerId);
+        query += ` AND sub_broker_id = $${params.length}`;
+      }
+      if (masterId) {
+        params.push(masterId);
+        query += ` AND master_id = $${params.length}`;
+      }
+      if (tenantId) {
+        params.push(tenantId);
+        query += ` AND tenant_id = $${params.length}`;
+      }
     }
     let rows: any[] = [];
     try {

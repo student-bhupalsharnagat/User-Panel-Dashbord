@@ -433,7 +433,7 @@ export const PositionsView: React.FC = () => {
                     </td>
 
                     <td className={`${cellPad} text-center font-sans`}>
-                      {currentUser?.role === 'sub_broker' || (currentUser?.role as any) === 'Sub-Broker' ? (
+                      {currentUser?.role === 'sub_broker' || (currentUser?.role as any) === 'Sub-Broker' || currentUser?.role === 'operations' || (currentUser?.role as any) === 'Staff / Ops' ? (
                         <span className="text-slate-500 text-xs italic font-sans" title="Read-only monitoring">—</span>
                       ) : (
                         <button

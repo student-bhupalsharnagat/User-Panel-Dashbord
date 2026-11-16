@@ -418,6 +418,8 @@ const systemUsers: Record<string, AuthenticatedUser> = {
     role: 'sub_broker',
     roleTitle: 'Sub-Broker / Franchisee',
     brokerId: 'BRK-ROHAN-01',
+    subBrokerId: 'SUB-BRK-001',
+    masterId: 'MST-ALPHA-01',
     tenantId: DEFAULT_TENANT_ID,
     organization: 'NexTrade Branch Office',
     phone: '+91 98204 11223',
@@ -457,11 +459,14 @@ const systemUsers: Record<string, AuthenticatedUser> = {
   },
   'trader_client': {
     id: 'USR-TRADER-01',
+    clientId: 'arav12',
     name: 'Aarav Mehta',
     email: 'aarav.mehta@client.com',
     role: 'trader_client',
     roleTitle: 'Trader Client',
     brokerId: 'BRK-ROHAN-01',
+    subBrokerId: 'SUB-BRK-001',
+    masterId: 'MST-ALPHA-01',
     tenantId: DEFAULT_TENANT_ID,
     organization: 'NexTrade Retail',
     phone: '+91 98201 54820',
@@ -2164,6 +2169,12 @@ app.get('/api/auth/me', authMiddleware, (req: AuthenticatedRequest, res: Respons
     subBrokerId: user.subBrokerId,
     masterId: user.masterId,
     tenantId: user.tenantId,
+    clientId: user.clientId || (user as any).client_id,
+    client_id: (user as any).client_id || user.clientId,
+    broker_id: user.broker_id || user.brokerId,
+    sub_broker_id: (user as any).sub_broker_id || user.subBrokerId,
+    master_id: (user as any).master_id || user.masterId,
+    tenant_id: (user as any).tenant_id || user.tenantId,
     organization: user.organization,
     phone: user.phone,
     timezone: 'IST (UTC +05:30)',
@@ -2178,9 +2189,15 @@ app.get('/api/auth/me', authMiddleware, (req: AuthenticatedRequest, res: Respons
     role: fullUser.role,
     roleTitle: fullUser.roleTitle,
     brokerId: fullUser.brokerId,
+    broker_id: fullUser.brokerId,
     subBrokerId: fullUser.subBrokerId,
+    sub_broker_id: fullUser.subBrokerId,
     masterId: fullUser.masterId,
+    master_id: fullUser.masterId,
     tenantId: fullUser.tenantId,
+    tenant_id: fullUser.tenantId,
+    clientId: fullUser.clientId,
+    client_id: fullUser.clientId,
     organization: fullUser.organization,
     phone: fullUser.phone,
   });
@@ -2717,11 +2734,17 @@ app.post(['/api/role', '/api/auth/switch-role'], (req: Request, res: Response) =
     role: targetUser.role,
     roleTitle: targetUser.roleTitle,
     brokerId: targetUser.brokerId,
+    broker_id: targetUser.brokerId,
     tenantId: targetUser.tenantId,
+    tenant_id: targetUser.tenantId,
     organization: targetUser.organization,
     phone: targetUser.phone,
     masterId: (targetUser as any).masterId,
+    master_id: (targetUser as any).masterId,
     subBrokerId: (targetUser as any).subBrokerId,
+    sub_broker_id: (targetUser as any).subBrokerId,
+    clientId: (targetUser as any).clientId,
+    client_id: (targetUser as any).clientId,
   });
 
   pushAudit({
@@ -3213,7 +3236,7 @@ app.get('/api/clients/:id', authMiddleware, (req: AuthenticatedRequest, res: Res
   });
 });
 
-app.post('/api/clients', authMiddleware, requireRole(['broker_admin', 'super_admin', 'operations', 'master', 'master_admin']), (req: AuthenticatedRequest, res: Response) => {
+app.post('/api/clients', authMiddleware, requireRole(['broker_admin', 'super_admin', 'master', 'master_admin']), (req: AuthenticatedRequest, res: Response) => {
   if (checkIdempotency(req, res)) return;
 
   const user = req.user!;
@@ -4006,7 +4029,10 @@ app.post('/api/positions/:id/square-off', authMiddleware, (req: AuthenticatedReq
   if (user.role === 'sub_broker' || (user.role as any) === 'Sub-Broker') {
     return res.status(403).json({ success: false, message: 'Forbidden: Sub-Brokers have read-only monitoring access and cannot square-off positions' });
   }
-  if (user.role === 'trader_client' && pos.clientId !== user.sub) {
+  if ((user.role as any) === 'operations' || (user.role as any) === 'staff_ops' || (user.role as any) === 'Staff / Ops') {
+    return res.status(403).json({ success: false, message: 'Forbidden: Staff / Operations role cannot execute emergency square-offs' });
+  }
+  if (user.role === 'trader_client' && pos.clientId !== user.sub && pos.clientId !== user.clientId && pos.clientId !== (user as any).client_id) {
     return res.status(403).json({ success: false, message: 'Forbidden: Cannot square-off another client position' });
   }
   if (user.role === 'broker_admin' && pos.brokerId !== user.brokerId) {
@@ -4180,6 +4206,9 @@ app.post(['/api/funds/deposit', '/api/funds/request'], authMiddleware, async (re
   if (checkIdempotency(req, res)) return;
 
   const user = req.user!;
+  if (user.role === 'sub_broker' || (user.role as any) === 'Sub-Broker') {
+    return res.status(403).json({ success: false, message: 'Forbidden: Sub-Brokers have read-only monitoring access and cannot initiate fund transactions' });
+  }
   const { amount, method, referenceId, clientId, proofDocument } = req.body;
 
   const numAmount = parseCleanNumber(amount);
@@ -4692,7 +4721,7 @@ app.get('/api/instruments', authMiddleware, (_req: Request, res: Response) => {
   res.json({ success: true, instruments: list });
 });
 
-app.patch('/api/instruments/:symbol/toggle', authMiddleware, requireRole(['broker_admin', 'super_admin']), (req: AuthenticatedRequest, res: Response) => {
+app.patch('/api/instruments/:symbol/toggle', authMiddleware, requireRole(['broker_admin', 'super_admin', 'master', 'master_admin']), (req: AuthenticatedRequest, res: Response) => {
   const user = req.user!;
   const inst = instruments.find(i => i.symbol === req.params.symbol);
   if (!inst) {

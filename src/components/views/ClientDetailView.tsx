@@ -28,6 +28,7 @@ export const ClientDetailView: React.FC = () => {
     openOrderModal,
     openSquareOffModal,
     refreshTrigger,
+    currentUser,
   } = useApp();
 
   const [clientData, setClientData] = useState<Client | null>(selectedClientForDetail);
@@ -89,13 +90,15 @@ export const ClientDetailView: React.FC = () => {
           </div>
 
           <div className="flex items-center gap-2 shrink-0">
-            <button
-              onClick={() => openOrderModal(null, 'BUY')}
-              className="px-2.5 sm:px-3 py-1.5 rounded-lg bg-indigo-600 hover:bg-indigo-500 text-white text-xs font-semibold flex items-center gap-1.5 transition-colors cursor-pointer"
-            >
-              <Plus className="w-3.5 h-3.5" />
-              <span>Place Trade</span>
-            </button>
+            {currentUser?.role !== 'sub_broker' && (currentUser?.role as any) !== 'Sub-Broker' && currentUser?.role !== 'operations' && currentUser?.role !== 'trader_client' && (
+              <button
+                onClick={() => openOrderModal(null, 'BUY')}
+                className="px-2.5 sm:px-3 py-1.5 rounded-lg bg-indigo-600 hover:bg-indigo-500 text-white text-xs font-semibold flex items-center gap-1.5 transition-colors cursor-pointer"
+              >
+                <Plus className="w-3.5 h-3.5" />
+                <span>Place Trade</span>
+              </button>
+            )}
             <button
               onClick={closeClientDetail}
               className="p-1.5 text-slate-400 hover:text-white rounded-lg hover:bg-slate-800 cursor-pointer"
@@ -214,12 +217,14 @@ export const ClientDetailView: React.FC = () => {
                           <div className={`font-mono font-bold ${pos.totalPnL >= 0 ? 'text-emerald-400' : 'text-rose-400'}`}>
                             {pos.totalPnL >= 0 ? '+' : ''}₹{pos.totalPnL.toLocaleString('en-IN')}
                           </div>
-                          <button
-                            onClick={() => openSquareOffModal(pos)}
-                            className="px-2 py-1 bg-rose-600/30 hover:bg-rose-600 text-rose-300 hover:text-white rounded text-[11px] font-bold"
-                          >
-                            Square Off
-                          </button>
+                          {currentUser?.role !== 'sub_broker' && (currentUser?.role as any) !== 'Sub-Broker' && currentUser?.role !== 'operations' && (currentUser?.role as any) !== 'Staff / Ops' && (
+                            <button
+                              onClick={() => openSquareOffModal(pos)}
+                              className="px-2 py-1 bg-rose-600/30 hover:bg-rose-600 text-rose-300 hover:text-white rounded text-[11px] font-bold"
+                            >
+                              Square Off
+                            </button>
+                          )}
                         </div>
                       </div>
                     ))}
@@ -247,12 +252,14 @@ export const ClientDetailView: React.FC = () => {
                     <span className={`font-mono font-bold text-sm ${pos.totalPnL >= 0 ? 'text-emerald-400' : 'text-rose-400'}`}>
                       {pos.totalPnL >= 0 ? '+' : ''}₹{pos.totalPnL.toLocaleString('en-IN')}
                     </span>
-                    <button
-                      onClick={() => openSquareOffModal(pos)}
-                      className="px-2.5 py-1 bg-rose-600/30 hover:bg-rose-600 text-rose-300 hover:text-white rounded text-[11px] font-bold"
-                    >
-                      Square Off
-                    </button>
+                    {currentUser?.role !== 'sub_broker' && (currentUser?.role as any) !== 'Sub-Broker' && currentUser?.role !== 'operations' && (currentUser?.role as any) !== 'Staff / Ops' && (
+                      <button
+                        onClick={() => openSquareOffModal(pos)}
+                        className="px-2.5 py-1 bg-rose-600/30 hover:bg-rose-600 text-rose-300 hover:text-white rounded text-[11px] font-bold"
+                      >
+                        Square Off
+                      </button>
+                    )}
                   </div>
                 </div>
               ))}

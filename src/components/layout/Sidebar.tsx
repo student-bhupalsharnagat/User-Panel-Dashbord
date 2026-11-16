@@ -71,15 +71,23 @@ export const Sidebar: React.FC = () => {
     setIsMobileMenuOpen(false);
   };
 
+  const roleCycle = ['super_admin', 'master', 'broker_admin', 'sub_broker', 'operations', 'trader_client'];
   const handleRoleSwitch = () => {
-    const current = currentUser?.role || 'broker_admin';
-    let nextRole = 'broker_admin';
-    if (current === 'broker_admin') nextRole = 'sub_broker';
-    else if (current === 'sub_broker') nextRole = 'trader_client';
-    else nextRole = 'broker_admin';
+    const current = (currentUser?.role || 'broker_admin').toLowerCase().replace(/[\s\-_/]+/g, '_');
+    const currentIndex = roleCycle.indexOf(current === 'master_admin' ? 'master' : current === 'staff_ops' ? 'operations' : current);
+    const nextRole = currentIndex >= 0 && currentIndex < roleCycle.length - 1 ? roleCycle[currentIndex + 1] : roleCycle[0];
     switchRole(nextRole);
     setIsMobileMenuOpen(false);
   };
+
+  // Trader Client gets standard personal trading terminal views
+  const isTraderClient = currentUser?.role === 'trader_client' || (currentUser?.role as any) === 'client';
+  const visibleNavItems = navigationItems.filter(item => {
+    if (isTraderClient && ['clients', 'analytics', 'action_logs'].includes(item.id)) {
+      return false;
+    }
+    return true;
+  });
 
   return (
     <>
@@ -165,7 +173,7 @@ export const Sidebar: React.FC = () => {
         </div>
 
         <nav className="flex-1 px-3 space-y-0.5 overflow-y-auto">
-          {navigationItems.map((item) => {
+          {visibleNavItems.map((item) => {
             const Icon = item.icon;
             const isActive = activeTab === item.id;
             return (
@@ -207,7 +215,7 @@ export const Sidebar: React.FC = () => {
           <button
             onClick={handleRoleSwitch}
             className="w-full flex items-center justify-between px-3 py-2 rounded-lg text-xs text-slate-400 hover:text-slate-200 hover:bg-[#131c30] transition-colors group cursor-pointer"
-            title="Switch role between Broker Admin, Sub-Broker, and Trader Client"
+            title={`Switch role (${currentUser?.roleTitle || 'Current'} -> Next)`}
           >
             <div className="flex items-center gap-3 min-w-0">
               <Activity className="w-4 h-4 text-slate-500 group-hover:text-amber-400 transition-colors shrink-0" />

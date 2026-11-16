@@ -198,7 +198,9 @@ export const SettingsView: React.FC = () => {
             { id: 'notifications', label: 'Notifications', icon: Bell },
             { id: 'tables', label: 'Table preferences', icon: Sliders },
             { id: 'support', label: 'Support', icon: HelpCircle },
-            { id: 'broker_config', label: 'Broker configuration', icon: Briefcase },
+            ...(['super_admin', 'master', 'master_admin', 'broker_admin'].includes(currentUser?.role || '')
+              ? [{ id: 'broker_config', label: 'Broker configuration', icon: Briefcase }]
+              : []),
           ].map((item) => {
             const Icon = item.icon;
             const isActive = activeSection === item.id;
@@ -398,7 +400,8 @@ export const SettingsView: React.FC = () => {
                 </button>
                 <button
                   type="submit"
-                  disabled={isSaving}
+                  disabled={isSaving || currentUser?.role === 'sub_broker' || (currentUser?.role as any) === 'Sub-Broker'}
+                  title={currentUser?.role === 'sub_broker' || (currentUser?.role as any) === 'Sub-Broker' ? 'Sub-Brokers have read-only monitoring access' : undefined}
                   className="px-5 py-2 rounded-lg bg-indigo-600 hover:bg-indigo-500 text-xs font-bold text-white transition-colors shadow-md shadow-indigo-900/30 disabled:opacity-50"
                 >
                   {isSaving ? 'Saving...' : 'Save changes'}
@@ -449,7 +452,8 @@ export const SettingsView: React.FC = () => {
                 </button>
                 <button
                   type="submit"
-                  disabled={isSaving}
+                  disabled={isSaving || currentUser?.role === 'sub_broker' || (currentUser?.role as any) === 'Sub-Broker'}
+                  title={currentUser?.role === 'sub_broker' || (currentUser?.role as any) === 'Sub-Broker' ? 'Sub-Brokers have read-only monitoring access' : undefined}
                   className="px-5 py-2 rounded-lg bg-indigo-600 hover:bg-indigo-500 text-xs font-bold text-white transition-colors shadow-md shadow-indigo-900/30 disabled:opacity-50"
                 >
                   {isSaving ? 'Saving...' : 'Save changes'}

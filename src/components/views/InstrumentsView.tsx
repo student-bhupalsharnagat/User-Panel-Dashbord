@@ -22,7 +22,7 @@ import { api } from '../../services/api';
 import { MarketInstrument } from '../../types';
 
 export const InstrumentsView: React.FC = () => {
-  const { refreshTrigger, showToast, triggerRefresh, isLiveMode, isCompactMode } = useApp();
+  const { refreshTrigger, showToast, triggerRefresh, isLiveMode, isCompactMode, currentUser } = useApp();
 
   const [instruments, setInstruments] = useState<MarketInstrument[]>([]);
   const [searchQuery, setSearchQuery] = useState('');
@@ -252,16 +252,20 @@ export const InstrumentsView: React.FC = () => {
                   </td>
 
                   <td className={`${cellPad} text-center font-sans`}>
-                    <button
-                      onClick={() => handleToggleStatus(inst.symbol)}
-                      className={`px-2.5 py-1 rounded text-[11px] font-semibold border transition-all cursor-pointer ${
-                        inst.status === 'Enabled'
-                          ? 'border-rose-500/40 text-rose-300 hover:bg-rose-600 hover:text-white'
-                          : 'border-emerald-500/40 text-emerald-300 hover:bg-emerald-600 hover:text-white'
-                      }`}
-                    >
-                      {inst.status === 'Enabled' ? 'Disable' : 'Enable'}
-                    </button>
+                    {currentUser?.role === 'sub_broker' || (currentUser?.role as any) === 'Sub-Broker' || currentUser?.role === 'trader_client' || currentUser?.role === 'operations' || (currentUser?.role as any) === 'Staff / Ops' ? (
+                      <span className="text-slate-500 text-xs italic font-sans" title="Read-only instrument master">—</span>
+                    ) : (
+                      <button
+                        onClick={() => handleToggleStatus(inst.symbol)}
+                        className={`px-2.5 py-1 rounded text-[11px] font-semibold border transition-all cursor-pointer ${
+                          inst.status === 'Enabled'
+                            ? 'border-rose-500/40 text-rose-300 hover:bg-rose-600 hover:text-white'
+                            : 'border-emerald-500/40 text-emerald-300 hover:bg-emerald-600 hover:text-white'
+                        }`}
+                      >
+                        {inst.status === 'Enabled' ? 'Disable' : 'Enable'}
+                      </button>
+                    )}
                   </td>
                 </tr>
               ))}
