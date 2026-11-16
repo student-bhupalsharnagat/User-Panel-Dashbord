@@ -5,10 +5,31 @@
 
 export function parseCleanNumber(val: any): number {
   if (val === null || val === undefined || val === '') return 0;
-  if (typeof val === 'number') return isNaN(val) ? 0 : val;
+  if (typeof val === 'number') return (isNaN(val) || !isFinite(val)) ? 0 : val;
   const cleaned = String(val).replace(/[₹$,\s]/g, '').trim();
   const num = Number(cleaned);
-  return isNaN(num) ? 0 : num;
+  return (isNaN(num) || !isFinite(num)) ? 0 : num;
+}
+
+export const cleanNumber = parseCleanNumber;
+
+export function safeRound(val: any, decimals = 2): number {
+  const num = parseCleanNumber(val);
+  const factor = Math.pow(10, decimals);
+  return Math.round((num + Number.EPSILON) * factor) / factor;
+}
+
+export function formatINR(val: any, decimals = 2): string {
+  const num = safeRound(val, decimals);
+  return num.toLocaleString('en-IN', {
+    minimumFractionDigits: decimals,
+    maximumFractionDigits: decimals,
+  });
+}
+
+export function formatQty(val: any): string {
+  const num = Math.round(parseCleanNumber(val));
+  return num.toLocaleString('en-IN');
 }
 
 const AUTHORITATIVE_INSTRUMENT_PRICES: Record<string, number> = {

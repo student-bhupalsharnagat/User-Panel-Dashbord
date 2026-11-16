@@ -10,38 +10,65 @@ import { useApp } from '../../context/AppContext';
 export const BannerNotice: React.FC = () => {
   const [isDismissed, setIsDismissed] = useState(false);
   const [showLearnMore, setShowLearnMore] = useState(false);
-  const { isLiveMode } = useApp();
+  const { isLiveMode, isRealtimeConnected } = useApp();
+  const [hasConnectedOnce, setHasConnectedOnce] = useState(false);
 
-  if (isDismissed) return null;
+  React.useEffect(() => {
+    if (isRealtimeConnected) {
+      setHasConnectedOnce(true);
+    }
+  }, [isRealtimeConnected]);
+
+  const showReconnectBanner = hasConnectedOnce && !isRealtimeConnected;
+
+  if (isDismissed && !showReconnectBanner) return null;
 
   return (
     <>
-      <div className="bg-[#0e1627] border-b border-[#1c2840] px-3 sm:px-6 py-1.5 sm:py-2 flex items-center justify-between text-[11px] sm:text-xs text-slate-300 gap-2">
-        <div className="flex items-center gap-1.5 sm:gap-2 truncate min-w-0">
-          <span className="font-semibold text-slate-200 shrink-0">Demo workspace</span>
-          <span className="text-slate-500 hidden xs:inline">·</span>
-          <span className="text-slate-400 truncate hidden xs:inline">
-            {isLiveMode 
-              ? 'Connected to authoritative Trading Engine with live market feeds and order reconciliation.' 
-              : 'All identities, prices, balances, and transactions shown are operational sandbox records.'}
+      {showReconnectBanner && (
+        <div className="bg-amber-950/40 border-b border-amber-500/30 px-3 sm:px-6 py-1.5 flex items-center justify-between text-[11px] sm:text-xs text-amber-200/90 gap-2 transition-colors">
+          <div className="flex items-center gap-2 truncate min-w-0">
+            <span className="w-2 h-2 rounded-full bg-amber-400 animate-ping shrink-0" />
+            <span className="font-semibold text-amber-300">Live feed reconnecting</span>
+            <span className="text-amber-500 hidden xs:inline">·</span>
+            <span className="text-amber-200/80 truncate">
+              Live market feed connection interrupted. Reconnecting with exponential backoff and auto-syncing portfolio state...
+            </span>
+          </div>
+          <span className="text-[10px] font-mono text-amber-400/80 bg-amber-500/10 px-2 py-0.5 rounded border border-amber-500/20 shrink-0">
+            Auto-reconnecting
           </span>
         </div>
-        <div className="flex items-center gap-3 sm:gap-4 shrink-0">
-          <button
-            onClick={() => setShowLearnMore(true)}
-            className="text-indigo-400 hover:text-indigo-300 underline font-medium cursor-pointer whitespace-nowrap"
-          >
-            Learn more
-          </button>
-          <button
-            onClick={() => setIsDismissed(true)}
-            className="text-slate-500 hover:text-slate-300 p-0.5 cursor-pointer"
-            aria-label="Dismiss banner"
-          >
-            <X className="w-3.5 h-3.5" />
-          </button>
+      )}
+
+      {!isDismissed && (
+        <div className="bg-[#0e1627] border-b border-[#1c2840] px-3 sm:px-6 py-1.5 sm:py-2 flex items-center justify-between text-[11px] sm:text-xs text-slate-300 gap-2">
+          <div className="flex items-center gap-1.5 sm:gap-2 truncate min-w-0">
+            <span className="font-semibold text-slate-200 shrink-0">Demo workspace</span>
+            <span className="text-slate-500 hidden xs:inline">·</span>
+            <span className="text-slate-400 truncate hidden xs:inline">
+              {isLiveMode 
+                ? 'Connected to authoritative Trading Engine with live market feeds and order reconciliation.' 
+                : 'All identities, prices, balances, and transactions shown are operational sandbox records.'}
+            </span>
+          </div>
+          <div className="flex items-center gap-3 sm:gap-4 shrink-0">
+            <button
+              onClick={() => setShowLearnMore(true)}
+              className="text-indigo-400 hover:text-indigo-300 underline font-medium cursor-pointer whitespace-nowrap"
+            >
+              Learn more
+            </button>
+            <button
+              onClick={() => setIsDismissed(true)}
+              className="text-slate-500 hover:text-slate-300 p-0.5 cursor-pointer"
+              aria-label="Dismiss banner"
+            >
+              <X className="w-3.5 h-3.5" />
+            </button>
+          </div>
         </div>
-      </div>
+      )}
 
       {/* Learn More Modal */}
       {showLearnMore && (

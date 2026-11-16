@@ -969,6 +969,7 @@ export const dbRepo = {
     return rows.map(r => ({
       id: r.id,
       clientId: r.client_id,
+      client_id: r.client_id,
       clientName: r.client_name,
       instrument: r.instrument,
       exchange: r.exchange,
@@ -981,10 +982,14 @@ export const dbRepo = {
       status: r.status,
       created: r.created,
       brokerId: r.broker_id || 'BRK-ROHAN-01',
+      broker_id: r.broker_id || 'BRK-ROHAN-01',
       rejectionReason: r.rejection_reason,
       subBrokerId: r.sub_broker_id || undefined,
+      sub_broker_id: r.sub_broker_id || undefined,
       masterId: r.master_id || undefined,
+      master_id: r.master_id || undefined,
       tenantId: r.tenant_id || undefined,
+      tenant_id: r.tenant_id || undefined,
     }));
   },
 
@@ -1006,11 +1011,11 @@ export const dbRepo = {
           master_id = COALESCE(EXCLUDED.master_id, user_panel_orders.master_id),
           tenant_id = COALESCE(EXCLUDED.tenant_id, user_panel_orders.tenant_id);
       `, [
-        order.id, order.clientId, order.clientName, order.instrument, order.exchange,
+        order.id, order.clientId || (order as any).client_id, order.clientName, order.instrument, order.exchange,
         order.side, order.type, order.quantity, String(order.orderPrice),
         order.executedQty, order.avgPrice, order.status, order.created,
-        order.brokerId, order.rejectionReason || null,
-        order.subBrokerId || null, order.masterId || null, order.tenantId || null
+        order.brokerId || (order as any).broker_id, order.rejectionReason || null,
+        order.subBrokerId || (order as any).sub_broker_id || null, order.masterId || (order as any).master_id || null, order.tenantId || (order as any).tenant_id || null
       ]);
     } catch (e: any) {
       console.warn('[Database dbRepo.insertOrder] notice:', e.message);
@@ -1086,6 +1091,7 @@ export const dbRepo = {
       return {
         id: r.id,
         clientId: r.client_id,
+        client_id: r.client_id,
         clientName: r.client_name,
         instrument: r.instrument,
         exchange: r.exchange,
@@ -1100,9 +1106,13 @@ export const dbRepo = {
         totalPnL: Number((realisedPnL + unrealisedPnL).toFixed(2)),
         marginUsed,
         brokerId: r.broker_id || 'BRK-ROHAN-01',
+        broker_id: r.broker_id || 'BRK-ROHAN-01',
         subBrokerId: r.sub_broker_id || undefined,
+        sub_broker_id: r.sub_broker_id || undefined,
         masterId: r.master_id || undefined,
+        master_id: r.master_id || undefined,
         tenantId: r.tenant_id || undefined,
+        tenant_id: r.tenant_id || undefined,
       };
     });
   },
@@ -1181,6 +1191,7 @@ export const dbRepo = {
     return rows.map(r => ({
       id: r.id,
       clientId: r.client_id,
+      client_id: r.client_id,
       clientName: r.client_name,
       type: r.type,
       amount: parseCleanNumber(r.amount),
@@ -1193,9 +1204,13 @@ export const dbRepo = {
       approvedBy: r.approved_by,
       rejectionReason: r.rejection_reason,
       brokerId: r.broker_id || 'BRK-ROHAN-01',
+      broker_id: r.broker_id || 'BRK-ROHAN-01',
       subBrokerId: r.sub_broker_id || undefined,
+      sub_broker_id: r.sub_broker_id || undefined,
       masterId: r.master_id || undefined,
+      master_id: r.master_id || undefined,
       tenantId: r.tenant_id || undefined,
+      tenant_id: r.tenant_id || undefined,
     }));
   },
 
@@ -1219,10 +1234,10 @@ export const dbRepo = {
           master_id = COALESCE(EXCLUDED.master_id, user_panel_fund_transactions.master_id),
           tenant_id = COALESCE(EXCLUDED.tenant_id, user_panel_fund_transactions.tenant_id);
       `, [
-        txn.id, txn.clientId, txn.clientName, txn.type, txn.amount, txn.method,
+        txn.id, txn.clientId || (txn as any).client_id, txn.clientName, txn.type, txn.amount, txn.method,
         txn.requestDate, txn.referenceId, txn.status, txn.verification,
-        txn.proofDocument || null, txn.approvedBy || null, txn.rejectionReason || null, txn.brokerId || 'BRK-ROHAN-01',
-        txn.subBrokerId || null, txn.masterId || null, txn.tenantId || null
+        txn.proofDocument || null, txn.approvedBy || null, txn.rejectionReason || null, txn.brokerId || (txn as any).broker_id || 'BRK-ROHAN-01',
+        txn.subBrokerId || (txn as any).sub_broker_id || null, txn.masterId || (txn as any).master_id || null, txn.tenantId || (txn as any).tenant_id || null
       ]);
     } catch (e: any) {
       console.warn('[Database dbRepo.insertFundTransaction] notice:', e.message);

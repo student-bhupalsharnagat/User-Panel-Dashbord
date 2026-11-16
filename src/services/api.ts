@@ -515,6 +515,25 @@ export const api = {
     return data.transaction;
   },
 
+  async depositFund(depositData: {
+    amount: number;
+    method?: string;
+    referenceId?: string;
+    clientId?: string;
+    proofDocument?: string;
+  }): Promise<FundTransaction> {
+    const res = await authenticatedFetch('/api/funds/deposit', {
+      method: 'POST',
+      headers: {
+        'X-Idempotency-Key': generateIdempotencyKey(),
+      },
+      body: JSON.stringify(depositData),
+    });
+    const data = await res.json();
+    if (!data.success) throw new Error(data.message || 'Deposit request failed');
+    return data.transaction;
+  },
+
   // Ledger
   async getLedger(timeRange?: string): Promise<{ summary: any; entries: LedgerEntry[] }> {
     const q = timeRange ? `?timeRange=${encodeURIComponent(timeRange)}` : '';

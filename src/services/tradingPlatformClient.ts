@@ -1170,12 +1170,16 @@ export class TradingPlatformClient extends EventEmitter {
         ws.onopen = () => {
           clearTimeout(this.wsConnectionTimeoutTimer);
           this.wsConnectionTimeoutTimer = null;
+          const wasReconnecting = this.reconnectAttempts > 0;
           this.reconnectAttempts = 0;
           this.lastWsActivity = Date.now();
           console.log('[TradingPlatformClient] Real-time WebSocket connected to Trading Platform.');
           this.status.wsConnected = true;
           this.status.error = null;
           this.emit('ws_connected');
+          if (wasReconnecting) {
+            this.emit('ws_reconnected');
+          }
           this.startWsHeartbeat();
           settle();
         };

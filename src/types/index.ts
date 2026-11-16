@@ -34,7 +34,13 @@ export interface AuthenticatedUser {
   brokerId: string;
   subBrokerId?: string;
   masterId?: string;
+  clientId?: string;
+  client_id?: string;
+  broker_id?: string;
+  sub_broker_id?: string;
+  master_id?: string;
   tenantId: string;
+  tenant_id?: string;
   organization: string;
   phone: string;
   timezone: string;
@@ -154,6 +160,11 @@ export interface Order {
   masterId?: string;
   tenantId?: string;
   product?: string;
+  client_id?: string;
+  broker_id?: string;
+  sub_broker_id?: string;
+  master_id?: string;
+  tenant_id?: string;
 }
 
 export interface Position {
@@ -176,6 +187,11 @@ export interface Position {
   subBrokerId?: string;
   masterId?: string;
   tenantId?: string;
+  client_id?: string;
+  broker_id?: string;
+  sub_broker_id?: string;
+  master_id?: string;
+  tenant_id?: string;
 }
 
 export interface FundTransaction {
@@ -196,6 +212,11 @@ export interface FundTransaction {
   subBrokerId?: string;
   masterId?: string;
   tenantId?: string;
+  client_id?: string;
+  broker_id?: string;
+  sub_broker_id?: string;
+  master_id?: string;
+  tenant_id?: string;
 }
 
 export interface LedgerEntry {

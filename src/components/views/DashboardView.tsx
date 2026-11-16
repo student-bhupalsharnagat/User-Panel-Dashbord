@@ -29,6 +29,7 @@ import {
   OperationsQueueItem,
   TurnoverTrendPoint,
 } from '../../types';
+import { parseCleanNumber, safeRound, formatINR } from '../../utils/cleanNumber';
 
 export const DashboardView: React.FC = () => {
   const {
@@ -141,27 +142,27 @@ export const DashboardView: React.FC = () => {
   }, [refreshTrigger]);
 
   // Single source for every client count on this page so cards, ribbon and donut always agree
-  const totalClients = metrics?.totalClients ?? 0;
-  const activeClients = metrics?.activeClients ?? 0;
-  const inactiveClients = metrics?.inactiveClients ?? Math.max(0, totalClients - activeClients);
-  const newToday = metrics?.newToday ?? 0;
-  const activeRatioPct = totalClients > 0 ? +((activeClients / totalClients) * 100).toFixed(1) : 0;
+  const totalClients = Math.round(parseCleanNumber(metrics?.totalClients));
+  const activeClients = Math.round(parseCleanNumber(metrics?.activeClients));
+  const inactiveClients = metrics?.inactiveClients != null ? Math.round(parseCleanNumber(metrics.inactiveClients)) : Math.max(0, totalClients - activeClients);
+  const newToday = Math.round(parseCleanNumber(metrics?.newToday));
+  const activeRatioPct = totalClients > 0 ? safeRound((activeClients / totalClients) * 100, 1) : 0;
 
   const handleExportSummary = () => {
     if (!metrics) return;
     const summaryData = [
       ['Metric', 'Value'],
-      ['Total Clients', metrics.totalClients],
-      ['Active Clients', metrics.activeClients],
-      ['Inactive Clients', metrics.inactiveClients],
-      ['New Today', metrics.newToday],
-      ['Ledger Balance (Cr)', `₹${metrics.ledgerBalanceCr} Cr`],
-      ['Open P&L (L)', `${Number(metrics.openPnLL) >= 0 ? '+' : ''}₹${metrics.openPnLL} L`],
-      ['Margin Used (Cr)', `₹${metrics.marginUsedCr} Cr`],
-      ['Margin Available (Cr)', `₹${metrics.marginAvailableCr} Cr`],
-      ['Today Orders', metrics.todaysOrders],
-      ['Client Turnover (Cr)', `₹${metrics.clientTurnoverCr} Cr`],
-      ['Commission (L)', `₹${metrics.commissionL} L`],
+      ['Total Clients', totalClients],
+      ['Active Clients', activeClients],
+      ['Inactive Clients', inactiveClients],
+      ['New Today', newToday],
+      ['Ledger Balance (Cr)', `₹${formatINR(metrics.ledgerBalanceCr, 2)} Cr`],
+      ['Open P&L (L)', `${parseCleanNumber(metrics.openPnLL) >= 0 ? '+' : ''}₹${formatINR(metrics.openPnLL, 2)} L`],
+      ['Margin Used (Cr)', `₹${formatINR(metrics.marginUsedCr, 2)} Cr`],
+      ['Margin Available (Cr)', `₹${formatINR(metrics.marginAvailableCr, 2)} Cr`],
+      ['Today Orders', Math.round(parseCleanNumber(metrics.todaysOrders))],
+      ['Client Turnover (Cr)', `₹${formatINR(metrics.clientTurnoverCr, 2)} Cr`],
+      ['Commission (L)', `₹${formatINR(metrics.commissionL, 2)} L`],
     ];
     const csvContent = 'data:text/csv;charset=utf-8,' + summaryData.map(e => e.join(',')).join('\n');
     const encodedUri = encodeURI(csvContent);
@@ -268,11 +269,11 @@ export const DashboardView: React.FC = () => {
             </div>
           </div>
           <div className="text-2xl font-bold font-mono text-white tracking-tight">
-            ₹{metrics !== null ? Number(metrics.ledgerBalanceCr).toFixed(2) : '0.00'} Cr
+            ₹{formatINR(metrics?.ledgerBalanceCr ?? 0, 2)} Cr
           </div>
           <div className="text-[11px] text-emerald-400 font-medium mt-1 flex items-center gap-1">
             <ArrowUpRight className="w-3.5 h-3.5" />
-            <span>+₹{metrics !== null ? Number(metrics.ledgerBalanceNetWeekL).toFixed(2) : '0.00'} L net week</span>
+            <span>+₹{formatINR(metrics?.ledgerBalanceNetWeekL ?? 0, 2)} L net week</span>
           </div>
         </div>
 
@@ -284,12 +285,12 @@ export const DashboardView: React.FC = () => {
               <TrendingUp className="w-4 h-4" />
             </div>
           </div>
-          <div className={`text-2xl font-bold font-mono tracking-tight ${(metrics?.openPnLL ?? 0) >= 0 ? 'text-emerald-400' : 'text-rose-400'}`}>
-            {(metrics?.openPnLL ?? 0) >= 0 ? '+' : ''}₹{Number(metrics?.openPnLL ?? 0).toFixed(2)} L
+          <div className={`text-2xl font-bold font-mono tracking-tight ${(parseCleanNumber(metrics?.openPnLL)) >= 0 ? 'text-emerald-400' : 'text-rose-400'}`}>
+            {parseCleanNumber(metrics?.openPnLL) >= 0 ? '+' : ''}₹{formatINR(metrics?.openPnLL ?? 0, 2)} L
           </div>
-          <div className={`text-[11px] font-medium mt-1 flex items-center gap-1 ${(metrics?.openPnLDayChangePct ?? 0) >= 0 ? 'text-emerald-400' : 'text-rose-400'}`}>
+          <div className={`text-[11px] font-medium mt-1 flex items-center gap-1 ${(parseCleanNumber(metrics?.openPnLDayChangePct)) >= 0 ? 'text-emerald-400' : 'text-rose-400'}`}>
             <ArrowUpRight className="w-3.5 h-3.5" />
-            <span>{(metrics?.openPnLDayChangePct ?? 0) >= 0 ? '+' : ''}{metrics?.openPnLDayChangePct ?? 0}% on day</span>
+            <span>{parseCleanNumber(metrics?.openPnLDayChangePct) >= 0 ? '+' : ''}{parseCleanNumber(metrics?.openPnLDayChangePct)}% on day</span>
           </div>
         </div>
       </div>
@@ -314,11 +315,11 @@ export const DashboardView: React.FC = () => {
         </button>
         <div className="p-2 rounded-lg bg-slate-900/60 border border-slate-800/40">
           <div className="text-[10px] font-semibold text-slate-400 uppercase tracking-wider truncate">Margin used</div>
-          <div className="text-xs font-bold font-mono text-slate-200 mt-0.5">₹{metrics !== null ? Number(metrics.marginUsedCr).toFixed(2) : '0.00'} Cr</div>
+          <div className="text-xs font-bold font-mono text-slate-200 mt-0.5">₹{formatINR(metrics?.marginUsedCr ?? 0, 2)} Cr</div>
         </div>
         <div className="p-2 rounded-lg bg-slate-900/60 border border-slate-800/40">
           <div className="text-[10px] font-semibold text-slate-400 uppercase tracking-wider truncate">Avail margin</div>
-          <div className="text-xs font-bold font-mono text-slate-200 mt-0.5">₹{metrics !== null ? Number(metrics.marginAvailableCr).toFixed(2) : '0.00'} Cr</div>
+          <div className="text-xs font-bold font-mono text-slate-200 mt-0.5">₹{formatINR(metrics?.marginAvailableCr ?? 0, 2)} Cr</div>
         </div>
         <button
           onClick={() => setActiveTab('orders')}
@@ -326,7 +327,7 @@ export const DashboardView: React.FC = () => {
           title="Review Orders Execution"
         >
           <div className="text-[10px] font-semibold text-slate-400 group-hover:text-slate-300 uppercase tracking-wider truncate">Today's orders</div>
-          <div className="text-xs font-bold font-mono text-slate-200 group-hover:text-white mt-0.5">{metrics?.todaysOrders !== undefined ? metrics.todaysOrders.toLocaleString('en-IN') : '0'}</div>
+          <div className="text-xs font-bold font-mono text-slate-200 group-hover:text-white mt-0.5">{Math.round(parseCleanNumber(metrics?.todaysOrders)).toLocaleString('en-IN')}</div>
         </button>
         <button
           onClick={() => {
@@ -337,7 +338,7 @@ export const DashboardView: React.FC = () => {
           title="Review Pending Deposits"
         >
           <div className="text-[10px] font-semibold text-amber-400/90 uppercase tracking-wider truncate">Pending dep</div>
-          <div className="text-xs font-bold font-mono text-amber-400 mt-0.5">{metrics?.pendingDeposits ?? 0}</div>
+          <div className="text-xs font-bold font-mono text-amber-400 mt-0.5">{Math.round(parseCleanNumber(metrics?.pendingDeposits))}</div>
         </button>
         <button
           onClick={() => {
@@ -348,15 +349,15 @@ export const DashboardView: React.FC = () => {
           title="Review Pending Withdrawals"
         >
           <div className="text-[10px] font-semibold text-rose-400/90 uppercase tracking-wider truncate">Pending wdr</div>
-          <div className="text-xs font-bold font-mono text-rose-400 mt-0.5">{metrics?.pendingWithdrawals ?? 0}</div>
+          <div className="text-xs font-bold font-mono text-rose-400 mt-0.5">{Math.round(parseCleanNumber(metrics?.pendingWithdrawals))}</div>
         </button>
         <div className="p-2 rounded-lg bg-slate-900/60 border border-slate-800/40">
           <div className="text-[10px] font-semibold text-slate-400 uppercase tracking-wider truncate">Turnover</div>
-          <div className="text-xs font-bold font-mono text-slate-200 mt-0.5">₹{metrics !== null ? Number(metrics.clientTurnoverCr).toFixed(2) : '0.00'} Cr</div>
+          <div className="text-xs font-bold font-mono text-slate-200 mt-0.5">₹{formatINR(metrics?.clientTurnoverCr ?? 0, 2)} Cr</div>
         </div>
         <div className="p-2 rounded-lg bg-slate-900/60 border border-slate-800/40 col-span-2 sm:col-span-1">
           <div className="text-[10px] font-semibold text-slate-400 uppercase tracking-wider truncate">Commission</div>
-          <div className="text-xs font-bold font-mono text-indigo-300 mt-0.5">₹{metrics !== null ? Number(metrics.commissionL).toFixed(2) : '0.00'} L</div>
+          <div className="text-xs font-bold font-mono text-indigo-300 mt-0.5">₹{formatINR(metrics?.commissionL ?? 0, 2)} L</div>
         </div>
       </div>
 
@@ -627,17 +628,17 @@ export const DashboardView: React.FC = () => {
               <span className="text-[11px] text-slate-400">Today across all positions</span>
             </div>
 
-            <div className={`text-3xl font-extrabold font-mono tracking-tight my-2 ${(metrics?.realisedPnL ?? 0) + (metrics?.unrealisedPnL ?? 0) >= 0 ? 'text-emerald-400' : 'text-rose-400'}`}>
-              {metrics?.totalPnLFormatted || '+₹0'}
+            <div className={`text-3xl font-extrabold font-mono tracking-tight my-2 ${(parseCleanNumber(metrics?.realisedPnL) + parseCleanNumber(metrics?.unrealisedPnL)) >= 0 ? 'text-emerald-400' : 'text-rose-400'}`}>
+              {metrics?.totalPnLFormatted || `${(parseCleanNumber(metrics?.realisedPnL) + parseCleanNumber(metrics?.unrealisedPnL)) >= 0 ? '+' : ''}₹${formatINR(parseCleanNumber(metrics?.realisedPnL) + parseCleanNumber(metrics?.unrealisedPnL), 0)}`}
             </div>
 
             <div className="space-y-3 mt-4 text-xs font-mono">
               <div>
                 <div className="flex justify-between text-slate-400 mb-1">
                   <span className="font-sans">Realised:</span>
-                  <span className={`font-bold ${(metrics?.realisedPnL ?? 0) >= 0 ? 'text-emerald-400' : 'text-rose-400'}`}>
-                    {metrics?.realisedPnL !== undefined
-                      ? `${metrics.realisedPnL >= 0 ? '+' : '-'}₹${Math.abs(metrics.realisedPnL).toLocaleString('en-IN')}`
+                  <span className={`font-bold ${parseCleanNumber(metrics?.realisedPnL) >= 0 ? 'text-emerald-400' : 'text-rose-400'}`}>
+                    {parseCleanNumber(metrics?.realisedPnL) !== 0
+                      ? `${parseCleanNumber(metrics?.realisedPnL) >= 0 ? '+' : '-'}₹${formatINR(Math.abs(parseCleanNumber(metrics?.realisedPnL)), 0)}`
                       : '₹0'}
                   </span>
                 </div>
@@ -646,8 +647,8 @@ export const DashboardView: React.FC = () => {
                     className="h-full bg-emerald-500 rounded-full"
                     style={{
                       width: `${
-                        Math.abs(metrics?.realisedPnL || 0) + Math.abs(metrics?.unrealisedPnL || 0) > 0
-                          ? Math.round((Math.abs(metrics?.realisedPnL || 0) / (Math.abs(metrics?.realisedPnL || 0) + Math.abs(metrics?.unrealisedPnL || 0))) * 100)
+                        Math.abs(parseCleanNumber(metrics?.realisedPnL)) + Math.abs(parseCleanNumber(metrics?.unrealisedPnL)) > 0
+                          ? Math.round((Math.abs(parseCleanNumber(metrics?.realisedPnL)) / (Math.abs(parseCleanNumber(metrics?.realisedPnL)) + Math.abs(parseCleanNumber(metrics?.unrealisedPnL)))) * 100)
                           : 50
                       }%`
                     }}
@@ -658,9 +659,9 @@ export const DashboardView: React.FC = () => {
               <div>
                 <div className="flex justify-between text-slate-400 mb-1">
                   <span className="font-sans">Unrealised:</span>
-                  <span className={`font-bold ${(metrics?.unrealisedPnL ?? 0) >= 0 ? 'text-teal-400' : 'text-rose-400'}`}>
-                    {metrics?.unrealisedPnL !== undefined
-                      ? `${metrics.unrealisedPnL >= 0 ? '+' : '-'}₹${Math.abs(metrics.unrealisedPnL).toLocaleString('en-IN')}`
+                  <span className={`font-bold ${parseCleanNumber(metrics?.unrealisedPnL) >= 0 ? 'text-teal-400' : 'text-rose-400'}`}>
+                    {parseCleanNumber(metrics?.unrealisedPnL) !== 0
+                      ? `${parseCleanNumber(metrics?.unrealisedPnL) >= 0 ? '+' : '-'}₹${formatINR(Math.abs(parseCleanNumber(metrics?.unrealisedPnL)), 0)}`
                       : '₹0'}
                   </span>
                 </div>
@@ -669,8 +670,8 @@ export const DashboardView: React.FC = () => {
                     className="h-full bg-teal-400 rounded-full"
                     style={{
                       width: `${
-                        Math.abs(metrics?.realisedPnL || 0) + Math.abs(metrics?.unrealisedPnL || 0) > 0
-                          ? Math.round((Math.abs(metrics?.unrealisedPnL || 0) / (Math.abs(metrics?.realisedPnL || 0) + Math.abs(metrics?.unrealisedPnL || 0))) * 100)
+                        Math.abs(parseCleanNumber(metrics?.realisedPnL)) + Math.abs(parseCleanNumber(metrics?.unrealisedPnL)) > 0
+                          ? Math.round((Math.abs(parseCleanNumber(metrics?.unrealisedPnL)) / (Math.abs(parseCleanNumber(metrics?.realisedPnL)) + Math.abs(parseCleanNumber(metrics?.unrealisedPnL)))) * 100)
                           : 50
                       }%`
                     }}

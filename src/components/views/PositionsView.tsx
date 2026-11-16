@@ -18,7 +18,7 @@ import {
 import { useApp } from '../../context/AppContext';
 import { api } from '../../services/api';
 import { Position } from '../../types';
-import { parseCleanNumber, liveLtpLookup } from '../../utils/cleanNumber';
+import { parseCleanNumber, liveLtpLookup, safeRound, formatINR } from '../../utils/cleanNumber';
 
 export const PositionsView: React.FC = () => {
   const {
@@ -100,13 +100,13 @@ export const PositionsView: React.FC = () => {
 
           const isBuy = netQty >= 0;
           if (currentPrice > 0 && avgPrice > 0 && netQty !== 0) {
-            unrealisedPnL = Number((isBuy ? (currentPrice - avgPrice) * netQty : (avgPrice - currentPrice) * Math.abs(netQty)).toFixed(2));
+            unrealisedPnL = safeRound(isBuy ? (currentPrice - avgPrice) * netQty : (avgPrice - currentPrice) * Math.abs(netQty), 2);
           }
 
           const realisedPnL = parseCleanNumber(rawPos.realisedPnL || rawPos.realizedPnl || 0);
           let marginUsed = parseCleanNumber(rawPos.marginUsed || rawPos.margin);
           if (marginUsed <= 0 && avgPrice > 0 && netQty !== 0) {
-            marginUsed = Number((avgPrice * Math.abs(netQty) * 0.2).toFixed(2));
+            marginUsed = safeRound(avgPrice * Math.abs(netQty) * 0.2, 2);
           }
 
           return {
@@ -115,12 +115,12 @@ export const PositionsView: React.FC = () => {
             buyQty,
             sellQty,
             netQty,
-            avgPrice,
-            currentPrice,
-            realisedPnL,
-            unrealisedPnL,
-            totalPnL: Number((realisedPnL + unrealisedPnL).toFixed(2)),
-            marginUsed,
+            avgPrice: safeRound(avgPrice, 2),
+            currentPrice: safeRound(currentPrice, 2),
+            realisedPnL: safeRound(realisedPnL, 2),
+            unrealisedPnL: safeRound(unrealisedPnL, 2),
+            totalPnL: safeRound(realisedPnL + unrealisedPnL, 2),
+            marginUsed: safeRound(marginUsed, 2),
           };
         });
         setPositions(merged);
@@ -143,18 +143,20 @@ export const PositionsView: React.FC = () => {
           k => k.toUpperCase() === instUpper || k.toUpperCase().replace(/[\s_\-/]/g, '') === instClean
         );
         const update = tickKey ? latestTicks[tickKey] : null;
-        if (!update || !update.lastPrice || update.lastPrice === pos.currentPrice) return pos;
+        if (!update || !update.lastPrice || parseCleanNumber(update.lastPrice) <= 0) return pos;
+        const currentPrice = safeRound(update.lastPrice, 2);
+        if (currentPrice === pos.currentPrice) return pos;
         changed = true;
-        const currentPrice = update.lastPrice;
         const isBuy = pos.netQty >= 0;
-        const unrealisedPnL = Number(
-          (isBuy ? (currentPrice - pos.avgPrice) * pos.netQty : (pos.avgPrice - currentPrice) * Math.abs(pos.netQty)).toFixed(2)
+        const unrealisedPnL = safeRound(
+          isBuy ? (currentPrice - pos.avgPrice) * pos.netQty : (pos.avgPrice - currentPrice) * Math.abs(pos.netQty),
+          2
         );
         return {
           ...pos,
           currentPrice,
           unrealisedPnL,
-          totalPnL: Number((pos.realisedPnL + unrealisedPnL).toFixed(2)),
+          totalPnL: safeRound(pos.realisedPnL + unrealisedPnL, 2),
         };
       });
       return changed ? next : prev;
@@ -217,18 +219,18 @@ export const PositionsView: React.FC = () => {
   };
 
   // Derived KPI sums ensuring Net P&L always includes Realised P&L
-  const computedRealised = positions.reduce((acc, p) => acc + (p.realisedPnL || 0), 0);
-  const computedUnrealised = positions.reduce((acc, p) => acc + (p.unrealisedPnL || 0), 0);
+  const computedRealised = positions.reduce((acc, p) => acc + safeRound(p.realisedPnL || 0, 2), 0);
+  const computedUnrealised = positions.reduce((acc, p) => acc + safeRound(p.unrealisedPnL || 0, 2), 0);
 
   const totalRealisedVal = summary?.totalRealisedPnLL != null
-    ? Number(summary.totalRealisedPnLL)
-    : +(computedRealised / 100000).toFixed(2);
+    ? safeRound(summary.totalRealisedPnLL, 2)
+    : safeRound(computedRealised / 100000, 2);
 
   const totalUnrealisedVal = summary?.unrealisedPnLL != null
-    ? Number(summary.unrealisedPnLL)
-    : +(computedUnrealised / 100000).toFixed(2);
+    ? safeRound(summary.unrealisedPnLL, 2)
+    : safeRound(computedUnrealised / 100000, 2);
 
-  const netPnLVal = +(totalRealisedVal + totalUnrealisedVal).toFixed(2);
+  const netPnLVal = safeRound(totalRealisedVal + totalUnrealisedVal, 2);
 
   return (
     <div className="p-3.5 sm:p-5 lg:p-6 space-y-4 sm:space-y-6 max-w-[1600px] mx-auto text-slate-100">
@@ -407,27 +409,27 @@ export const PositionsView: React.FC = () => {
                     </td>
 
                     <td className={`${cellPad} text-right text-slate-200`}>
-                      ₹{pos.avgPrice.toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                      ₹{formatINR(pos.avgPrice, 2)}
                     </td>
 
                     <td className={`${cellPad} text-right font-bold text-white`}>
-                      ₹{pos.currentPrice.toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                      ₹{formatINR(pos.currentPrice, 2)}
                     </td>
 
                     <td className={`${cellPad} text-right ${pos.realisedPnL >= 0 ? 'text-slate-300' : 'text-rose-400'}`}>
-                      {pos.realisedPnL !== 0 ? `₹${pos.realisedPnL.toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}` : '₹0.00'}
+                      {pos.realisedPnL !== 0 ? `₹${formatINR(pos.realisedPnL, 2)}` : '₹0.00'}
                     </td>
 
                     <td className={`${cellPad} text-right font-medium ${pos.unrealisedPnL >= 0 ? 'text-emerald-400' : 'text-rose-400'}`}>
-                      {pos.unrealisedPnL >= 0 ? '+' : ''}₹{pos.unrealisedPnL.toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                      {pos.unrealisedPnL >= 0 ? '+' : ''}₹{formatINR(pos.unrealisedPnL, 2)}
                     </td>
 
                     <td className={`${cellPad} text-right font-bold ${isPositiveTotal ? 'text-emerald-400' : 'text-rose-400'}`}>
-                      {isPositiveTotal ? '+' : ''}₹{pos.totalPnL.toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                      {isPositiveTotal ? '+' : ''}₹{formatINR(pos.totalPnL, 2)}
                     </td>
 
                     <td className={`${cellPad} text-right text-slate-300`}>
-                      ₹{pos.marginUsed.toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                      ₹{formatINR(pos.marginUsed, 2)}
                     </td>
 
                     <td className={`${cellPad} text-center font-sans`}>

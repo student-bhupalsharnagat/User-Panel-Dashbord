@@ -17,7 +17,7 @@ import {
   SettingsState,
   TenantBranding,
 } from '../types';
-import { api, getAuthToken, setAuthToken, resolveApiUrl } from '../services/api';
+import { api, getAuthToken, setAuthToken, resolveApiUrl, API_BASE } from '../services/api';
 import { parseCleanNumber } from '../utils/cleanNumber';
 
 export interface ToastItem {
@@ -490,9 +490,17 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
         eventSource = new EventSource(resolveApiUrl(ssePath));
 
         eventSource.addEventListener('connected', () => {
+          if (reconnectAttempts > 0) {
+            triggerRefresh(false);
+          }
           reconnectAttempts = 0;
           setIsRealtimeConnected(true);
           setIsLiveMode(true);
+        });
+
+        eventSource.addEventListener('upstream_reconnected', () => {
+          setIsRealtimeConnected(true);
+          triggerRefresh(false);
         });
 
         eventSource.addEventListener('ping', () => {
@@ -658,31 +666,89 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
     connectSSE();
 
     let ws: WebSocket | null = null;
-    try {
-      const wsProtocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
-      const wsUrl = `${wsProtocol}//${window.location.hostname}:4000/ws`;
-      ws = new WebSocket(wsUrl);
-      ws.onmessage = (event) => {
-        try {
-          const msg = JSON.parse(event.data);
-          if (msg.type === 'tick' || msg.eventType === 'market.ticks' || msg.type === 'market.ticks') {
-            const ticks = Array.isArray(msg.data) ? msg.data : (msg.data ? [msg.data] : (Array.isArray(msg.payload) ? msg.payload : [msg.payload || msg]));
-            queueTickUpdates(ticks);
-          } else if (msg.type === 'position.updated' || msg.eventType === 'position.updated' || msg.type === 'portfolio.mtm') {
+    let wsReconnectTimer: any = null;
+    let wsReconnectAttempts = 0;
+
+    function getWebSocketUrl(): string {
+      const token = getAuthToken();
+      const tokenParam = token ? `?token=${encodeURIComponent(token)}` : '';
+      if (API_BASE && /^https?:\/\//i.test(API_BASE)) {
+        const url = new URL(API_BASE);
+        const protocol = url.protocol === 'https:' ? 'wss:' : 'ws:';
+        return `${protocol}//${url.host}/ws${tokenParam}`;
+      }
+      if (typeof window !== 'undefined' && window.location) {
+        const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
+        return `${protocol}//${window.location.host}/ws${tokenParam}`;
+      }
+      return 'ws://localhost:4000/ws';
+    }
+
+    function connectWS() {
+      if (isDisposed) return;
+      try {
+        const wsUrl = getWebSocketUrl();
+        ws = new WebSocket(wsUrl);
+
+        ws.onopen = () => {
+          if (wsReconnectAttempts > 0) {
             triggerRefresh(false);
           }
-        } catch {}
-      };
-      ws.onerror = () => {};
-    } catch {}
+          wsReconnectAttempts = 0;
+          setIsRealtimeConnected(true);
+        };
+
+        ws.onmessage = (event) => {
+          try {
+            const msg = JSON.parse(event.data);
+            if (msg.type === 'tick' || msg.eventType === 'market.ticks' || msg.type === 'market.ticks') {
+              const ticks = Array.isArray(msg.data) ? msg.data : (msg.data ? [msg.data] : (Array.isArray(msg.payload) ? msg.payload : [msg.payload || msg]));
+              queueTickUpdates(ticks);
+            } else if (msg.type === 'position.updated' || msg.eventType === 'position.updated' || msg.type === 'portfolio.mtm') {
+              triggerRefresh(false);
+            } else if (msg.type === 'connected') {
+              setIsRealtimeConnected(true);
+            }
+          } catch {}
+        };
+
+        ws.onerror = () => {
+          // Handled via onclose
+        };
+
+        ws.onclose = () => {
+          if (ws) {
+            try { ws.close(); } catch {}
+            ws = null;
+          }
+          if (!isDisposed) {
+            clearTimeout(wsReconnectTimer);
+            const delay = Math.min(1000 * Math.pow(1.5, wsReconnectAttempts) + Math.random() * 400, 15000);
+            wsReconnectAttempts++;
+            wsReconnectTimer = setTimeout(connectWS, delay);
+          }
+        };
+      } catch {
+        if (!isDisposed) {
+          clearTimeout(wsReconnectTimer);
+          const delay = Math.min(1000 * Math.pow(1.5, wsReconnectAttempts) + Math.random() * 400, 15000);
+          wsReconnectAttempts++;
+          wsReconnectTimer = setTimeout(connectWS, delay);
+        }
+      }
+    }
+
+    connectWS();
 
     return () => {
       isDisposed = true;
       clearTimeout(reconnectTimer);
+      clearTimeout(wsReconnectTimer);
       clearTimeout(tickFlushTimerRef.current);
       eventSource?.close();
       if (ws) {
         try { ws.close(); } catch {}
+        ws = null;
       }
     };
   }, [showToast, triggerRefresh, currentUser, queueTickUpdates]);
