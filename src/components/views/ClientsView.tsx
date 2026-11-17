@@ -35,6 +35,7 @@ export const ClientsView: React.FC = () => {
     isLiveMode,
     isCompactMode,
     currentUser,
+    liveClientsMtm,
   } = useApp();
 
   const [clients, setClients] = useState<Client[]>([]);
@@ -51,18 +52,61 @@ export const ClientsView: React.FC = () => {
   }, [searchQuery, statusFilter, hideDemo, accountTypeTab]);
 
   useEffect(() => {
-    if (clients.length === 0) {
-      setLoading(true);
-    }
-    api.getClients({ q: searchQuery, status: statusFilter, hideDemo: hideDemo || accountTypeTab === 'Real' })
-      .then((data) => {
-        if (Array.isArray(data)) {
-          setClients(data);
-        }
-      })
-      .catch((err) => console.error('Failed to load clients:', err))
-      .finally(() => setLoading(false));
+    let isMounted = true;
+    const fetchClients = () => {
+      if (clients.length === 0) {
+        setLoading(true);
+      }
+      api.getClients({ q: searchQuery, status: statusFilter, hideDemo: hideDemo || accountTypeTab === 'Real' })
+        .then((data) => {
+          if (!isMounted) return;
+          if (Array.isArray(data)) {
+            setClients(data);
+          }
+        })
+        .catch((err) => console.error('Failed to load clients:', err))
+        .finally(() => {
+          if (isMounted) setLoading(false);
+        });
+    };
+
+    fetchClients();
+    const interval = setInterval(fetchClients, 2500);
+    return () => {
+      isMounted = false;
+      clearInterval(interval);
+    };
   }, [searchQuery, statusFilter, hideDemo, accountTypeTab, refreshTrigger]);
+
+  // Recalculate client live P&L and available margin when live MTM deltas arrive
+  useEffect(() => {
+    if (!liveClientsMtm || Object.keys(liveClientsMtm).length === 0) return;
+    setClients((prev) => {
+      let changed = false;
+      const next = prev.map((c) => {
+        const idKey = String(c.id);
+        const codeKey = (c as any).clientCode ? String((c as any).clientCode) : '';
+        const mtm = liveClientsMtm[idKey] || (codeKey ? liveClientsMtm[codeKey] : null);
+        if (mtm) {
+          if (
+            mtm.openPnL !== c.openPnL ||
+            mtm.marginAvailable !== c.marginAvailable ||
+            mtm.marginUsed !== c.marginUsed
+          ) {
+            changed = true;
+            return {
+              ...c,
+              openPnL: mtm.openPnL,
+              marginAvailable: mtm.marginAvailable,
+              marginUsed: mtm.marginUsed,
+            };
+          }
+        }
+        return c;
+      });
+      return changed ? next : prev;
+    });
+  }, [liveClientsMtm]);
 
   const filteredClients = clients.filter((c) => {
     if (accountTypeTab === 'Real' && c.isDemo) return false;

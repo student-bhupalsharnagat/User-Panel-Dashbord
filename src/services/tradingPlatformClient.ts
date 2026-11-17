@@ -47,10 +47,10 @@ export function extractPositions(res: any): any[] {
     if (!p || typeof p !== 'object') return p;
     const symbol = p.symbol || p.instrument || '';
     const isForex = ['USD/INR', 'EUR/INR', 'GBP/INR', 'JPY/INR'].includes(String(symbol).toUpperCase());
-    let currentPrice = parseCleanNumber(p.currentPrice ?? p.current_price ?? p.markPrice ?? p.ltp ?? p.lastPrice);
+    const livePrice = liveLtpLookup(symbol);
+    let currentPrice = livePrice > 0 ? livePrice : parseCleanNumber(p.currentPrice ?? p.current_price ?? p.markPrice ?? p.ltp ?? p.lastPrice);
     if (currentPrice <= 0 || (!isForex && currentPrice < 25)) {
-      const ltp = liveLtpLookup(symbol);
-      if (ltp > 0) currentPrice = ltp;
+      if (livePrice > 0) currentPrice = livePrice;
     }
     const buyQty = parseCleanNumber(p.buyQty ?? p.buy_qty ?? (p.side === 'BUY' ? p.quantity : 0));
     const sellQty = parseCleanNumber(p.sellQty ?? p.sell_qty ?? (p.side === 'SELL' ? p.quantity : 0));
@@ -66,7 +66,7 @@ export function extractPositions(res: any): any[] {
       }
     }
 
-    if (unrealizedPnl === 0 && currentPrice > 0 && avgPrice > 0 && netQty !== 0) {
+    if (currentPrice > 0 && avgPrice > 0 && netQty !== 0) {
       unrealizedPnl = netQty > 0 ? (currentPrice - avgPrice) * netQty : (avgPrice - currentPrice) * Math.abs(netQty);
       unrealizedPnl = Number(unrealizedPnl.toFixed(2));
     }

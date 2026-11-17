@@ -138,6 +138,13 @@ export interface Client {
   masterId?: string;
   tenantId?: string;
   isLive?: boolean;
+  balance?: number;
+  equity?: number;
+  pl?: number;
+  pnl?: number;
+  todays_pl?: number;
+  available_margin?: number;
+  margin?: number;
 }
 
 export interface Order {
@@ -347,3 +354,4 @@ export interface AuthResponse {
   token?: string;
   user?: AuthenticatedUser;
 }
+

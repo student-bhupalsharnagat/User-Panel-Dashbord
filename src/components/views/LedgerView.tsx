@@ -156,7 +156,7 @@ export const LedgerView: React.FC = () => {
     };
 
     fetchLedgerData();
-    const pollInterval = setInterval(fetchLedgerData, 4000);
+    const pollInterval = setInterval(fetchLedgerData, 2500);
     return () => {
       isMounted = false;
       clearInterval(pollInterval);

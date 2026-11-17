@@ -28,11 +28,27 @@ export const AnalyticsView: React.FC = () => {
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
-    setLoading(true);
-    api.getAnalytics(timeRange)
-      .then((data) => setAnalytics(data))
-      .catch((err) => console.error('Failed to load analytics:', err))
-      .finally(() => setLoading(false));
+    let isMounted = true;
+    const fetchAnalytics = (silent = false) => {
+      if (!silent) setLoading(true);
+      api.getAnalytics(timeRange)
+        .then((data) => {
+          if (isMounted) setAnalytics(data);
+        })
+        .catch((err) => {
+          if (!silent) console.error('Failed to load analytics:', err);
+        })
+        .finally(() => {
+          if (isMounted && !silent) setLoading(false);
+        });
+    };
+
+    fetchAnalytics(analytics !== null);
+    const interval = setInterval(() => fetchAnalytics(true), 2500);
+    return () => {
+      isMounted = false;
+      clearInterval(interval);
+    };
   }, [refreshTrigger, timeRange]);
 
   const trendList = React.useMemo(() => {
@@ -206,44 +222,44 @@ export const AnalyticsView: React.FC = () => {
         <div className="p-4 rounded-xl bg-[#111827] border border-[#1e293b]">
           <div className="text-xs font-semibold text-slate-400 mb-2">Monthly turnover</div>
           <div className="text-2xl font-bold font-mono text-white tracking-tight">
-            ₹{analytics?.monthlyTurnoverCr || '742.8'} Cr
+            ₹{analytics?.monthlyTurnoverCr ?? '0.00'} Cr
           </div>
           <div className="text-[11px] text-emerald-400 font-medium mt-1 flex items-center gap-1">
             <ArrowUpRight className="w-3.5 h-3.5" />
-            <span>+{analytics?.turnoverChangePct || 12.6}% vs last month</span>
+            <span>+{analytics?.turnoverChangePct ?? 0}% vs last month</span>
           </div>
         </div>
 
         <div className="p-4 rounded-xl bg-[#111827] border border-[#1e293b]">
           <div className="text-xs font-semibold text-slate-400 mb-2">Commission earned</div>
           <div className="text-2xl font-bold font-mono text-indigo-300 tracking-tight">
-            ₹{analytics?.commissionEarnedL || '28.42'} L
+            ₹{analytics?.commissionEarnedL ?? '0.00'} L
           </div>
           <div className="text-[11px] text-emerald-400 font-medium mt-1 flex items-center gap-1">
             <ArrowUpRight className="w-3.5 h-3.5" />
-            <span>+{analytics?.commissionChangePct || 5.4}% vs last month</span>
+            <span>+{analytics?.commissionChangePct ?? 0}% vs last month</span>
           </div>
         </div>
 
         <div className="p-4 rounded-xl bg-[#111827] border border-[#1e293b]">
           <div className="text-xs font-semibold text-slate-400 mb-2">Order execution</div>
           <div className="text-2xl font-bold font-mono text-white tracking-tight">
-            {analytics?.orderExecutionRate || '94.8'}%
+            {analytics?.orderExecutionRate ?? '0'}%
           </div>
           <div className="text-[11px] text-emerald-400 font-medium mt-1 flex items-center gap-1">
             <ArrowUpRight className="w-3.5 h-3.5" />
-            <span>+{analytics?.executionImprovementPct || 1.1}% improvement</span>
+            <span>+{analytics?.executionImprovementPct ?? 0}% improvement</span>
           </div>
         </div>
 
         <div className="p-4 rounded-xl bg-[#111827] border border-[#1e293b]">
           <div className="text-xs font-semibold text-slate-400 mb-2">Net P&L</div>
           <div className="text-2xl font-bold font-mono text-emerald-400 tracking-tight">
-            +₹{analytics?.netPnLL || '42.16'} L
+            {Number(analytics?.netPnLL ?? 0) >= 0 ? '+' : '-'}₹{Math.abs(Number(analytics?.netPnLL ?? 0)).toFixed(2)} L
           </div>
           <div className="text-[11px] text-emerald-400 font-medium mt-1 flex items-center gap-1">
             <ArrowUpRight className="w-3.5 h-3.5" />
-            <span>+{analytics?.netPnLChangePct || 8.8}% this month</span>
+            <span>+{analytics?.netPnLChangePct ?? 0}% this month</span>
           </div>
         </div>
       </div>

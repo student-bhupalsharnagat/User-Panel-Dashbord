@@ -122,6 +122,8 @@ export const PositionsView: React.FC = () => {
     isLiveMode,
     isCompactMode,
     latestTicks,
+    marketWatchLtpMap,
+    livePositionsMtm,
     positionsFilter,
     setPositionsFilter,
     currentUser,
@@ -136,10 +138,20 @@ export const PositionsView: React.FC = () => {
   const [loading, setLoading] = useState(true);
   const hasLoadedRef = useRef(false);
   const latestTicksRef = useRef(latestTicks);
+  const marketWatchLtpMapRef = useRef(marketWatchLtpMap);
+  const livePositionsMtmRef = useRef(livePositionsMtm);
 
   useEffect(() => {
     latestTicksRef.current = latestTicks;
   }, [latestTicks]);
+
+  useEffect(() => {
+    marketWatchLtpMapRef.current = marketWatchLtpMap;
+  }, [marketWatchLtpMap]);
+
+  useEffect(() => {
+    livePositionsMtmRef.current = livePositionsMtm;
+  }, [livePositionsMtm]);
 
   // Consume any target positionsFilter set from Notifications
   useEffect(() => {
@@ -166,21 +178,32 @@ export const PositionsView: React.FC = () => {
           const activeOnly = rawPositions.filter((p: any) => parseCleanNumber(p.netQty) !== 0);
           const effectivePositions = activeOnly.length > 0 ? activeOnly : DEFAULT_FALLBACK_POSITIONS;
           const ticks = latestTicksRef.current || {};
+          const liveMtmState = livePositionsMtmRef.current || {};
+          const ltpMap = marketWatchLtpMapRef.current || {};
           const merged = effectivePositions.map((rawPos: any) => {
             const instrument = rawPos.instrument || rawPos.symbol || '';
             const isForex = ['USD/INR', 'EUR/INR', 'GBP/INR', 'JPY/INR'].includes(instrument.toUpperCase());
             let currentPrice = parseCleanNumber(rawPos.currentPrice || rawPos.current_price || rawPos.ltp);
-            if (currentPrice <= 0 || (!isForex && currentPrice < 25)) {
-              const lookedUp = liveLtpLookup(instrument);
-              if (lookedUp > 0) currentPrice = lookedUp;
-            }
 
-            const instUpper = instrument.toUpperCase();
-            const instClean = instUpper.replace(/[\s_\-/]/g, '');
-            const tickKey = Object.keys(ticks).find(k => k.toUpperCase() === instUpper || k.toUpperCase().replace(/[\s_\-/]/g, '') === instClean);
-            const update = tickKey ? ticks[tickKey] : null;
-            if (update && update.lastPrice && update.lastPrice > 0) {
-              currentPrice = update.lastPrice;
+            const livePos = liveMtmState[String(rawPos.id)];
+            if (livePos && livePos.ltp > 0) {
+              currentPrice = livePos.ltp;
+            } else {
+              const instUpper = instrument.toUpperCase();
+              const instClean = instUpper.replace(/[\s_\-/]/g, '');
+              const mapPrice = ltpMap[instrument] || ltpMap[instUpper] || ltpMap[instClean];
+              if (mapPrice && mapPrice > 0) {
+                currentPrice = mapPrice;
+              } else {
+                const tickKey = Object.keys(ticks).find(k => k.toUpperCase() === instUpper || k.toUpperCase().replace(/[\s_\-/]/g, '') === instClean);
+                const update = tickKey ? ticks[tickKey] : null;
+                if (update && update.lastPrice && update.lastPrice > 0) {
+                  currentPrice = update.lastPrice;
+                } else if (currentPrice <= 0 || (!isForex && currentPrice < 25)) {
+                  const lookedUp = liveLtpLookup(instrument);
+                  if (lookedUp > 0) currentPrice = lookedUp;
+                }
+              }
             }
 
             const buyQty = parseCleanNumber(rawPos.buyQty);
@@ -240,44 +263,74 @@ export const PositionsView: React.FC = () => {
     };
 
     fetchPositionsData();
-    const interval = setInterval(fetchPositionsData, 4000);
+    const interval = setInterval(fetchPositionsData, 2500);
     return () => {
       isMounted = false;
       clearInterval(interval);
     };
   }, [refreshTrigger]);
 
-  // Recalculate MTM and current prices when live streaming ticks arrive
+  // Recalculate MTM and current prices when live streaming ticks, marketWatch LTP map, or MTM batches arrive
   useEffect(() => {
-    if (!latestTicks || Object.keys(latestTicks).length === 0) return;
     setPositions((prev) => {
       let changed = false;
       const next = prev.map((pos) => {
+        // 1. Direct authoritative MTM delta match
+        const livePos = livePositionsMtm[String(pos.id)];
+        if (livePos && livePos.ltp > 0) {
+          const roundedLtp = safeRound(livePos.ltp, 2);
+          const roundedUnrealised = safeRound(livePos.unrealisedPnL, 2);
+          if (roundedLtp !== pos.currentPrice || roundedUnrealised !== pos.unrealisedPnL) {
+            changed = true;
+            return {
+              ...pos,
+              currentPrice: roundedLtp,
+              unrealisedPnL: roundedUnrealised,
+              totalPnL: safeRound((pos.realisedPnL || 0) + roundedUnrealised, 2),
+            };
+          }
+        }
+
+        // 2. MarketWatch LTP or latest ticks match
         const instUpper = pos.instrument.toUpperCase();
         const instClean = instUpper.replace(/[\s_\-/]/g, '');
-        const tickKey = Object.keys(latestTicks).find(
-          k => k.toUpperCase() === instUpper || k.toUpperCase().replace(/[\s_\-/]/g, '') === instClean
-        );
-        const update = tickKey ? latestTicks[tickKey] : null;
-        if (!update || !update.lastPrice || parseCleanNumber(update.lastPrice) <= 0) return pos;
-        const currentPrice = safeRound(update.lastPrice, 2);
-        if (currentPrice === pos.currentPrice) return pos;
-        changed = true;
-        const isBuy = pos.netQty >= 0;
-        const unrealisedPnL = safeRound(
-          isBuy ? (currentPrice - pos.avgPrice) * pos.netQty : (pos.avgPrice - currentPrice) * Math.abs(pos.netQty),
-          2
-        );
-        return {
-          ...pos,
-          currentPrice,
-          unrealisedPnL,
-          totalPnL: safeRound(pos.realisedPnL + unrealisedPnL, 2),
-        };
+
+        let incomingLtp = 0;
+        if (marketWatchLtpMap[pos.instrument] || marketWatchLtpMap[instUpper] || marketWatchLtpMap[instClean]) {
+          incomingLtp = marketWatchLtpMap[pos.instrument] || marketWatchLtpMap[instUpper] || marketWatchLtpMap[instClean];
+        } else if (latestTicks) {
+          const tickKey = Object.keys(latestTicks).find(
+            k => k.toUpperCase() === instUpper || k.toUpperCase().replace(/[\s_\-/]/g, '') === instClean
+          );
+          const update = tickKey ? latestTicks[tickKey] : null;
+          if (update && update.lastPrice && parseCleanNumber(update.lastPrice) > 0) {
+            incomingLtp = parseCleanNumber(update.lastPrice);
+          }
+        }
+
+        if (incomingLtp > 0) {
+          const currentPrice = safeRound(incomingLtp, 2);
+          if (currentPrice !== pos.currentPrice) {
+            changed = true;
+            const isBuy = pos.netQty >= 0;
+            const unrealisedPnL = safeRound(
+              isBuy ? (currentPrice - pos.avgPrice) * pos.netQty : (pos.avgPrice - currentPrice) * Math.abs(pos.netQty),
+              2
+            );
+            return {
+              ...pos,
+              currentPrice,
+              unrealisedPnL,
+              totalPnL: safeRound((pos.realisedPnL || 0) + unrealisedPnL, 2),
+            };
+          }
+        }
+
+        return pos;
       });
       return changed ? next : prev;
     });
-  }, [latestTicks]);
+  }, [latestTicks, marketWatchLtpMap, livePositionsMtm]);
 
   const filteredPositions = useMemo(() => {
     const q = searchQuery.toLowerCase();

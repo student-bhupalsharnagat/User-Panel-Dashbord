@@ -312,14 +312,14 @@ export const api = {
     return res.json();
   },
 
-  // Dashboard Summary
-  async getDashboardSummary(): Promise<{
+  // Dashboard Summary & Live Metrics
+  async getDashboardMetrics(): Promise<{
     metrics: MetricSummary;
     turnoverTrend: TurnoverTrendPoint[];
     accountActivity: AccountActivityBar[];
     operationsQueue: OperationsQueueItem[];
   }> {
-    const res = await authenticatedFetch('/api/dashboard/summary');
+    const res = await authenticatedFetch('/api/dashboard/metrics');
     const data = await res.json();
     return {
       metrics: data.metrics,
@@ -327,6 +327,15 @@ export const api = {
       accountActivity: data.accountActivity,
       operationsQueue: data.operationsQueue,
     };
+  },
+
+  async getDashboardSummary(): Promise<{
+    metrics: MetricSummary;
+    turnoverTrend: TurnoverTrendPoint[];
+    accountActivity: AccountActivityBar[];
+    operationsQueue: OperationsQueueItem[];
+  }> {
+    return this.getDashboardMetrics();
   },
 
   // Market Watch

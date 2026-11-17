@@ -18,7 +18,7 @@ import {
   TenantBranding,
 } from '../types';
 import { api, getAuthToken, setAuthToken, resolveApiUrl, API_BASE } from '../services/api';
-import { parseCleanNumber } from '../utils/cleanNumber';
+import { parseCleanNumber, updateLivePrices } from '../utils/cleanNumber';
 
 export interface ToastItem {
   id: string;
@@ -66,10 +66,13 @@ interface AppContextType {
 
   // Real-time state & Refresh
   refreshTrigger: number;
-  triggerRefresh: () => void;
+  triggerRefresh: (force?: boolean) => void;
   isRealtimeConnected: boolean;
   lastTickTimestamp: string;
   latestTicks: Record<string, Partial<MarketInstrument>>;
+  marketWatchLtpMap: Record<string, number>;
+  livePositionsMtm: Record<string, { ltp: number; unrealisedPnL: number; totalPnL: number }>;
+  liveClientsMtm: Record<string, { openPnL: number; marginAvailable: number; marginUsed: number }>;
 
   // Global Search
   isSearchOpen: boolean;
@@ -193,6 +196,9 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
   const [isRealtimeConnected, setIsRealtimeConnected] = useState<boolean>(false);
   const [lastTickTimestamp, setLastTickTimestamp] = useState<string>('Just now');
   const [latestTicks, setLatestTicks] = useState<Record<string, Partial<MarketInstrument>>>({});
+  const [marketWatchLtpMap, setMarketWatchLtpMap] = useState<Record<string, number>>({});
+  const [livePositionsMtm, setLivePositionsMtm] = useState<Record<string, { ltp: number; unrealisedPnL: number; totalPnL: number }>>({});
+  const [liveClientsMtm, setLiveClientsMtm] = useState<Record<string, { openPnL: number; marginAvailable: number; marginUsed: number }>>({});
 
   const [isSearchOpen, setIsSearchOpen] = useState<boolean>(false);
   const [globalSearchQuery, setGlobalSearchQuery] = useState<string>('');
@@ -365,6 +371,8 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
       await api.logout();
     } catch {}
     setCurrentUser(null);
+    setLivePositionsMtm({});
+    setLiveClientsMtm({});
     setAuthToken('');
     if (typeof window !== 'undefined' && window.localStorage) {
       localStorage.removeItem('nextrade_auth_user');
@@ -383,6 +391,8 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
       const res = await api.switchRole(targetRole);
       if (res && res.user) {
         setCurrentUser(res.user);
+        setLivePositionsMtm({});
+        setLiveClientsMtm({});
         if (typeof window !== 'undefined' && window.localStorage) {
           localStorage.setItem('nextrade_auth_user', JSON.stringify(res.user));
         }
@@ -434,8 +444,90 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
   const pendingTicksRef = useRef<Record<string, Partial<MarketInstrument>>>({});
   const tickFlushTimerRef = useRef<any>(null);
 
+  const currentUserRef = useRef<AuthenticatedUser | null>(currentUser);
+  useEffect(() => {
+    currentUserRef.current = currentUser;
+  }, [currentUser]);
+
+  const handleMtmBatch = useCallback((data: any) => {
+    const isFullSnapshot = Array.isArray(data);
+    const deltas = isFullSnapshot ? data : (Array.isArray(data?.deltas) ? data.deltas : []);
+    const u = currentUserRef.current;
+    const role = (u?.role || '').toLowerCase().replace(/[\s\-_/]+/g, '_');
+
+    const matchesScope = (d: any) => {
+      if (!u || !role || role === 'super_admin') return true;
+      if (role === 'trader_client' || role === 'client') {
+        const cId = u.clientId || u.client_id || u.id;
+        return !d.clientId || d.clientId === cId;
+      }
+      if (role === 'sub_broker') {
+        const sId = u.subBrokerId || u.sub_broker_id || u.id;
+        return !d.subBrokerId || d.subBrokerId === sId || d.subBrokerId === 'SUB-BRK-001';
+      }
+      if (role === 'broker_admin' || role === 'operations' || role === 'staff_ops') {
+        const bId = u.brokerId || u.broker_id;
+        return !bId || !d.brokerId || d.brokerId === bId;
+      }
+      if (role === 'master' || role === 'master_admin') {
+        const mId = u.masterId || u.master_id || u.id;
+        return !mId || !d.masterId || d.masterId === mId || (u.brokerId && d.brokerId === u.brokerId);
+      }
+      return true;
+    };
+
+    if (isFullSnapshot) {
+      const nextMap: Record<string, { ltp: number; unrealisedPnL: number; totalPnL: number }> = {};
+      for (const d of deltas) {
+        if (!matchesScope(d)) continue;
+        const id = d.positionId || d.id;
+        if (id && Number(d.netQty ?? 1) !== 0) {
+          nextMap[String(id)] = {
+            ltp: parseCleanNumber(d.ltp ?? d.currentPrice),
+            unrealisedPnL: parseCleanNumber(d.unrealisedPnL ?? d.unrealizedPnl ?? d.pnl),
+            totalPnL: parseCleanNumber(d.totalPnL ?? d.pnl),
+          };
+        }
+      }
+      setLivePositionsMtm(nextMap);
+    } else if (deltas.length > 0) {
+      const mtmMap: Record<string, { ltp: number; unrealisedPnL: number; totalPnL: number }> = {};
+      for (const d of deltas) {
+        if (!matchesScope(d)) continue;
+        const id = d.positionId || d.id;
+        if (id) {
+          mtmMap[String(id)] = {
+            ltp: parseCleanNumber(d.ltp ?? d.currentPrice),
+            unrealisedPnL: parseCleanNumber(d.unrealisedPnL ?? d.unrealizedPnl ?? d.pnl),
+            totalPnL: parseCleanNumber(d.totalPnL ?? d.pnl),
+          };
+        }
+      }
+      setLivePositionsMtm((prev) => ({ ...prev, ...mtmMap }));
+    }
+  }, []);
+
+  const handleClientsMtm = useCallback((data: any) => {
+    const list = Array.isArray(data) ? data : (Array.isArray(data?.clients) ? data.clients : []);
+    if (list.length > 0) {
+      const cMap: Record<string, { openPnL: number; marginAvailable: number; marginUsed: number }> = {};
+      for (const c of list) {
+        const id = c.id || c.clientId || c.clientCode;
+        if (id) {
+          cMap[String(id)] = {
+            openPnL: parseCleanNumber(c.openPnL ?? c.todays_pl ?? c.pnl),
+            marginAvailable: parseCleanNumber(c.marginAvailable ?? c.available_margin ?? c.equity),
+            marginUsed: parseCleanNumber(c.marginUsed ?? c.margin),
+          };
+        }
+      }
+      setLiveClientsMtm((prev) => ({ ...prev, ...cMap }));
+    }
+  }, []);
+
   const queueTickUpdates = useCallback((rawTicks: any[]) => {
     if (!rawTicks || rawTicks.length === 0) return;
+    const ltpBatch: Record<string, number> = {};
     for (const t of rawTicks) {
       if (t && t.symbol) {
         const lastPrice = parseCleanNumber(t.lastPrice ?? t.price ?? t.ltp ?? 0);
@@ -458,7 +550,17 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
         pendingTicksRef.current[sym] = tickObj;
         pendingTicksRef.current[sym.toUpperCase()] = tickObj;
         pendingTicksRef.current[sym.toUpperCase().replace(/[\s_\-/]/g, '')] = tickObj;
+        if (lastPrice > 0) {
+          ltpBatch[sym] = lastPrice;
+          ltpBatch[sym.toUpperCase()] = lastPrice;
+          ltpBatch[sym.toUpperCase().replace(/[\s_\-/]/g, '')] = lastPrice;
+        }
       }
+    }
+
+    if (Object.keys(ltpBatch).length > 0) {
+      updateLivePrices(ltpBatch);
+      setMarketWatchLtpMap((prev) => ({ ...prev, ...ltpBatch }));
     }
 
     if (!tickFlushTimerRef.current) {
@@ -531,6 +633,14 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
           triggerRefresh(false);
         });
 
+        eventSource.addEventListener('client.registered', () => {
+          triggerRefresh(false);
+        });
+
+        eventSource.addEventListener('broker.added', () => {
+          triggerRefresh(false);
+        });
+
         eventSource.addEventListener('clients_updated', () => {
           triggerRefresh(false);
         });
@@ -543,11 +653,23 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
           triggerRefresh(false);
         });
 
+        eventSource.addEventListener('trade.executed', () => {
+          triggerRefresh(false);
+        });
+
         eventSource.addEventListener('fund_created', () => {
           triggerRefresh(false);
         });
 
         eventSource.addEventListener('fund_updated', () => {
+          triggerRefresh(false);
+        });
+
+        eventSource.addEventListener('fund.transaction_updated', () => {
+          triggerRefresh(false);
+        });
+
+        eventSource.addEventListener('risk.alert_triggered', () => {
           triggerRefresh(false);
         });
 
@@ -575,6 +697,27 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
           triggerRefresh(false);
         });
 
+        eventSource.addEventListener('positions.live_mtm', (e: MessageEvent) => {
+          try {
+            const parsed = JSON.parse(e.data);
+            handleMtmBatch(parsed.data || parsed.payload || parsed);
+          } catch {}
+        });
+
+        eventSource.addEventListener('positions.mtm_batch', (e: MessageEvent) => {
+          try {
+            const parsed = JSON.parse(e.data);
+            handleMtmBatch(parsed.data || parsed.payload || parsed);
+          } catch {}
+        });
+
+        eventSource.addEventListener('clients.live_mtm', (e: MessageEvent) => {
+          try {
+            const parsed = JSON.parse(e.data);
+            handleClientsMtm(parsed.data || parsed.payload || parsed);
+          } catch {}
+        });
+
         const handleTickEvent = (e: MessageEvent) => {
           try {
             const parsed = JSON.parse(e.data);
@@ -595,6 +738,19 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
         eventSource.addEventListener('tick', handleTickEvent);
         eventSource.addEventListener('price.update', handleTickEvent);
         eventSource.addEventListener('price_update', handleTickEvent);
+        eventSource.addEventListener('price_tick', handleTickEvent);
+
+        eventSource.addEventListener('order.created', () => {
+          triggerRefresh(false);
+        });
+
+        eventSource.addEventListener('fund.updated', () => {
+          triggerRefresh(false);
+        });
+
+        eventSource.addEventListener('ledger.updated', () => {
+          triggerRefresh(false);
+        });
 
         eventSource.addEventListener('ledger_update', () => {
           triggerRefresh(false);
@@ -716,33 +872,65 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
         ws.onmessage = (event) => {
           try {
             const msg = JSON.parse(event.data);
+            const evtType = msg.eventType || msg.type || msg.event || '';
             if (
-              msg.type === 'tick' ||
-              msg.eventType === 'market.ticks' ||
-              msg.type === 'market.ticks' ||
-              msg.type === 'market_tick' ||
-              msg.type === 'price.update' ||
-              msg.type === 'price_update' ||
-              msg.event === 'price.update' ||
-              msg.event === 'market.ticks'
+              evtType === 'tick' ||
+              evtType === 'market.ticks' ||
+              evtType === 'market_tick' ||
+              evtType === 'price.update' ||
+              evtType === 'price_update' ||
+              evtType === 'price_tick'
             ) {
-              const ticks = Array.isArray(msg.data)
+              const ticks = Array.isArray(msg.data?.ticks)
+                ? msg.data.ticks
+                : Array.isArray(msg.data)
                 ? msg.data
                 : msg.data
                 ? [msg.data]
+                : Array.isArray(msg.payload?.ticks)
+                ? msg.payload.ticks
                 : Array.isArray(msg.payload)
                 ? msg.payload
                 : [msg.payload || msg];
               queueTickUpdates(ticks);
             } else if (
-              msg.type === 'position.updated' ||
-              msg.eventType === 'position.updated' ||
-              msg.type === 'position_update' ||
-              msg.event === 'position.updated' ||
-              msg.type === 'portfolio.mtm'
+              evtType === 'positions.live_mtm' ||
+              evtType === 'positions.mtm_batch'
+            ) {
+              handleMtmBatch(Array.isArray(msg.payload) ? msg.payload : (msg.data || msg.payload || msg));
+            } else if (evtType === 'clients.live_mtm') {
+              handleClientsMtm(Array.isArray(msg.payload) ? msg.payload : (msg.data || msg.payload || msg));
+            } else if (
+              evtType === 'position.updated' ||
+              evtType === 'position_update' ||
+              evtType === 'position_squared_off' ||
+              evtType === 'portfolio.mtm' ||
+              evtType === 'order.created' ||
+              evtType === 'order_placed' ||
+              evtType === 'order_update' ||
+              evtType === 'trade.executed' ||
+              evtType === 'trade_executed' ||
+              evtType === 'client.registered' ||
+              evtType === 'client.created' ||
+              evtType === 'client_created' ||
+              evtType === 'clients_updated' ||
+              evtType === 'client_updated' ||
+              evtType === 'broker.added' ||
+              evtType === 'fund.transaction_updated' ||
+              evtType === 'fund.updated' ||
+              evtType === 'fund_updated' ||
+              evtType === 'fund_created' ||
+              evtType === 'fund_approved' ||
+              evtType === 'fund_rejected' ||
+              evtType === 'ledger.updated' ||
+              evtType === 'ledger_update' ||
+              evtType === 'wallet.updated' ||
+              evtType === 'wallet_update' ||
+              evtType === 'risk.alert_triggered' ||
+              evtType === 'risk.margin_breach'
             ) {
               triggerRefresh(false);
-            } else if (msg.type === 'connected') {
+            } else if (evtType === 'connected') {
               setIsRealtimeConnected(true);
             }
           } catch {}
@@ -789,16 +977,15 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
     };
   }, [showToast, triggerRefresh, currentUser, queueTickUpdates]);
 
-  // Adaptive real-time polling:
-  // When live push stream is active, relax polling to 10s to prevent query congestion.
-  // When disconnected or recovering, fallback to 4s polling.
+  // High-frequency silent background polling:
+  // Set to 2500ms (2.5 seconds) so active positions, orders, funds, and ledger reflect immediately
   useEffect(() => {
-    const pollInterval = isRealtimeConnected ? 10000 : 4000;
+    const pollInterval = 2500;
     const poll = setInterval(() => {
       triggerRefresh(false);
     }, pollInterval);
     return () => clearInterval(poll);
-  }, [isRealtimeConnected, triggerRefresh]);
+  }, [triggerRefresh]);
 
   // Memoized modal actions
   const openOrderModal = useCallback((instrument?: MarketInstrument | null, side: 'BUY' | 'SELL' = 'BUY', existingOrder?: Order | null) => {
@@ -874,6 +1061,9 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
     isRealtimeConnected,
     lastTickTimestamp,
     latestTicks,
+    marketWatchLtpMap,
+    livePositionsMtm,
+    liveClientsMtm,
     isSearchOpen,
     setIsSearchOpen,
     globalSearchQuery,
@@ -922,6 +1112,9 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
     isRealtimeConnected,
     lastTickTimestamp,
     latestTicks,
+    marketWatchLtpMap,
+    livePositionsMtm,
+    liveClientsMtm,
     isSearchOpen,
     globalSearchQuery,
     isNotificationsOpen,

@@ -39,6 +39,8 @@ export const DashboardView: React.FC = () => {
     isLiveMode,
     showToast,
     openOrderModal,
+    livePositionsMtm,
+    liveClientsMtm,
   } = useApp();
 
   const [timeRange, setTimeRange] = useState<'Today' | '7 Days' | '30 Days' | 'This Month'>('Today');
@@ -129,17 +131,43 @@ export const DashboardView: React.FC = () => {
   }, [timeRange, metrics?.marginUsedCr]);
 
   useEffect(() => {
-    api.getDashboardSummary()
-      .then((res) => {
-        setMetrics(res.metrics);
-        setTurnoverTrend(res.turnoverTrend);
-        setAccountActivity(res.accountActivity);
-        setOperationsQueue(res.operationsQueue);
-      })
-      .catch((err) => {
-        console.error('Failed to load dashboard data:', err);
-      });
+    let isMounted = true;
+    const fetchDashboard = () => {
+      api.getDashboardMetrics()
+        .then((res) => {
+          if (!isMounted) return;
+          setMetrics(res.metrics);
+          setTurnoverTrend(res.turnoverTrend);
+          setAccountActivity(res.accountActivity);
+          setOperationsQueue(res.operationsQueue);
+        })
+        .catch((err) => {
+          if (!isMounted) return;
+          console.error('Failed to load dashboard data:', err);
+        });
+    };
+
+    fetchDashboard();
+    const interval = setInterval(fetchDashboard, 2500);
+    return () => {
+      isMounted = false;
+      clearInterval(interval);
+    };
   }, [refreshTrigger]);
+
+  const effectiveOpenPnLL = React.useMemo(() => {
+    const posKeys = Object.keys(livePositionsMtm || {});
+    if (posKeys.length > 0) {
+      const sumUnrealised = posKeys.reduce((acc, k) => acc + (livePositionsMtm[k]?.unrealisedPnL || 0), 0);
+      return safeRound(sumUnrealised / 100000, 2);
+    }
+    const clientKeys = Object.keys(liveClientsMtm || {});
+    if (clientKeys.length > 0) {
+      const sumClientPnL = clientKeys.reduce((acc, k) => acc + (liveClientsMtm[k]?.openPnL || 0), 0);
+      return safeRound(sumClientPnL / 100000, 2);
+    }
+    return metrics?.openPnLL != null ? parseCleanNumber(metrics.openPnLL) : 0;
+  }, [livePositionsMtm, liveClientsMtm, metrics?.openPnLL]);
 
   // Single source for every client count on this page so cards, ribbon and donut always agree
   const totalClients = Math.round(parseCleanNumber(metrics?.totalClients));
@@ -157,7 +185,7 @@ export const DashboardView: React.FC = () => {
       ['Inactive Clients', inactiveClients],
       ['New Today', newToday],
       ['Ledger Balance (Cr)', `₹${formatINR(metrics.ledgerBalanceCr, 2)} Cr`],
-      ['Open P&L (L)', `${parseCleanNumber(metrics.openPnLL) >= 0 ? '+' : ''}₹${formatINR(metrics.openPnLL, 2)} L`],
+      ['Open P&L (L)', `${effectiveOpenPnLL >= 0 ? '+' : ''}₹${formatINR(effectiveOpenPnLL, 2)} L`],
       ['Margin Used (Cr)', `₹${formatINR(metrics.marginUsedCr, 2)} Cr`],
       ['Margin Available (Cr)', `₹${formatINR(metrics.marginAvailableCr, 2)} Cr`],
       ['Today Orders', Math.round(parseCleanNumber(metrics.todaysOrders))],
@@ -285,8 +313,8 @@ export const DashboardView: React.FC = () => {
               <TrendingUp className="w-4 h-4" />
             </div>
           </div>
-          <div className={`text-2xl font-bold font-mono tracking-tight ${(parseCleanNumber(metrics?.openPnLL)) >= 0 ? 'text-emerald-400' : 'text-rose-400'}`}>
-            {parseCleanNumber(metrics?.openPnLL) >= 0 ? '+' : ''}₹{formatINR(metrics?.openPnLL ?? 0, 2)} L
+          <div className={`text-2xl font-bold font-mono tracking-tight ${effectiveOpenPnLL >= 0 ? 'text-emerald-400' : 'text-rose-400'}`}>
+            {effectiveOpenPnLL >= 0 ? '+' : ''}₹{formatINR(effectiveOpenPnLL, 2)} L
           </div>
           <div className={`text-[11px] font-medium mt-1 flex items-center gap-1 ${(parseCleanNumber(metrics?.openPnLDayChangePct)) >= 0 ? 'text-emerald-400' : 'text-rose-400'}`}>
             <ArrowUpRight className="w-3.5 h-3.5" />

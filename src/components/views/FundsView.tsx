@@ -184,7 +184,7 @@ export const FundsView: React.FC = () => {
     };
 
     fetchFundsData();
-    const pollInterval = setInterval(fetchFundsData, 4000);
+    const pollInterval = setInterval(fetchFundsData, 2500);
     return () => {
       isMounted = false;
       clearInterval(pollInterval);

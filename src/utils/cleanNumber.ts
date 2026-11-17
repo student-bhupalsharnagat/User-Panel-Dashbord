@@ -82,3 +82,30 @@ export function liveLtpLookup(symbol: string): number {
   return 0;
 }
 
+export function updateLivePrice(symbol: string, price: number): void {
+  if (!symbol || !price || isNaN(price) || price <= 0) return;
+  const clean = symbol.trim().toUpperCase();
+  AUTHORITATIVE_INSTRUMENT_PRICES[clean] = price;
+  const stripped = clean.replace(/[\s_\-/]/g, '');
+  AUTHORITATIVE_INSTRUMENT_PRICES[stripped] = price;
+}
+
+export function updateLivePrices(quotes: Record<string, number> | Array<{ symbol: string; ltp?: number; price?: number; lastPrice?: number }>): void {
+  if (!quotes) return;
+  if (Array.isArray(quotes)) {
+    for (const q of quotes) {
+      const p = parseCleanNumber(q.ltp ?? q.price ?? q.lastPrice);
+      if (q.symbol && p > 0) updateLivePrice(q.symbol, p);
+    }
+  } else if (typeof quotes === 'object') {
+    for (const [sym, val] of Object.entries(quotes)) {
+      const p = parseCleanNumber(val);
+      if (sym && p > 0) updateLivePrice(sym, p);
+    }
+  }
+}
+
+export function getAllLivePrices(): Record<string, number> {
+  return { ...AUTHORITATIVE_INSTRUMENT_PRICES };
+}
+
