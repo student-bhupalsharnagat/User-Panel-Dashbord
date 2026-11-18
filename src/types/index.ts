@@ -46,6 +46,7 @@ export interface AuthenticatedUser {
   timezone: string;
   currency: string;
   avatar: string;
+  referralCode?: string;
 }
 
 export interface MetricSummary {
@@ -311,6 +312,7 @@ export interface TenantBranding {
   supportEmail: string;
   supportPhone: string;
   footerCopyright: string;
+  domain?: string;
   version: string;
   updatedAt: string;
 }
@@ -345,6 +347,8 @@ export interface UserAccount {
   tenantId: string;
   organization?: string;
   pan?: string;
+  referralCode?: string;
+  commissionShare?: number;
   createdAt?: string;
 }
 

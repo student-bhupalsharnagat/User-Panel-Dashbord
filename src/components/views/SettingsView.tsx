@@ -19,6 +19,12 @@ import {
   MessageSquare,
   Send,
   Plus,
+  Copy,
+  Check,
+  Link2,
+  Eye,
+  EyeOff,
+  KeyRound,
 } from 'lucide-react';
 import { useApp } from '../../context/AppContext';
 import { api } from '../../services/api';
@@ -61,6 +67,82 @@ export const SettingsView: React.FC = () => {
   const [newTicketMessage, setNewTicketMessage] = useState('');
   const [isCreatingTicket, setIsCreatingTicket] = useState(false);
   const [isSubmittingTicket, setIsSubmittingTicket] = useState(false);
+
+  // Security & Password Change State (top-level hooks)
+  const [currentPassword, setCurrentPassword] = useState('');
+  const [newPassword, setNewPassword] = useState('');
+  const [confirmPassword, setConfirmPassword] = useState('');
+  const [showPasswords, setShowPasswords] = useState(false);
+  const [isChangingPassword, setIsChangingPassword] = useState(false);
+
+  // Referral Code & Signup Link State (top-level hooks)
+  const [tradingPlatformUrl, setTradingPlatformUrl] = useState('https://trading-platform-2t6r.onrender.com');
+  const [copiedField, setCopiedField] = useState<'code' | 'link' | null>(null);
+
+  useEffect(() => {
+    api.getWhiteLabelConfig()
+      .then((res) => {
+        if (res.tradingPlatformUrl) {
+          setTradingPlatformUrl(res.tradingPlatformUrl.replace(/\/+$/, ''));
+        }
+      })
+      .catch(() => {});
+  }, []);
+
+  const normalizedRole = String(currentUser?.role || '').toLowerCase();
+  const isPartnerRole = normalizedRole !== 'trader_client' && normalizedRole !== 'client';
+  const partnerReferralCode = currentUser?.referralCode || (
+    isPartnerRole && currentUser?.id
+      ? `${normalizedRole.includes('master') ? 'MST' : normalizedRole.includes('sub') ? 'SUB' : 'BRK'}-${currentUser.id.replace(/[^A-Z0-9]/gi, '').slice(-6).toUpperCase()}`
+      : ''
+  );
+  const baseSignupOrigin = tenantBranding?.domain
+    ? (/^https?:\/\//i.test(tenantBranding.domain) ? tenantBranding.domain : `https://${tenantBranding.domain}`).replace(/\/+$/, '')
+    : tradingPlatformUrl;
+  const referralSignupUrl = partnerReferralCode
+    ? `${baseSignupOrigin}/?ref=${encodeURIComponent(partnerReferralCode)}`
+    : '';
+
+  const handleCopyReferral = async (value: string, field: 'code' | 'link') => {
+    if (!value) return;
+    try {
+      await navigator.clipboard.writeText(value);
+      setCopiedField(field);
+      showToast(field === 'code' ? 'Referral code copied to clipboard' : 'Client signup link copied to clipboard', 'success');
+      setTimeout(() => setCopiedField((prev) => (prev === field ? null : prev)), 2000);
+    } catch {
+      showToast('Unable to copy to clipboard', 'error');
+    }
+  };
+
+  const handlePasswordChange = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!currentPassword || !newPassword || !confirmPassword) {
+      showToast('Please fill in all password fields', 'error');
+      return;
+    }
+    if (newPassword.length < 6) {
+      showToast('New password must be at least 6 characters long', 'error');
+      return;
+    }
+    if (newPassword !== confirmPassword) {
+      showToast('New password and confirmation do not match', 'error');
+      return;
+    }
+
+    setIsChangingPassword(true);
+    try {
+      const res = await api.changePassword(currentPassword, newPassword);
+      setCurrentPassword('');
+      setNewPassword('');
+      setConfirmPassword('');
+      showToast(res.message || 'Password updated successfully', 'success');
+    } catch (err: any) {
+      showToast(err.message || 'Failed to update password', 'error');
+    } finally {
+      setIsChangingPassword(false);
+    }
+  };
 
   useEffect(() => {
     if (activeSection === 'support') {
@@ -459,13 +541,164 @@ export const SettingsView: React.FC = () => {
                   {isSaving ? 'Saving...' : 'Save changes'}
                 </button>
               </div>
+
+              {partnerReferralCode && (
+                <div className="p-4 rounded-xl bg-slate-900/90 border border-indigo-500/30 space-y-3">
+                  <div className="flex items-center justify-between gap-2">
+                    <div>
+                      <div className="text-xs font-bold text-white flex items-center gap-1.5">
+                        <Link2 className="w-3.5 h-3.5 text-indigo-400" />
+                        <span>Client Referral Code &amp; Onboarding Link</span>
+                      </div>
+                      <p className="text-[11px] text-slate-400 mt-0.5">
+                        Share this code or link with prospective clients to automatically register them under your downline.
+                      </p>
+                    </div>
+                  </div>
+                  <div className="grid grid-cols-1 md:grid-cols-12 gap-2.5">
+                    <div className="md:col-span-4 flex items-center justify-between gap-2 px-3 py-2 rounded-lg bg-[#0c1220] border border-slate-800">
+                      <span className="font-mono text-xs font-bold text-indigo-300 tracking-wider truncate">{partnerReferralCode}</span>
+                      <button
+                        type="button"
+                        onClick={() => handleCopyReferral(partnerReferralCode, 'code')}
+                        className="px-2 py-1 rounded-md bg-indigo-600/20 hover:bg-indigo-600/30 text-indigo-300 text-[11px] font-semibold flex items-center gap-1 cursor-pointer shrink-0"
+                      >
+                        {copiedField === 'code' ? <Check className="w-3 h-3 text-emerald-400" /> : <Copy className="w-3 h-3" />}
+                        <span>{copiedField === 'code' ? 'Copied' : 'Copy'}</span>
+                      </button>
+                    </div>
+                    <div className="md:col-span-8 flex items-center justify-between gap-2 px-3 py-2 rounded-lg bg-[#0c1220] border border-slate-800">
+                      <span className="font-mono text-[11px] text-slate-300 truncate">{referralSignupUrl}</span>
+                      <button
+                        type="button"
+                        onClick={() => handleCopyReferral(referralSignupUrl, 'link')}
+                        className="px-2.5 py-1 rounded-md bg-indigo-600 hover:bg-indigo-500 text-white text-[11px] font-semibold flex items-center gap-1 cursor-pointer shrink-0"
+                      >
+                        {copiedField === 'link' ? <Check className="w-3 h-3" /> : <Copy className="w-3 h-3" />}
+                        <span>{copiedField === 'link' ? 'Copied Link' : 'Copy Link'}</span>
+                      </button>
+                    </div>
+                  </div>
+                </div>
+              )}
             </form>
           )}
 
           {activeSection === 'security' && (
             <div className="space-y-4 text-xs">
-              <h3 className="text-sm font-bold text-white">Security & Active Sessions</h3>
-              <p className="text-slate-400">Configure authentication credentials and token rotation.</p>
+              <div>
+                <h3 className="text-sm font-bold text-white">Security &amp; Password Change</h3>
+                <p className="text-slate-400 mt-0.5">Update your terminal password, manage partner referral onboarding, and review active sessions.</p>
+              </div>
+
+              {/* Change Password Card */}
+              <form onSubmit={handlePasswordChange} className="p-4 rounded-xl bg-slate-900 border border-slate-800 space-y-3.5">
+                <div className="flex items-center justify-between">
+                  <div className="flex items-center gap-2">
+                    <KeyRound className="w-4 h-4 text-indigo-400" />
+                    <div>
+                      <div className="font-semibold text-white">Change Account Password</div>
+                      <div className="text-slate-400 text-[11px]">Synced automatically across Admin Panel, Broker OS, and Trading Platform</div>
+                    </div>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => setShowPasswords((prev) => !prev)}
+                    className="px-2 py-1 rounded-md bg-slate-800 hover:bg-slate-700 text-slate-300 text-[11px] flex items-center gap-1 cursor-pointer"
+                  >
+                    {showPasswords ? <EyeOff className="w-3.5 h-3.5" /> : <Eye className="w-3.5 h-3.5" />}
+                    <span>{showPasswords ? 'Hide' : 'Show'}</span>
+                  </button>
+                </div>
+
+                <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
+                  <div>
+                    <label className="block text-[11px] font-semibold text-slate-300 mb-1">Current Password</label>
+                    <input
+                      type={showPasswords ? 'text' : 'password'}
+                      value={currentPassword}
+                      onChange={(e) => setCurrentPassword(e.target.value)}
+                      placeholder="Enter current password"
+                      required
+                      className="w-full px-3 py-2 bg-[#0c1220] border border-slate-800 rounded-lg text-xs text-white focus:outline-none focus:border-indigo-500"
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-[11px] font-semibold text-slate-300 mb-1">New Password</label>
+                    <input
+                      type={showPasswords ? 'text' : 'password'}
+                      value={newPassword}
+                      onChange={(e) => setNewPassword(e.target.value)}
+                      placeholder="Min. 6 characters"
+                      minLength={6}
+                      required
+                      className="w-full px-3 py-2 bg-[#0c1220] border border-slate-800 rounded-lg text-xs text-white focus:outline-none focus:border-indigo-500"
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-[11px] font-semibold text-slate-300 mb-1">Confirm New Password</label>
+                    <input
+                      type={showPasswords ? 'text' : 'password'}
+                      value={confirmPassword}
+                      onChange={(e) => setConfirmPassword(e.target.value)}
+                      placeholder="Re-enter new password"
+                      minLength={6}
+                      required
+                      className="w-full px-3 py-2 bg-[#0c1220] border border-slate-800 rounded-lg text-xs text-white focus:outline-none focus:border-indigo-500"
+                    />
+                  </div>
+                </div>
+
+                <div className="flex justify-end">
+                  <button
+                    type="submit"
+                    disabled={isChangingPassword}
+                    className="px-4 py-2 rounded-lg bg-indigo-600 hover:bg-indigo-500 text-xs font-bold text-white transition-colors shadow-md shadow-indigo-900/30 disabled:opacity-50 cursor-pointer flex items-center gap-1.5"
+                  >
+                    <Lock className="w-3.5 h-3.5" />
+                    <span>{isChangingPassword ? 'Updating Password...' : 'Update Password'}</span>
+                  </button>
+                </div>
+              </form>
+
+              {/* Partner Client Referral Code & Signup Link Card */}
+              {partnerReferralCode && (
+                <div className="p-4 rounded-xl bg-slate-900 border border-indigo-500/30 space-y-3">
+                  <div>
+                    <div className="font-semibold text-white flex items-center gap-1.5">
+                      <Link2 className="w-3.5 h-3.5 text-indigo-400" />
+                      <span>Partner Client Referral Code &amp; Signup Link</span>
+                    </div>
+                    <div className="text-slate-400 text-[11px] mt-0.5">
+                      Clients signing up with this code or URL are automatically linked to your partner hierarchy.
+                    </div>
+                  </div>
+                  <div className="grid grid-cols-1 md:grid-cols-12 gap-2.5">
+                    <div className="md:col-span-4 flex items-center justify-between gap-2 px-3 py-2 rounded-lg bg-[#0c1220] border border-slate-800">
+                      <span className="font-mono text-xs font-bold text-indigo-300 tracking-wider truncate">{partnerReferralCode}</span>
+                      <button
+                        type="button"
+                        onClick={() => handleCopyReferral(partnerReferralCode, 'code')}
+                        className="px-2 py-1 rounded-md bg-indigo-600/20 hover:bg-indigo-600/30 text-indigo-300 text-[11px] font-semibold flex items-center gap-1 cursor-pointer shrink-0"
+                      >
+                        {copiedField === 'code' ? <Check className="w-3 h-3 text-emerald-400" /> : <Copy className="w-3 h-3" />}
+                        <span>{copiedField === 'code' ? 'Copied' : 'Copy'}</span>
+                      </button>
+                    </div>
+                    <div className="md:col-span-8 flex items-center justify-between gap-2 px-3 py-2 rounded-lg bg-[#0c1220] border border-slate-800">
+                      <span className="font-mono text-[11px] text-slate-300 truncate">{referralSignupUrl}</span>
+                      <button
+                        type="button"
+                        onClick={() => handleCopyReferral(referralSignupUrl, 'link')}
+                        className="px-2.5 py-1 rounded-md bg-indigo-600 hover:bg-indigo-500 text-white text-[11px] font-semibold flex items-center gap-1 cursor-pointer shrink-0"
+                      >
+                        {copiedField === 'link' ? <Check className="w-3 h-3" /> : <Copy className="w-3 h-3" />}
+                        <span>{copiedField === 'link' ? 'Copied Link' : 'Copy Link'}</span>
+                      </button>
+                    </div>
+                  </div>
+                </div>
+              )}
 
               <div className="p-4 rounded-xl bg-slate-900 border border-slate-800 space-y-3">
                 <div className="flex items-center justify-between">
@@ -480,7 +713,7 @@ export const SettingsView: React.FC = () => {
               <div className="p-4 rounded-xl bg-slate-900 border border-slate-800 space-y-3">
                 <div className="font-semibold text-white">Active Session Credentials</div>
                 <div className="text-slate-400 text-[11px]">
-                  Logged in from IP 103.48.xx.21 · Chrome Desktop (macOS) · Token expires in 11 hours
+                  Logged in as {currentUser?.email || 'partner'} · Role: {currentUser?.roleTitle || currentUser?.role} · Token expires in 24 hours
                 </div>
               </div>
             </div>

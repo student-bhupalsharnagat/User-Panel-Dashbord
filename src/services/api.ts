@@ -238,6 +238,18 @@ export const api = {
     setAuthToken('');
   },
 
+  async changePassword(currentPassword: string, newPassword: string): Promise<{ success: boolean; message: string }> {
+    const res = await authenticatedFetch('/api/auth/change-password', {
+      method: 'POST',
+      body: JSON.stringify({ currentPassword, newPassword }),
+    });
+    const data = await res.json();
+    if (!res.ok || !data.success) {
+      throw new Error(data.message || 'Failed to update password.');
+    }
+    return data;
+  },
+
   async getMe(): Promise<{ user: AuthenticatedUser; tenant: TenantBranding; token: string }> {
     const res = await authenticatedFetch('/api/auth/me');
     if (!res.ok && res.status === 401) {
@@ -612,10 +624,17 @@ export const api = {
   },
 
   // White-label Branding
-  async getBranding(): Promise<TenantBranding> {
-    const res = await fetch(resolveApiUrl('/api/tenant/branding'));
+  async getWhiteLabelConfig(): Promise<{ branding: TenantBranding; config: TenantBranding; tradingPlatformUrl?: string }> {
+    const res = await fetch(resolveApiUrl('/api/whitelabel/config'));
     const data = await res.json();
-    return data.branding;
+    const branding = data.config || data.branding;
+    return { branding, config: branding, tradingPlatformUrl: data.tradingPlatformUrl };
+  },
+
+  async getBranding(): Promise<TenantBranding> {
+    const res = await fetch(resolveApiUrl('/api/whitelabel/config'));
+    const data = await res.json();
+    return data.branding || data.config;
   },
 
   async updateBranding(branding: Partial<TenantBranding>): Promise<TenantBranding> {

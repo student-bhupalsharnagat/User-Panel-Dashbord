@@ -273,6 +273,20 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
     setRefreshTrigger((prev) => prev + 1);
   }, []);
 
+  // Fetch public White-Label Branding immediately on mount (works on Login screen before auth)
+  useEffect(() => {
+    api.getWhiteLabelConfig()
+      .then(({ branding }) => {
+        if (branding) {
+          setTenantBranding((prev) => ({ ...(prev || {}), ...branding }));
+          if (typeof document !== 'undefined' && branding.brandName) {
+            document.title = `${branding.brandName} — Broker OS`;
+          }
+        }
+      })
+      .catch(() => {});
+  }, []);
+
   // Fetch Authoritative Bootstrap Feed (User, Tenant, Instruments) on mount
   useEffect(() => {
     const token = getAuthToken();
@@ -930,6 +944,11 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
               evtType === 'risk.margin_breach'
             ) {
               triggerRefresh(false);
+            } else if (evtType === 'branding_updated' || evtType === 'branding_update') {
+              const branding = msg.data || msg.payload;
+              if (branding && typeof branding === 'object') {
+                setTenantBranding((prev) => ({ ...(prev || {}), ...branding }));
+              }
             } else if (evtType === 'connected') {
               setIsRealtimeConnected(true);
             }

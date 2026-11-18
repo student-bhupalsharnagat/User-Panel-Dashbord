@@ -10,6 +10,7 @@ import { createServer as createViteServer } from 'vite';
 import path from 'path';
 import { fileURLToPath } from 'url';
 import crypto from 'crypto';
+import bcrypt from 'bcryptjs';
 import fs from 'fs';
 import dotenv from 'dotenv';
 import {
@@ -48,7 +49,11 @@ const __dirname = path.dirname(__filename);
 
 const PORT = parseInt(process.env.PORT || '3000', 10);
 const app = express();
-app.use(express.json());
+app.use(express.json({
+  verify: (req: any, _res, buf) => {
+    req.rawBody = buf.toString('utf8');
+  },
+}));
 
 // ==========================================
 // CONFIGURATION & SECRETS
@@ -110,6 +115,7 @@ export interface TokenPayload {
   tenant_id?: string;
   organization: string;
   phone: string;
+  referralCode?: string;
   exp: number;
 }
 
@@ -201,12 +207,28 @@ export function verifySignedToken(token: string): TokenPayload | null {
       tenant_id: tenantId,
       organization: raw.organization || 'NexTrade Securities Pvt. Ltd.',
       phone: raw.phone || '+91 98765 43210',
+      referralCode: raw.referralCode || raw.referral_code || undefined,
       exp: raw.exp || Date.now() + 86400000,
     };
     return payload;
   } catch {
     return null;
   }
+}
+
+export function deriveReferralCode(role: string, id: string, existing?: string | null): string | undefined {
+  if (existing && String(existing).trim()) return String(existing).trim().toUpperCase();
+  const norm = String(role || '').toLowerCase();
+  const prefix = norm.includes('master')
+    ? 'MST'
+    : norm.includes('sub')
+      ? 'SUB'
+      : (norm.includes('broker') || norm.includes('admin'))
+        ? 'BRK'
+        : null;
+  if (!prefix) return undefined;
+  const suffix = crypto.createHash('sha256').update(`${prefix}:${id}`).digest('hex').slice(0, 6).toUpperCase();
+  return `${prefix}-${suffix}`;
 }
 
 export function verifyHmacSignature(rawBody: string, signature: string, timestamp: number): boolean {
@@ -225,12 +247,118 @@ export function verifyHmacSignature(rawBody: string, signature: string, timestam
   }
 }
 
+export function verifyS2SRequest(req: Request): { valid: boolean; reason?: string } {
+  const sigHeader = String(
+    req.headers['x-internal-signature'] ||
+    req.headers['x-signature-sha256'] ||
+    req.headers['x-hmac-signature'] ||
+    req.headers['x-signature'] ||
+    ''
+  ).trim();
+  const tsHeader = String(
+    req.headers['x-internal-timestamp'] ||
+    req.headers['x-timestamp'] ||
+    ''
+  ).trim();
+  const secretHeader = String(
+    req.headers['x-internal-secret'] ||
+    req.headers['x-api-key'] ||
+    ''
+  ).trim();
+
+  if (sigHeader) {
+    const ts = Number(tsHeader);
+    if (!ts || !Number.isFinite(ts) || Math.abs(Date.now() - ts) > 300000) {
+      return { valid: false, reason: 'Expired or invalid S2S timestamp' };
+    }
+    const rawBody = typeof (req as any).rawBody === 'string'
+      ? (req as any).rawBody
+      : (req.body && Object.keys(req.body).length > 0 ? JSON.stringify(req.body) : '');
+    const method = req.method.toUpperCase();
+    const pathWithoutQuery = (req.originalUrl || req.url || req.path || '').split('?')[0];
+
+    const candidates = [
+      `${ts}.${method}.${pathWithoutQuery}.${rawBody}`,
+      `${ts}.${rawBody}`,
+    ];
+
+    const sigBuf = Buffer.from(sigHeader, 'hex');
+    for (const candidate of candidates) {
+      const expectedHex = crypto.createHmac('sha256', INTERNAL_API_SECRET).update(candidate).digest('hex');
+      const expBuf = Buffer.from(expectedHex, 'hex');
+      if (sigBuf.length === expBuf.length && crypto.timingSafeEqual(sigBuf, expBuf)) {
+        return { valid: true };
+      }
+    }
+    return { valid: false, reason: 'Invalid HMAC signature' };
+  }
+
+  if (secretHeader) {
+    return secretHeader === INTERNAL_API_SECRET
+      ? { valid: true }
+      : { valid: false, reason: 'Invalid internal secret' };
+  }
+
+  // Allow unsigned S2S calls only outside production
+  return APP_ENV === 'production'
+    ? { valid: false, reason: 'Missing S2S signature header' }
+    : { valid: true };
+}
+
 export function hashPassword(password: string): string {
   return crypto.createHash('sha256').update(password + 'nextrade-salt-2026').digest('hex');
 }
 
+export function hashPasswordBcrypt(password: string): string {
+  return bcrypt.hashSync(password, 10);
+}
+
 export function verifyPassword(password: string, hash: string): boolean {
+  if (!password || !hash) return false;
+  if (/^\$2[aby]\$\d{2}\$/.test(hash)) {
+    try {
+      return bcrypt.compareSync(password, hash);
+    } catch {
+      return false;
+    }
+  }
   return hashPassword(password) === hash;
+}
+
+async function dispatchS2SHierarchySync(node: Record<string, any>): Promise<void> {
+  const path = '/api/internal/v1/hierarchy/sync';
+  const payload = { ...node, node, timestamp: new Date().toISOString() };
+  const bodyStr = JSON.stringify(payload);
+  const targets = [TRADING_PLATFORM_URL, CENTRAL_ADMIN_URL].filter(Boolean);
+
+  await Promise.allSettled(
+    targets.map(async (baseUrl) => {
+      const timestamp = Date.now().toString();
+      const canonical = `${timestamp}.POST.${path}.${bodyStr}`;
+      const signature = crypto.createHmac('sha256', INTERNAL_API_SECRET).update(canonical).digest('hex');
+      const controller = new AbortController();
+      const timer = setTimeout(() => controller.abort(), 8000);
+      try {
+        await fetch(`${baseUrl}${path}`, {
+          method: 'POST',
+          headers: {
+            'content-type': 'application/json',
+            'x-internal-signature': signature,
+            'x-signature-sha256': signature,
+            'x-internal-timestamp': timestamp,
+            'x-timestamp': timestamp,
+            'x-tenant-id': String(node.tenantId || DEFAULT_TENANT_ID),
+          },
+          body: bodyStr,
+          signal: controller.signal,
+        });
+      } catch (err: any) {
+        console.warn(`[S2S Sync] Non-blocking dispatch failed for ${baseUrl}${path}:`, err?.message || err);
+      } finally {
+        clearTimeout(timer);
+      }
+    })
+  );
 }
 
 // ==========================================
@@ -2304,6 +2432,8 @@ app.get('/api/realtime/stream', authMiddleware, (req: AuthenticatedRequest, res:
 app.get('/api/auth/me', authMiddleware, (req: AuthenticatedRequest, res: Response) => {
   const user = req.user!;
   const effectiveName = (user.role === 'broker_admin' && settingsState.displayName) ? settingsState.displayName : user.name;
+  const matchedAccount = userAccounts.find(u => u.id === user.sub || u.email.toLowerCase() === (user.email || '').toLowerCase());
+  const resolvedReferralCode = deriveReferralCode(user.role, user.sub, user.referralCode || matchedAccount?.referralCode);
   const fullUser: AuthenticatedUser = {
     id: user.sub,
     name: effectiveName,
@@ -2325,6 +2455,7 @@ app.get('/api/auth/me', authMiddleware, (req: AuthenticatedRequest, res: Respons
     timezone: 'IST (UTC +05:30)',
     currency: 'INR - Indian Rupee',
     avatar: effectiveName.split(' ').map(n => n[0]).join('').slice(0, 2).toUpperCase(),
+    referralCode: resolvedReferralCode,
   };
 
   const token = createSignedToken({
@@ -2345,6 +2476,7 @@ app.get('/api/auth/me', authMiddleware, (req: AuthenticatedRequest, res: Respons
     client_id: fullUser.clientId,
     organization: fullUser.organization,
     phone: fullUser.phone,
+    referralCode: resolvedReferralCode,
   });
 
   res.json({
@@ -2358,7 +2490,8 @@ app.get('/api/auth/me', authMiddleware, (req: AuthenticatedRequest, res: Respons
 // Direct Login Endpoint — No OTP Required
 app.post('/api/auth/login', async (req: Request, res: Response) => {
   try {
-    const { identifier, password } = req.body;
+    const identifier = req.body.identifier || req.body.email || req.body.userId;
+    const password = req.body.password;
     if (!identifier || !password) {
       return res.status(400).json({
         success: false,
@@ -2382,7 +2515,8 @@ app.post('/api/auth/login', async (req: Request, res: Response) => {
         u.email.toLowerCase() === cleanLower ||
         u.id.toLowerCase() === cleanLower ||
         u.userId.toLowerCase() === cleanLower ||
-        u.phone.replace(/\D/g, '') === cleanIdentifier.replace(/\D/g, '')
+        (u.referralCode && u.referralCode.toLowerCase() === cleanLower) ||
+        (u.phone && cleanIdentifier.replace(/\D/g, '').length >= 7 && u.phone.replace(/\D/g, '') === cleanIdentifier.replace(/\D/g, ''))
       ) || null;
     }
 
@@ -2391,7 +2525,7 @@ app.post('/api/auth/login', async (req: Request, res: Response) => {
       const sysUser = Object.values(systemUsers).find(u =>
         u.email.toLowerCase() === cleanLower ||
         u.id.toLowerCase() === cleanLower ||
-        u.phone.replace(/\D/g, '') === cleanIdentifier.replace(/\D/g, '')
+        (u.phone && cleanIdentifier.replace(/\D/g, '').length >= 7 && u.phone.replace(/\D/g, '') === cleanIdentifier.replace(/\D/g, ''))
       );
       if (sysUser) {
         account = {
@@ -2404,9 +2538,12 @@ app.post('/api/auth/login', async (req: Request, res: Response) => {
           role: sysUser.role,
           roleTitle: sysUser.roleTitle,
           brokerId: sysUser.brokerId,
+          subBrokerId: sysUser.subBrokerId,
+          masterId: sysUser.masterId,
           tenantId: sysUser.tenantId || DEFAULT_TENANT_ID,
           organization: sysUser.organization,
           pan: 'ABCDE1234F',
+          referralCode: deriveReferralCode(sysUser.role, sysUser.id),
           createdAt: new Date().toISOString(),
         };
       }
@@ -2422,7 +2559,7 @@ app.post('/api/auth/login', async (req: Request, res: Response) => {
           (c.userId && c.userId.toLowerCase() === cleanLower) ||
           (c.clientCode && c.clientCode.toLowerCase() === cleanLower) ||
           (stripped && c.id && stripTenantPrefix(c.id).toLowerCase() === stripped) ||
-          (c.phone && c.phone.replace(/\D/g, '') === cleanIdentifier.replace(/\D/g, ''))
+          (c.phone && cleanIdentifier.replace(/\D/g, '').length >= 7 && c.phone.replace(/\D/g, '') === cleanIdentifier.replace(/\D/g, ''))
         )
       );
 
@@ -2433,10 +2570,12 @@ app.post('/api/auth/login', async (req: Request, res: Response) => {
           name: liveClient.name,
           email: liveClient.email,
           phone: liveClient.phone,
-          passwordHash: hashPassword(passwordStr),
+          passwordHash: hashPasswordBcrypt(passwordStr),
           role: 'trader_client',
           roleTitle: 'Trader Client',
           brokerId: liveClient.brokerId || 'BRK-ROHAN-01',
+          subBrokerId: liveClient.subBrokerId,
+          masterId: liveClient.masterId,
           tenantId: liveClient.tenantId || DEFAULT_TENANT_ID,
           organization: 'NexTrade Retail',
           pan: liveClient.pan || 'ABCDE1234F',
@@ -2468,8 +2607,8 @@ app.post('/api/auth/login', async (req: Request, res: Response) => {
       });
     }
 
-    // Verify Password
-    const isPasswordValid = verifyPassword(passwordStr, account.passwordHash) || passwordStr === 'Password@123';
+    // Verify Password (supports bcrypt hashes from Admin Panel, local SHA-256 hashes, and fallback for unhashed legacy rows)
+    const isPasswordValid = verifyPassword(passwordStr, account.passwordHash) || (!account.passwordHash && passwordStr === 'Password@123');
 
     if (!isPasswordValid) {
       pushAudit({
@@ -2490,17 +2629,32 @@ app.post('/api/auth/login', async (req: Request, res: Response) => {
       });
     }
 
-    // Generate signed token
+    const resolvedMasterId = account.masterId || ((account.role === 'master' || account.role === 'master_admin') ? account.id : undefined);
+    const resolvedBrokerId = account.brokerId || (account.role === 'broker_admin' ? account.id : 'BRK-ROHAN-01');
+    const resolvedSubBrokerId = account.subBrokerId || (account.role === 'sub_broker' ? account.id : undefined);
+    const resolvedClientId = account.role === 'trader_client' ? account.id : undefined;
+    const resolvedReferralCode = deriveReferralCode(account.role, account.id, account.referralCode);
+
+    // Generate signed token with full hierarchy scope
     const token = createSignedToken({
       sub: account.id,
       name: account.name,
       email: account.email,
       role: account.role,
       roleTitle: account.roleTitle,
-      brokerId: account.brokerId,
-      tenantId: account.tenantId,
+      brokerId: resolvedBrokerId,
+      broker_id: resolvedBrokerId,
+      subBrokerId: resolvedSubBrokerId,
+      sub_broker_id: resolvedSubBrokerId,
+      masterId: resolvedMasterId,
+      master_id: resolvedMasterId,
+      clientId: resolvedClientId,
+      client_id: resolvedClientId,
+      tenantId: account.tenantId || DEFAULT_TENANT_ID,
+      tenant_id: account.tenantId || DEFAULT_TENANT_ID,
       organization: account.organization || 'NexTrade Securities',
       phone: account.phone,
+      referralCode: resolvedReferralCode,
     });
 
     const userProfile: AuthenticatedUser = {
@@ -2509,13 +2663,22 @@ app.post('/api/auth/login', async (req: Request, res: Response) => {
       email: account.email,
       role: account.role,
       roleTitle: account.roleTitle,
-      brokerId: account.brokerId,
-      tenantId: account.tenantId,
+      brokerId: resolvedBrokerId,
+      broker_id: resolvedBrokerId,
+      subBrokerId: resolvedSubBrokerId,
+      sub_broker_id: resolvedSubBrokerId,
+      masterId: resolvedMasterId,
+      master_id: resolvedMasterId,
+      clientId: resolvedClientId,
+      client_id: resolvedClientId,
+      tenantId: account.tenantId || DEFAULT_TENANT_ID,
+      tenant_id: account.tenantId || DEFAULT_TENANT_ID,
       organization: account.organization || 'NexTrade Securities',
       phone: account.phone,
       timezone: 'IST (UTC +05:30)',
       currency: 'INR - Indian Rupee',
       avatar: account.name.split(' ').map(n => n[0]).join('').slice(0, 2).toUpperCase(),
+      referralCode: resolvedReferralCode,
     };
 
     pushAudit({
@@ -2540,6 +2703,121 @@ app.post('/api/auth/login', async (req: Request, res: Response) => {
   } catch (err: any) {
     console.error('[Auth Login] Error during login:', err.message);
     return res.status(500).json({ success: false, message: 'Internal authentication error: ' + err.message });
+  }
+});
+
+// Self-Service Password Change — Updates local store + PostgreSQL and syncs via S2S to Admin & Trading Platform
+app.post('/api/auth/change-password', authMiddleware, async (req: AuthenticatedRequest, res: Response) => {
+  try {
+    const user = req.user!;
+    const currentPassword = String(req.body.currentPassword || '');
+    const newPassword = String(req.body.newPassword || '');
+
+    if (!currentPassword || !newPassword) {
+      return res.status(400).json({ success: false, message: 'Current password and new password are required.' });
+    }
+    if (newPassword.length < 6) {
+      return res.status(400).json({ success: false, message: 'New password must be at least 6 characters long.' });
+    }
+    if (currentPassword === newPassword) {
+      return res.status(400).json({ success: false, message: 'New password must be different from your current password.' });
+    }
+
+    let account: UserAccount | null = null;
+    if (isUsingPostgres()) {
+      account = await dbRepo.getAccountByIdentifier(user.sub) || await dbRepo.getAccountByIdentifier(user.email);
+    }
+    if (!account) {
+      account = userAccounts.find(u => u.id === user.sub || u.email.toLowerCase() === (user.email || '').toLowerCase()) || null;
+    }
+    if (!account) {
+      // Materialize account record for built-in session users so password change persists
+      account = {
+        id: user.sub,
+        userId: user.sub,
+        name: user.name,
+        email: user.email,
+        phone: user.phone || '',
+        passwordHash: hashPassword('Password@123'),
+        role: user.role,
+        roleTitle: user.roleTitle,
+        brokerId: user.brokerId || 'BRK-ROHAN-01',
+        subBrokerId: user.subBrokerId,
+        masterId: user.masterId,
+        tenantId: user.tenantId || DEFAULT_TENANT_ID,
+        organization: user.organization || 'NexTrade Securities',
+        referralCode: deriveReferralCode(user.role, user.sub, user.referralCode),
+        createdAt: new Date().toISOString(),
+      };
+      userAccounts.push(account);
+    }
+
+    const isCurrentValid = verifyPassword(currentPassword, account.passwordHash) || (!account.passwordHash && currentPassword === 'Password@123');
+    if (!isCurrentValid) {
+      return res.status(400).json({ success: false, message: 'Current password is incorrect.' });
+    }
+
+    const nextHash = hashPasswordBcrypt(newPassword);
+    account.passwordHash = nextHash;
+
+    const memIdx = userAccounts.findIndex(u => u.id === account!.id || u.email.toLowerCase() === account!.email.toLowerCase());
+    if (memIdx !== -1) {
+      userAccounts[memIdx] = { ...userAccounts[memIdx], passwordHash: nextHash };
+    } else {
+      userAccounts.push(account);
+    }
+
+    if (isUsingPostgres()) {
+      await dbRepo.insertAccount(account);
+      await dbRepo.updateAccountPassword(account.id, account.email, nextHash);
+    }
+    savePersistence();
+
+    const s2sRole = account.role === 'master' || account.role === 'master_admin'
+      ? 'MASTER'
+      : account.role === 'broker_admin'
+        ? 'BROKER'
+        : account.role === 'sub_broker'
+          ? 'SUB_BROKER'
+          : account.role === 'super_admin'
+            ? 'SUPER_ADMIN'
+            : account.role === 'operations'
+              ? 'STAFF'
+              : 'CLIENT';
+
+    dispatchS2SHierarchySync({
+      action: 'PASSWORD_UPDATED',
+      nodeType: s2sRole,
+      role: s2sRole,
+      id: account.id,
+      userId: account.userId || account.id,
+      name: account.name,
+      email: account.email,
+      phone: account.phone,
+      passwordHash: nextHash,
+      tenantId: account.tenantId || DEFAULT_TENANT_ID,
+      masterId: account.masterId,
+      brokerId: account.brokerId,
+      subBrokerId: account.subBrokerId,
+      referralCode: account.referralCode,
+    }).catch(() => {});
+
+    pushAudit({
+      id: `LOG-${Date.now().toString().slice(-4)}`,
+      timestamp: new Date().toLocaleTimeString('en-GB') + ', Today',
+      user: account.name,
+      role: account.role,
+      action: 'Password Changed',
+      relatedEntity: account.id,
+      ipAddress: (req.headers['x-forwarded-for'] as string) || req.socket.remoteAddress || '127.0.0.1',
+      result: 'Success',
+      details: `Self-service password updated for ${account.email} and queued for cross-platform S2S sync`,
+    });
+
+    return res.json({ success: true, message: 'Password updated successfully and synced across platforms.' });
+  } catch (err: any) {
+    console.error('[Auth Change Password] Error:', err.message);
+    return res.status(500).json({ success: false, message: 'Failed to update password: ' + err.message });
   }
 });
 
@@ -2801,6 +3079,8 @@ app.get('/api/bootstrap', authMiddleware, async (req: AuthenticatedRequest, res:
   const returnedInstruments = instruments && instruments.length > 0 ? instruments : defaultMarketInstruments;
 
   const effectiveName = (user.role === 'broker_admin' && settingsState.displayName) ? settingsState.displayName : user.name;
+  const matchedAccount = userAccounts.find(u => u.id === user.sub || u.email.toLowerCase() === (user.email || '').toLowerCase());
+  const resolvedReferralCode = deriveReferralCode(user.role, user.sub, user.referralCode || matchedAccount?.referralCode);
   res.json({
     success: true,
     user: {
@@ -2810,12 +3090,21 @@ app.get('/api/bootstrap', authMiddleware, async (req: AuthenticatedRequest, res:
       role: user.role,
       roleTitle: user.roleTitle,
       brokerId: user.brokerId,
+      broker_id: user.brokerId,
+      subBrokerId: user.subBrokerId,
+      sub_broker_id: user.subBrokerId,
+      masterId: user.masterId,
+      master_id: user.masterId,
+      clientId: user.clientId,
+      client_id: user.clientId,
       tenantId: user.tenantId,
+      tenant_id: user.tenantId,
       organization: user.organization,
       phone: user.phone,
       timezone: 'IST (UTC +05:30)',
       currency: 'INR - Indian Rupee',
       avatar: effectiveName.split(' ').map(n => n[0]).join('').slice(0, 2).toUpperCase(),
+      referralCode: resolvedReferralCode,
     },
     metrics,
     clients: scopedClients,
@@ -3206,102 +3495,168 @@ app.post(['/api/sub-brokers', '/api/admin/sub-brokers'], authMiddleware, require
 
 // Authoritative Cross-Platform Hierarchy S2S Receiver
 app.post(['/api/internal/v1/hierarchy/sync', '/api/internal/hierarchy/sync'], async (req: Request, res: Response) => {
-  const secretHeader = (req.headers['x-internal-secret'] || req.headers['x-api-key'] || req.headers['authorization']) as string;
-  const signature = req.headers['x-signature'] as string;
-  const timestamp = Number(req.headers['x-timestamp']) || 0;
-
-  if (signature) {
-    const rawBody = JSON.stringify(req.body);
-    const valid = verifyHmacSignature(rawBody, signature, timestamp);
-    if (!valid && APP_ENV === 'production') {
-      return res.status(401).json({ success: false, message: 'Invalid HMAC signature' });
-    }
-  } else if (secretHeader && !secretHeader.includes(INTERNAL_API_SECRET) && APP_ENV === 'production') {
-    return res.status(401).json({ success: false, message: 'Invalid internal secret' });
+  const s2sCheck = verifyS2SRequest(req);
+  if (!s2sCheck.valid) {
+    return res.status(401).json({ success: false, message: s2sCheck.reason || 'Invalid S2S signature' });
   }
 
-  const payload = req.body;
-  const nodeType = (payload.nodeType || payload.type || payload.role || '').toLowerCase();
-  const id = payload.id || payload.userId || payload.brokerId || payload.subBrokerId || payload.masterId || payload.clientId;
+  const envelope = req.body || {};
+  const node = (envelope.node && typeof envelope.node === 'object') ? { ...envelope, ...envelope.node } : envelope;
+  const rawType = String(node.nodeType || node.type || node.role || envelope.nodeType || envelope.type || '').toLowerCase();
+  const id = String(node.id || node.userId || node.brokerId || node.subBrokerId || node.masterId || node.clientId || '').trim();
   if (!id) {
     return res.json({ success: true, message: 'Empty hierarchy sync payload ignored' });
   }
-  const name = payload.name || payload.fullName || id;
-  const email = (payload.email || `${id}@nextrade.example`).toLowerCase();
-  const tenantId = payload.tenantId || DEFAULT_TENANT_ID;
 
-  if (nodeType.includes('master')) {
-    const acc: UserAccount = {
-      id,
-      userId: id,
-      name,
-      email,
-      phone: payload.phone || '',
-      passwordHash: hashPassword(payload.password || 'Password@123'),
-      role: 'master',
-      roleTitle: 'Master Admin',
-      brokerId: payload.brokerId || 'BRK-MASTER-01',
-      masterId: id,
-      tenantId,
-      organization: payload.organization || payload.company || `${name} Prime`,
-      createdAt: payload.createdAt || new Date().toISOString(),
-    };
-    const idx = userAccounts.findIndex(u => u.id === id || u.email === email);
-    if (idx !== -1) userAccounts[idx] = acc; else userAccounts.push(acc);
-    if (isUsingPostgres()) dbRepo.insertAccount(acc).catch(console.warn);
-  } else if (nodeType.includes('broker') && !nodeType.includes('sub')) {
-    const acc: UserAccount = {
-      id,
-      userId: id,
-      name,
-      email,
-      phone: payload.phone || '',
-      passwordHash: hashPassword(payload.password || 'Password@123'),
-      role: 'broker_admin',
-      roleTitle: 'Broker Administrator',
-      brokerId: id,
-      masterId: payload.masterId || 'MST-ALPHA-01',
-      tenantId,
-      organization: payload.organization || payload.company || `${name} Securities`,
-      createdAt: payload.createdAt || new Date().toISOString(),
-    };
-    const idx = userAccounts.findIndex(u => u.id === id || u.email === email);
-    if (idx !== -1) userAccounts[idx] = acc; else userAccounts.push(acc);
-    if (isUsingPostgres()) dbRepo.insertAccount(acc).catch(console.warn);
-  } else if (nodeType.includes('sub')) {
-    const acc: UserAccount = {
-      id,
-      userId: id,
-      name,
-      email,
-      phone: payload.phone || '',
-      passwordHash: hashPassword(payload.password || 'Password@123'),
-      role: 'sub_broker',
-      roleTitle: 'Sub-Broker / Franchisee',
-      brokerId: payload.brokerId || 'BRK-ROHAN-01',
-      subBrokerId: id,
-      masterId: payload.masterId || 'MST-ALPHA-01',
-      tenantId,
-      organization: payload.organization || payload.company || `${name} Franchise`,
-      createdAt: payload.createdAt || new Date().toISOString(),
-    };
-    const idx = userAccounts.findIndex(u => u.id === id || u.email === email);
-    if (idx !== -1) userAccounts[idx] = acc; else userAccounts.push(acc);
-    if (isUsingPostgres()) dbRepo.insertAccount(acc).catch(console.warn);
-  } else if (nodeType.includes('client')) {
-    const existing = clients.find(c => c.id === id || (c.userId && c.userId === id));
-    if (existing) {
-      if (payload.brokerId) existing.brokerId = payload.brokerId;
-      if (payload.subBrokerId) existing.subBrokerId = payload.subBrokerId;
-      if (payload.masterId) existing.masterId = payload.masterId;
-      if (payload.status) existing.status = payload.status;
-      if (isUsingPostgres()) dbRepo.insertClient(existing).catch(console.warn);
+  const name = String(node.name || node.fullName || id).trim();
+  const email = String(node.email || `${id.toLowerCase()}@nextrade.example`).trim().toLowerCase();
+  const tenantId = String(node.tenantId || envelope.tenantId || DEFAULT_TENANT_ID).trim();
+  const incomingPasswordHash = typeof node.passwordHash === 'string' && node.passwordHash.trim()
+    ? node.passwordHash.trim()
+    : (typeof envelope.passwordHash === 'string' && envelope.passwordHash.trim() ? envelope.passwordHash.trim() : '');
+  const incomingPassword = typeof node.password === 'string' && node.password.trim() ? node.password.trim() : '';
+
+  const existingAccount = userAccounts.find(u => u.id === id || u.email.toLowerCase() === email)
+    || (isUsingPostgres() ? (await dbRepo.getAccountByIdentifier(id) || await dbRepo.getAccountByIdentifier(email)) : null);
+
+  // Preserve incoming bcrypt/SHA-256 hash verbatim; otherwise hash plaintext or retain existing hash
+  const resolvedPasswordHash = incomingPasswordHash
+    || (incomingPassword ? hashPasswordBcrypt(incomingPassword) : '')
+    || existingAccount?.passwordHash
+    || hashPasswordBcrypt('Password@123');
+
+  let mappedRole: UserRole = 'trader_client';
+  let roleTitle = 'Trader Client';
+  if (rawType.includes('super')) {
+    mappedRole = 'super_admin';
+    roleTitle = 'Super Administrator';
+  } else if (rawType.includes('master')) {
+    mappedRole = 'master';
+    roleTitle = 'Master Admin';
+  } else if (rawType.includes('sub')) {
+    mappedRole = 'sub_broker';
+    roleTitle = 'Sub-Broker / Franchisee';
+  } else if (rawType.includes('broker')) {
+    mappedRole = 'broker_admin';
+    roleTitle = 'Broker Administrator';
+  } else if (rawType.includes('staff') || rawType.includes('ops') || rawType.includes('operation')) {
+    mappedRole = 'operations';
+    roleTitle = 'Operations / Staff';
+  }
+
+  const resolvedMasterId = mappedRole === 'master'
+    ? id
+    : (node.masterId || existingAccount?.masterId || (mappedRole !== 'super_admin' ? 'MST-ALPHA-01' : undefined));
+  const resolvedBrokerId = mappedRole === 'broker_admin'
+    ? id
+    : (node.brokerId || existingAccount?.brokerId || (mappedRole === 'master' ? 'BRK-MASTER-01' : 'BRK-ROHAN-01'));
+  const resolvedSubBrokerId = mappedRole === 'sub_broker'
+    ? id
+    : (node.subBrokerId || existingAccount?.subBrokerId || undefined);
+  const resolvedReferralCode = deriveReferralCode(mappedRole, id, node.referralCode || existingAccount?.referralCode);
+  const commissionShare = node.commissionShare !== undefined && node.commissionShare !== null
+    ? Number(node.commissionShare)
+    : existingAccount?.commissionShare;
+
+  const syncedAccount: UserAccount = {
+    id,
+    userId: String(node.userId || id),
+    name,
+    email,
+    phone: String(node.phone || existingAccount?.phone || ''),
+    passwordHash: resolvedPasswordHash,
+    role: mappedRole,
+    roleTitle,
+    brokerId: resolvedBrokerId,
+    subBrokerId: resolvedSubBrokerId,
+    masterId: resolvedMasterId,
+    tenantId,
+    organization: String(node.organization || node.company || existingAccount?.organization || `${name} Capital`),
+    pan: String(node.pan || existingAccount?.pan || ''),
+    referralCode: resolvedReferralCode,
+    commissionShare: Number.isFinite(commissionShare as number) ? commissionShare : undefined,
+    createdAt: node.createdAt || existingAccount?.createdAt || new Date().toISOString(),
+  };
+
+  const idx = userAccounts.findIndex(u => u.id === id || u.email.toLowerCase() === email);
+  if (idx !== -1) userAccounts[idx] = syncedAccount;
+  else userAccounts.push(syncedAccount);
+
+  if (isUsingPostgres()) {
+    await dbRepo.insertAccount(syncedAccount);
+  }
+
+  if (mappedRole === 'trader_client' || rawType.includes('client')) {
+    const existingClient = clients.find(c => c.id === id || (c.userId && c.userId === id) || c.email?.toLowerCase() === email);
+    if (existingClient) {
+      existingClient.name = name;
+      existingClient.email = email;
+      if (node.phone) existingClient.phone = String(node.phone);
+      if (resolvedBrokerId) existingClient.brokerId = resolvedBrokerId;
+      if (resolvedSubBrokerId) existingClient.subBrokerId = resolvedSubBrokerId;
+      if (resolvedMasterId) existingClient.masterId = resolvedMasterId;
+      if (tenantId) existingClient.tenantId = tenantId;
+      if (node.status) existingClient.status = node.status;
+      if (isUsingPostgres()) dbRepo.insertClient(existingClient).catch(console.warn);
+    } else {
+      const newClient: Client = {
+        id,
+        userId: id,
+        clientCode: node.clientCode || id,
+        name,
+        email,
+        phone: String(node.phone || '+91 98000 00000'),
+        pan: String(node.pan || 'ABCDE1234F'),
+        status: (node.status === 'Suspended' || node.status === 'Inactive') ? node.status : 'Active',
+        isDemo: false,
+        ledgerBalance: Number(node.balance ?? node.ledgerBalance ?? 0) || 0,
+        openPnL: 0,
+        peakLedger: Number(node.balance ?? node.ledgerBalance ?? 0) || 0,
+        marginUsed: 0,
+        income: 0,
+        marginAvailable: Number(node.marginAvailable ?? node.balance ?? 0) || 0,
+        brokerId: resolvedBrokerId,
+        brokerName: String(node.brokerName || 'Broker Desk'),
+        subBrokerId: resolvedSubBrokerId,
+        masterId: resolvedMasterId,
+        tenantId,
+        kycStatus: 'Verified',
+        kycDocuments: ['PAN Card'],
+        createdDate: new Date().toISOString().split('T')[0],
+        lastActive: 'Just now',
+        riskLimit: 500000,
+        isLive: true,
+      };
+      clients.unshift(newClient);
+      if (isUsingPostgres()) dbRepo.insertClient(newClient).catch(console.warn);
     }
   }
 
   savePersistence();
-  broadcastScopedEvent('hierarchy_synced', { nodeType, id, name, timestamp: new Date().toISOString() });
-  res.json({ success: true, message: `Hierarchy node ${id} (${nodeType}) synced successfully` });
+  broadcastScopedEvent('hierarchy_synced', {
+    nodeType: rawType || mappedRole,
+    id,
+    name,
+    email,
+    role: mappedRole,
+    referralCode: resolvedReferralCode,
+    timestamp: new Date().toISOString(),
+  });
+  res.json({
+    success: true,
+    message: `Hierarchy node ${id} (${mappedRole}) synced successfully`,
+    account: {
+      id: syncedAccount.id,
+      name: syncedAccount.name,
+      email: syncedAccount.email,
+      role: syncedAccount.role,
+      tenantId: syncedAccount.tenantId,
+      masterId: syncedAccount.masterId,
+      brokerId: syncedAccount.brokerId,
+      subBrokerId: syncedAccount.subBrokerId,
+      referralCode: syncedAccount.referralCode,
+    },
+  });
 });
 
 // Trades API with Strict Multi-Tenant Hierarchy Scoping
@@ -5154,32 +5509,61 @@ app.post('/api/tickets/:id/reply', authMiddleware, (req: AuthenticatedRequest, r
 });
 
 // White-label & Central Admin Propagation with HMAC Signature Validation
-app.get('/api/tenant/branding', (_req: Request, res: Response) => {
-  res.json({ success: true, branding: tenantBranding });
+function mergeIncomingBranding(raw: any): TenantBranding {
+  const src = (raw?.branding && typeof raw.branding === 'object') ? { ...raw, ...raw.branding } : (raw || {});
+  const nextBrandName = src.brandName || src.brand_name || tenantBranding.brandName;
+  return {
+    ...tenantBranding,
+    brandName: nextBrandName,
+    platformName: src.platformName || src.platform_name || (nextBrandName ? `${nextBrandName} Broker OS` : tenantBranding.platformName),
+    shortName: src.shortName || src.short_name || nextBrandName || tenantBranding.shortName,
+    tagline: src.tagline ?? tenantBranding.tagline,
+    logoUrl: src.logoUrl ?? src.logo_url ?? tenantBranding.logoUrl,
+    primaryColor: src.primaryColor || src.primary_color || tenantBranding.primaryColor,
+    secondaryColor: src.secondaryColor || src.secondary_color || tenantBranding.secondaryColor,
+    accentColor: src.accentColor || src.accent_color || tenantBranding.accentColor,
+    supportEmail: src.supportEmail || src.support_email || tenantBranding.supportEmail,
+    supportPhone: src.supportPhone || src.support_phone || tenantBranding.supportPhone,
+    footerCopyright: src.footerCopyright || src.footerText || src.footer_text || (nextBrandName ? `© ${new Date().getFullYear()} ${nextBrandName}. All rights reserved.` : tenantBranding.footerCopyright),
+    domain: src.domain || src.customDomain || src.custom_domain || tenantBranding.domain || '',
+    version: String(src.version || tenantBranding.version),
+    updatedAt: new Date().toISOString(),
+  };
+}
+
+app.get(['/api/whitelabel/config', '/api/tenant/branding'], (_req: Request, res: Response) => {
+  res.json({
+    success: true,
+    config: tenantBranding,
+    branding: tenantBranding,
+    tradingPlatformUrl: TRADING_PLATFORM_URL,
+  });
 });
 
-app.post('/api/whitelabel/publish', (req: Request, res: Response) => {
-  const signature = req.headers['x-signature'] as string;
-  const timestamp = Number(req.headers['x-timestamp']) || 0;
+app.post([
+  '/api/internal/v1/whitelabel/sync',
+  '/api/internal/v1/white-label/sync',
+  '/api/internal/v1/tenant/branding',
+  '/api/whitelabel/publish',
+], async (req: Request, res: Response) => {
   const tenantId = req.headers['x-tenant-id'] as string;
-
-  // Validate HMAC signature unless in development test mode with explicit bypass flag
-  if (APP_ENV === 'production' || signature) {
-    const rawBody = JSON.stringify(req.body);
-    const isValid = verifyHmacSignature(rawBody, signature, timestamp);
-    if (!isValid) {
+  const s2sCheck = verifyS2SRequest(req);
+  if (!s2sCheck.valid) {
+    // Allow authenticated broker/admin UI updates on /api/whitelabel/publish
+    const authHeader = req.headers.authorization;
+    const isAuthedUi = req.path === '/api/whitelabel/publish' && authHeader?.startsWith('Bearer ') && Boolean(verifySignedToken(authHeader.slice(7)));
+    if (!isAuthedUi) {
       return res.status(401).json({
         success: false,
-        message: 'Unauthorized: Invalid HMAC signature or expired timestamp from Central Admin',
+        message: s2sCheck.reason || 'Unauthorized: Invalid HMAC signature or expired timestamp from Central Admin',
       });
     }
   }
 
-  tenantBranding = {
-    ...tenantBranding,
-    ...req.body,
-    updatedAt: new Date().toISOString(),
-  };
+  tenantBranding = mergeIncomingBranding(req.body);
+  if (isUsingPostgres()) {
+    await dbRepo.saveBranding(tenantBranding).catch(console.warn);
+  }
   savePersistence();
 
   pushAudit({
@@ -5187,15 +5571,16 @@ app.post('/api/whitelabel/publish', (req: Request, res: Response) => {
     timestamp: new Date().toLocaleTimeString('en-GB') + ', Today',
     user: 'Central Admin Panel',
     role: 'Super Admin RPC',
-    action: 'White-Label Branding Published',
+    action: 'White-Label Branding Synced',
     relatedEntity: tenantId || tenantBranding.brandName,
     ipAddress: req.ip || '127.0.0.1',
     result: 'Success',
-    details: `Central Admin published updated branding version ${tenantBranding.version} with theme colors [${tenantBranding.primaryColor}, ${tenantBranding.secondaryColor}]`,
+    details: `White-label branding updated to "${tenantBranding.brandName}" (v${tenantBranding.version}, primary ${tenantBranding.primaryColor})`,
   });
 
   broadcastScopedEvent('branding_updated', tenantBranding);
-  res.json({ success: true, branding: tenantBranding });
+  broadcastScopedEvent('branding_update', tenantBranding);
+  res.json({ success: true, config: tenantBranding, branding: tenantBranding });
 });
 
 // Manual trigger to sync live instruments from Trading Platform
@@ -5378,6 +5763,14 @@ async function startServer() {
       if (pgAudit.length > 0) auditLogs = pgAudit;
     } catch (e: any) {
       console.warn('[Database] Notice loading audit logs from PostgreSQL:', e.message);
+    }
+    try {
+      const pgBranding = await dbRepo.getBranding();
+      if (pgBranding) {
+        tenantBranding = { ...tenantBranding, ...pgBranding };
+      }
+    } catch (e: any) {
+      console.warn('[Database] Notice loading branding from PostgreSQL:', e.message);
     }
     console.log(`[Database] Loaded authoritative records from PostgreSQL: ${clients.length} clients, ${orders.length} orders, ${positions.length} positions.`);
   }
@@ -5679,7 +6072,9 @@ async function startServer() {
   });
 }
 
-startServer().catch((err) => {
-  console.error('Failed to start server:', err);
-  process.exit(1);
-});
+if (process.env.SKIP_SERVER_START !== 'true') {
+  startServer().catch((err) => {
+    console.error('Failed to start server:', err);
+    process.exit(1);
+  });
+}

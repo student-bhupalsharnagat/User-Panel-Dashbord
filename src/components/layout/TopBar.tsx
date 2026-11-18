@@ -24,6 +24,7 @@ export const TopBar: React.FC = () => {
     activeTab,
     currentUser,
     settings,
+    tenantBranding,
     switchRole,
     isSearchOpen,
     setIsSearchOpen,
@@ -93,7 +94,7 @@ export const TopBar: React.FC = () => {
 
         <div className="flex items-center gap-1.5 min-w-0">
           <div className="text-xs text-slate-500 font-medium whitespace-nowrap hidden sm:inline">
-            NexTrade <span className="text-slate-600">/</span>
+            {tenantBranding?.brandName || 'NexTrade'} <span className="text-slate-600">/</span>
           </div>
           <h1 className="text-sm font-semibold text-white tracking-tight truncate">
             {getBreadcrumbTitle()}

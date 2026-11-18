@@ -193,8 +193,12 @@ export const AuthView: React.FC = () => {
       {/* Top Header Branding */}
       <header className="w-full max-w-6xl mx-auto flex items-center justify-between pb-6 border-b border-[#161f36]">
         <div className="flex items-center gap-3">
-          <div className="w-10 h-10 rounded-xl bg-gradient-to-tr from-purple-600 via-indigo-600 to-cyan-500 flex items-center justify-center shadow-lg shadow-purple-500/20 ring-1 ring-white/20">
-            <Terminal className="w-5 h-5 text-white" />
+          <div className="w-10 h-10 rounded-xl bg-gradient-to-tr from-purple-600 via-indigo-600 to-cyan-500 flex items-center justify-center shadow-lg shadow-purple-500/20 ring-1 ring-white/20 overflow-hidden shrink-0">
+            {tenantBranding?.logoUrl ? (
+              <img src={tenantBranding.logoUrl} alt={tenantBranding.brandName || 'Brand'} className="w-full h-full object-cover" />
+            ) : (
+              <Terminal className="w-5 h-5 text-white" />
+            )}
           </div>
           <div>
             <div className="flex items-center gap-2">
@@ -526,7 +530,7 @@ export const AuthView: React.FC = () => {
       {/* Footer System Status & Security */}
       <footer className="w-full max-w-6xl mx-auto flex flex-col sm:flex-row items-center justify-between gap-3 pt-6 border-t border-[#161f36] text-xs text-slate-500">
         <div className="flex items-center gap-4">
-          <span>{tenantBranding?.footerCopyright || '© 2026 NexTrade Technologies Ltd.'}</span>
+          <span>{tenantBranding?.footerCopyright || `© 2026 ${tenantBranding?.brandName || 'NexTrade'} Technologies Ltd.`}</span>
           <span className="hidden sm:inline">•</span>
           <span className="text-slate-400">Production Build v4.3.0</span>
         </div>

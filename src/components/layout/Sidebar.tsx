@@ -108,17 +108,21 @@ export const Sidebar: React.FC = () => {
       >
         {/* Brand Header */}
         <div className="px-4 sm:px-5 py-4 border-b border-[#1a2336] flex items-center justify-between">
-          <div className="flex items-center gap-3">
-            <div className="w-8 h-8 rounded-lg bg-gradient-to-br from-indigo-500 to-purple-600 flex items-center justify-center shadow-lg shadow-purple-900/30 shrink-0">
-              <Activity className="w-5 h-5 text-white" />
+          <div className="flex items-center gap-3 min-w-0">
+            <div className="w-8 h-8 rounded-lg bg-gradient-to-br from-indigo-500 to-purple-600 flex items-center justify-center shadow-lg shadow-purple-900/30 shrink-0 overflow-hidden">
+              {tenantBranding?.logoUrl ? (
+                <img src={tenantBranding.logoUrl} alt={tenantBranding.brandName || 'Brand'} className="w-full h-full object-cover" />
+              ) : (
+                <Activity className="w-5 h-5 text-white" />
+              )}
             </div>
-            <div>
+            <div className="min-w-0">
               <div className="flex items-center gap-1.5">
-                <span className="text-base font-bold text-white tracking-tight">
+                <span className="text-base font-bold text-white tracking-tight truncate">
                   {tenantBranding?.brandName || 'NexTrade'}
                 </span>
               </div>
-              <span className="text-[10px] font-semibold tracking-wider text-indigo-400 uppercase block -mt-0.5">
+              <span className="text-[10px] font-semibold tracking-wider text-indigo-400 uppercase block -mt-0.5 truncate">
                 {tenantBranding?.platformName?.includes('OS') ? 'BROKER OS' : 'TRADING OS'}
               </span>
             </div>

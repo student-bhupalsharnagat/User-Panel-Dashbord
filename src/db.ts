@@ -245,6 +245,9 @@ export async function initDatabase(appEnv: string = 'production'): Promise<boole
       await dropForeignKeyConstraints(dropFkClient);
       await dropFkClient.query('ALTER TABLE IF EXISTS user_panel_clients ADD COLUMN IF NOT EXISTS user_id TEXT;');
       await dropFkClient.query('ALTER TABLE IF EXISTS user_panel_clients ADD COLUMN IF NOT EXISTS client_code TEXT;');
+      await dropFkClient.query('ALTER TABLE IF EXISTS user_panel_accounts ADD COLUMN IF NOT EXISTS referral_code TEXT;');
+      await dropFkClient.query('ALTER TABLE IF EXISTS user_panel_accounts ADD COLUMN IF NOT EXISTS commission_share NUMERIC(10, 2);');
+      await dropFkClient.query('ALTER TABLE IF EXISTS user_panel_tenant_branding ADD COLUMN IF NOT EXISTS domain TEXT;');
     } finally {
       dropFkClient.release();
     }
@@ -753,6 +756,22 @@ async function runMigrations(pool: Pool) {
         );
       } catch {}
       console.log('[Database Migration] Migration 6 successfully committed.');
+    }
+
+    // Migration 7: B2B Referral codes, commission share, and White-Label custom domain
+    if (!appliedVersions.has(7)) {
+      console.log('[Database Migration] Running Migration 7: Referral codes & White-Label domain...');
+      try {
+        await client.query('ALTER TABLE IF EXISTS user_panel_accounts ADD COLUMN IF NOT EXISTS referral_code TEXT;');
+        await client.query('ALTER TABLE IF EXISTS user_panel_accounts ADD COLUMN IF NOT EXISTS commission_share NUMERIC(10, 2);');
+        await client.query('CREATE INDEX IF NOT EXISTS idx_up_accounts_referral_code ON user_panel_accounts(UPPER(referral_code));');
+        await client.query('ALTER TABLE IF EXISTS user_panel_tenant_branding ADD COLUMN IF NOT EXISTS domain TEXT;');
+        await client.query(
+          'INSERT INTO user_panel_schema_migrations (version, name) VALUES (7, $1) ON CONFLICT (version) DO NOTHING',
+          ['Add referral_code and commission_share to user_panel_accounts and domain to user_panel_tenant_branding']
+        );
+      } catch {}
+      console.log('[Database Migration] Migration 7 successfully committed.');
     }
 
     // Guarantee created_at columns exist unconditionally on primary tables
@@ -1377,30 +1396,61 @@ export const dbRepo = {
   },
 
   // Tenant Branding
+  async getBranding(): Promise<TenantBranding | null> {
+    if (!pgPool || !isPostgresReady) return null;
+    try {
+      const res = await pgPool.query('SELECT * FROM user_panel_tenant_branding WHERE id = $1 LIMIT 1', ['default']);
+      if (res.rows.length === 0) return null;
+      const r = res.rows[0];
+      return {
+        brandName: r.brand_name || 'NexTrade',
+        platformName: r.platform_name || 'NexTrade Broker OS',
+        shortName: r.short_name || r.brand_name || 'NexTrade',
+        tagline: r.tagline || 'Institutional Grade Broker Infrastructure',
+        logoUrl: r.logo_url || '',
+        primaryColor: r.primary_color || '#8b5cf6',
+        secondaryColor: r.secondary_color || '#06b6d4',
+        accentColor: r.accent_color || '#10b981',
+        supportEmail: r.support_email || 'support@nextrade.example',
+        supportPhone: r.support_phone || '+91 98765 42000',
+        footerCopyright: r.footer_copyright || '© 2026 NexTrade Technologies Ltd.',
+        domain: r.domain || '',
+        version: r.version || 'v4.3.0-prod',
+        updatedAt: r.updated_at ? new Date(r.updated_at).toISOString() : new Date().toISOString(),
+      };
+    } catch (e: any) {
+      console.warn('[Database dbRepo.getBranding] notice:', e.message);
+      return null;
+    }
+  },
+
   async saveBranding(branding: TenantBranding): Promise<void> {
     if (!pgPool || !isPostgresReady) return;
     await pgPool.query(`
       INSERT INTO user_panel_tenant_branding (
         id, brand_name, platform_name, short_name, tagline, logo_url,
         primary_color, secondary_color, accent_color, support_email, support_phone,
-        footer_copyright, version, updated_at
-      ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, NOW())
+        footer_copyright, domain, version, updated_at
+      ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, NOW())
       ON CONFLICT (id) DO UPDATE SET
         brand_name = EXCLUDED.brand_name,
         platform_name = EXCLUDED.platform_name,
         short_name = EXCLUDED.short_name,
         tagline = EXCLUDED.tagline,
+        logo_url = EXCLUDED.logo_url,
         primary_color = EXCLUDED.primary_color,
         secondary_color = EXCLUDED.secondary_color,
         accent_color = EXCLUDED.accent_color,
         support_email = EXCLUDED.support_email,
         support_phone = EXCLUDED.support_phone,
+        footer_copyright = EXCLUDED.footer_copyright,
+        domain = EXCLUDED.domain,
         version = EXCLUDED.version,
         updated_at = NOW();
     `, [
       'default', branding.brandName, branding.platformName, branding.shortName, branding.tagline,
-      branding.logoUrl, branding.primaryColor, branding.secondaryColor, branding.accentColor,
-      branding.supportEmail, branding.supportPhone, branding.footerCopyright, branding.version
+      branding.logoUrl || '', branding.primaryColor, branding.secondaryColor, branding.accentColor,
+      branding.supportEmail, branding.supportPhone, branding.footerCopyright, branding.domain || '', branding.version
     ]);
   },
 
@@ -1487,24 +1537,26 @@ export const dbRepo = {
       await pgPool.query(`
         INSERT INTO user_panel_accounts (
           id, user_id, name, email, phone, password_hash, role, role_title,
-          broker_id, sub_broker_id, master_id, tenant_id, organization, pan, created_at, updated_at
+          broker_id, sub_broker_id, master_id, tenant_id, organization, pan, referral_code, commission_share, created_at, updated_at
         ) VALUES (
           $1, $2, $3, $4, $5, $6, $7, $8,
-          $9, $10, $11, $12, $13, $14, NOW(), NOW()
+          $9, $10, $11, $12, $13, $14, $15, $16, NOW(), NOW()
         )
         ON CONFLICT (id) DO UPDATE SET
           name = EXCLUDED.name,
           email = EXCLUDED.email,
-          phone = EXCLUDED.phone,
-          password_hash = EXCLUDED.password_hash,
+          phone = COALESCE(NULLIF(EXCLUDED.phone, ''), user_panel_accounts.phone),
+          password_hash = COALESCE(NULLIF(EXCLUDED.password_hash, ''), user_panel_accounts.password_hash),
           role = EXCLUDED.role,
           role_title = EXCLUDED.role_title,
-          broker_id = EXCLUDED.broker_id,
-          sub_broker_id = EXCLUDED.sub_broker_id,
-          master_id = EXCLUDED.master_id,
-          tenant_id = EXCLUDED.tenant_id,
-          organization = EXCLUDED.organization,
-          pan = EXCLUDED.pan,
+          broker_id = COALESCE(NULLIF(EXCLUDED.broker_id, ''), user_panel_accounts.broker_id),
+          sub_broker_id = COALESCE(NULLIF(EXCLUDED.sub_broker_id, ''), user_panel_accounts.sub_broker_id),
+          master_id = COALESCE(NULLIF(EXCLUDED.master_id, ''), user_panel_accounts.master_id),
+          tenant_id = COALESCE(NULLIF(EXCLUDED.tenant_id, ''), user_panel_accounts.tenant_id),
+          organization = COALESCE(NULLIF(EXCLUDED.organization, ''), user_panel_accounts.organization),
+          pan = COALESCE(NULLIF(EXCLUDED.pan, ''), user_panel_accounts.pan),
+          referral_code = COALESCE(NULLIF(EXCLUDED.referral_code, ''), user_panel_accounts.referral_code),
+          commission_share = COALESCE(EXCLUDED.commission_share, user_panel_accounts.commission_share),
           updated_at = NOW();
       `, [
         account.id,
@@ -1521,9 +1573,63 @@ export const dbRepo = {
         account.tenantId || 'TNT-001',
         account.organization || '',
         account.pan || '',
+        account.referralCode || null,
+        account.commissionShare ?? null,
       ]);
     } catch (e: any) {
+      // Handle email unique conflict when synced node id differs from an existing local account with the same email
+      if (e.code === '23505' && String(e.constraint || '').includes('email')) {
+        try {
+          await pgPool.query(`
+            UPDATE user_panel_accounts SET
+              name = $2,
+              phone = COALESCE(NULLIF($3, ''), phone),
+              password_hash = COALESCE(NULLIF($4, ''), password_hash),
+              role = $5,
+              role_title = $6,
+              broker_id = COALESCE(NULLIF($7, ''), broker_id),
+              sub_broker_id = COALESCE(NULLIF($8, ''), sub_broker_id),
+              master_id = COALESCE(NULLIF($9, ''), master_id),
+              tenant_id = COALESCE(NULLIF($10, ''), tenant_id),
+              organization = COALESCE(NULLIF($11, ''), organization),
+              referral_code = COALESCE(NULLIF($12, ''), referral_code),
+              commission_share = COALESCE($13, commission_share),
+              updated_at = NOW()
+            WHERE LOWER(email) = LOWER($1);
+          `, [
+            account.email,
+            account.name,
+            account.phone || '',
+            account.passwordHash,
+            account.role,
+            account.roleTitle || '',
+            account.brokerId || 'BRK-ROHAN-01',
+            account.subBrokerId || null,
+            account.masterId || null,
+            account.tenantId || 'TNT-001',
+            account.organization || '',
+            account.referralCode || null,
+            account.commissionShare ?? null,
+          ]);
+          return;
+        } catch (inner: any) {
+          console.warn('[Database dbRepo.insertAccount email-upsert] notice:', inner.message);
+        }
+      }
       console.warn('[Database dbRepo.insertAccount] notice:', e.message);
+    }
+  },
+
+  async updateAccountPassword(id: string, email: string, passwordHash: string): Promise<void> {
+    if (!pgPool || !isPostgresReady) return;
+    try {
+      await pgPool.query(`
+        UPDATE user_panel_accounts
+        SET password_hash = $1, updated_at = NOW()
+        WHERE id = $2 OR LOWER(email) = LOWER($3);
+      `, [passwordHash, id, email]);
+    } catch (e: any) {
+      console.warn('[Database dbRepo.updateAccountPassword] notice:', e.message);
     }
   },
 
@@ -1536,6 +1642,7 @@ export const dbRepo = {
         WHERE LOWER(email) = $1
            OR LOWER(id) = $1
            OR LOWER(user_id) = $1
+           OR LOWER(COALESCE(referral_code, '')) = $1
            OR phone = $2
         LIMIT 1
       `, [clean, identifier.trim()]);
@@ -1556,6 +1663,8 @@ export const dbRepo = {
         tenantId: r.tenant_id || 'TNT-001',
         organization: r.organization || '',
         pan: r.pan || '',
+        referralCode: r.referral_code || undefined,
+        commissionShare: r.commission_share !== null && r.commission_share !== undefined ? Number(r.commission_share) : undefined,
         createdAt: r.created_at ? new Date(r.created_at).toISOString() : new Date().toISOString(),
       };
     } catch (e: any) {
@@ -1587,6 +1696,8 @@ export const dbRepo = {
         tenantId: r.tenant_id || 'TNT-001',
         organization: r.organization || '',
         pan: r.pan || '',
+        referralCode: r.referral_code || undefined,
+        commissionShare: r.commission_share !== null && r.commission_share !== undefined ? Number(r.commission_share) : undefined,
         createdAt: r.created_at ? new Date(r.created_at).toISOString() : new Date().toISOString(),
       }));
     } catch {
