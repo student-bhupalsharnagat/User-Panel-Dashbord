@@ -47,6 +47,7 @@ export interface AuthenticatedUser {
   currency: string;
   avatar: string;
   referralCode?: string;
+  status?: 'ACTIVE' | 'SUSPENDED' | 'INACTIVE' | string;
 }
 
 export interface MetricSummary {
@@ -349,6 +350,7 @@ export interface UserAccount {
   pan?: string;
   referralCode?: string;
   commissionShare?: number;
+  status?: 'ACTIVE' | 'SUSPENDED' | 'INACTIVE' | string;
   createdAt?: string;
 }
 

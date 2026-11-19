@@ -116,6 +116,7 @@ export interface TokenPayload {
   organization: string;
   phone: string;
   referralCode?: string;
+  status?: string;
   exp: number;
 }
 
@@ -621,9 +622,9 @@ const systemUsers: Record<string, AuthenticatedUser> = {
 };
 
 let tenantBranding: TenantBranding = {
-  brandName: 'NexTrade',
-  platformName: 'NexTrade BROKER OS',
-  shortName: 'NexTrade',
+  brandName: 'NexTrade Institutional',
+  platformName: 'NexTrade Institutional Broker OS',
+  shortName: 'NexTrade Institutional',
   tagline: 'Institutional Grade Broker Infrastructure',
   logoUrl: '',
   primaryColor: '#8b5cf6',
@@ -631,7 +632,7 @@ let tenantBranding: TenantBranding = {
   accentColor: '#10b981',
   supportEmail: 'support@nextrade.example',
   supportPhone: '+91 98765 42000',
-  footerCopyright: '© 2026 NexTrade Technologies Ltd. All rights reserved.',
+  footerCopyright: '© 2026 NexTrade Institutional Technologies Ltd. All rights reserved.',
   version: 'v4.2.0-prod',
   updatedAt: new Date().toISOString(),
 };
@@ -2145,6 +2146,9 @@ if (APP_ENV !== 'production') {
 // ==========================================
 // AUTH & RBAC MIDDLEWARES
 // ==========================================
+export const revokedTokens = new Set<string>();
+export const revokedUserIds = new Set<string>();
+
 export interface AuthenticatedRequest extends Request {
   user?: TokenPayload;
 }
@@ -2162,6 +2166,9 @@ function authMiddleware(req: AuthenticatedRequest, res: Response, next: NextFunc
   if (token) {
     const payload = verifySignedToken(token);
     if (payload) {
+      if (revokedTokens.has(token) || (payload.sub && revokedUserIds.has(payload.sub))) {
+        return res.status(401).json({ success: false, message: 'Session has been revoked. Please log in again.' });
+      }
       req.user = payload;
       return next();
     }
@@ -2607,6 +2614,26 @@ app.post('/api/auth/login', async (req: Request, res: Response) => {
       });
     }
 
+    const statusUpper = String(account.status || 'ACTIVE').toUpperCase();
+    if (statusUpper === 'SUSPENDED' || statusUpper === 'INACTIVE') {
+      pushAudit({
+        id: `LOG-${Date.now().toString().slice(-4)}`,
+        timestamp: new Date().toLocaleTimeString('en-GB') + ', Today',
+        user: account.name,
+        role: account.role,
+        action: 'Authentication Blocked',
+        relatedEntity: 'User Panel Terminal',
+        ipAddress: (req.headers['x-forwarded-for'] as string) || req.socket.remoteAddress || '127.0.0.1',
+        result: 'Failed',
+        details: `Login blocked for ${statusUpper.toLowerCase()} account ${account.name} (${account.email})`,
+      });
+
+      return res.status(403).json({
+        success: false,
+        message: 'Account is suspended. Please contact platform administration.',
+      });
+    }
+
     // Verify Password (supports bcrypt hashes from Admin Panel, local SHA-256 hashes, and fallback for unhashed legacy rows)
     const isPasswordValid = verifyPassword(passwordStr, account.passwordHash) || (!account.passwordHash && passwordStr === 'Password@123');
 
@@ -2655,6 +2682,7 @@ app.post('/api/auth/login', async (req: Request, res: Response) => {
       organization: account.organization || 'NexTrade Securities',
       phone: account.phone,
       referralCode: resolvedReferralCode,
+      status: statusUpper,
     });
 
     const userProfile: AuthenticatedUser = {
@@ -2679,6 +2707,7 @@ app.post('/api/auth/login', async (req: Request, res: Response) => {
       currency: 'INR - Indian Rupee',
       avatar: account.name.split(' ').map(n => n[0]).join('').slice(0, 2).toUpperCase(),
       referralCode: resolvedReferralCode,
+      status: statusUpper,
     };
 
     pushAudit({
@@ -3525,6 +3554,74 @@ app.post(['/api/internal/v1/hierarchy/sync', '/api/internal/hierarchy/sync'], as
     || existingAccount?.passwordHash
     || hashPasswordBcrypt('Password@123');
 
+  const action = String(envelope.action || node.action || 'UPSERT').toUpperCase();
+
+  if (action === 'DELETE') {
+    userAccounts = userAccounts.filter(u => u.id !== id && u.email.toLowerCase() !== email);
+    clients = clients.filter(c => c.id !== id && c.userId !== id && c.email?.toLowerCase() !== email);
+    revokedUserIds.add(id);
+    if (isUsingPostgres()) {
+      await dbRepo.deleteAccount(id).catch(console.warn);
+    }
+    savePersistence();
+    broadcastScopedEvent('hierarchy_deleted', { id, email, timestamp: new Date().toISOString() });
+    return res.json({ success: true, message: `Hierarchy node ${id} deleted successfully` });
+  }
+
+  if (action === 'STATUS_CHANGE') {
+    const rawStatus = String(node.status || envelope.status || 'ACTIVE').toUpperCase();
+    const resolvedStatus = (rawStatus === 'SUSPENDED' || rawStatus === 'INACTIVE') ? 'SUSPENDED' : 'ACTIVE';
+    if (existingAccount) {
+      existingAccount.status = resolvedStatus;
+    }
+    const memIdx = userAccounts.findIndex(u => u.id === id || u.email.toLowerCase() === email);
+    if (memIdx !== -1) {
+      userAccounts[memIdx].status = resolvedStatus;
+    }
+    const clientNode = clients.find(c => c.id === id || c.userId === id || c.email?.toLowerCase() === email);
+    if (clientNode) {
+      clientNode.status = resolvedStatus === 'SUSPENDED' ? 'Suspended' : 'Active';
+    }
+    if (resolvedStatus === 'SUSPENDED') {
+      revokedUserIds.add(id);
+    } else {
+      revokedUserIds.delete(id);
+    }
+    if (isUsingPostgres()) {
+      await dbRepo.updateAccountStatus(id, resolvedStatus).catch(console.warn);
+    }
+    savePersistence();
+    broadcastScopedEvent('hierarchy_synced', {
+      nodeType: rawType || existingAccount?.role || 'user',
+      id,
+      status: resolvedStatus,
+      timestamp: new Date().toISOString(),
+    });
+    return res.json({ success: true, message: `Hierarchy node ${id} status updated to ${resolvedStatus}`, status: resolvedStatus });
+  }
+
+  if (action === 'PASSWORD_RESET' || action === 'PASSWORD_UPDATED') {
+    if (existingAccount) {
+      existingAccount.passwordHash = resolvedPasswordHash;
+    }
+    const memIdx = userAccounts.findIndex(u => u.id === id || u.email.toLowerCase() === email);
+    if (memIdx !== -1) {
+      userAccounts[memIdx].passwordHash = resolvedPasswordHash;
+    }
+    revokedUserIds.add(id);
+    if (isUsingPostgres()) {
+      await dbRepo.updateAccountPassword(id, email, resolvedPasswordHash).catch(console.warn);
+    }
+    savePersistence();
+    broadcastScopedEvent('hierarchy_synced', {
+      nodeType: rawType || existingAccount?.role || 'user',
+      id,
+      action: 'PASSWORD_RESET',
+      timestamp: new Date().toISOString(),
+    });
+    return res.json({ success: true, message: `Password reset successfully for hierarchy node ${id}` });
+  }
+
   let mappedRole: UserRole = 'trader_client';
   let roleTitle = 'Trader Client';
   if (rawType.includes('super')) {
@@ -3557,6 +3654,13 @@ app.post(['/api/internal/v1/hierarchy/sync', '/api/internal/hierarchy/sync'], as
   const commissionShare = node.commissionShare !== undefined && node.commissionShare !== null
     ? Number(node.commissionShare)
     : existingAccount?.commissionShare;
+  const rawStatus = String(node.status || envelope.status || existingAccount?.status || 'ACTIVE').toUpperCase();
+  const resolvedStatus = (rawStatus === 'SUSPENDED' || rawStatus === 'INACTIVE') ? 'SUSPENDED' : 'ACTIVE';
+  if (resolvedStatus === 'SUSPENDED') {
+    revokedUserIds.add(id);
+  } else {
+    revokedUserIds.delete(id);
+  }
 
   const syncedAccount: UserAccount = {
     id,
@@ -3575,6 +3679,7 @@ app.post(['/api/internal/v1/hierarchy/sync', '/api/internal/hierarchy/sync'], as
     pan: String(node.pan || existingAccount?.pan || ''),
     referralCode: resolvedReferralCode,
     commissionShare: Number.isFinite(commissionShare as number) ? commissionShare : undefined,
+    status: resolvedStatus,
     createdAt: node.createdAt || existingAccount?.createdAt || new Date().toISOString(),
   };
 
@@ -3655,6 +3760,7 @@ app.post(['/api/internal/v1/hierarchy/sync', '/api/internal/hierarchy/sync'], as
       brokerId: syncedAccount.brokerId,
       subBrokerId: syncedAccount.subBrokerId,
       referralCode: syncedAccount.referralCode,
+      status: syncedAccount.status,
     },
   });
 });

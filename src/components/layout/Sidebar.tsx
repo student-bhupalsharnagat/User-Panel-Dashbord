@@ -119,7 +119,7 @@ export const Sidebar: React.FC = () => {
             <div className="min-w-0">
               <div className="flex items-center gap-1.5">
                 <span className="text-base font-bold text-white tracking-tight truncate">
-                  {tenantBranding?.brandName || 'NexTrade'}
+                  {tenantBranding?.brandName || 'NexTrade Institutional'}
                 </span>
               </div>
               <span className="text-[10px] font-semibold tracking-wider text-indigo-400 uppercase block -mt-0.5 truncate">

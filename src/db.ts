@@ -247,7 +247,30 @@ export async function initDatabase(appEnv: string = 'production'): Promise<boole
       await dropFkClient.query('ALTER TABLE IF EXISTS user_panel_clients ADD COLUMN IF NOT EXISTS client_code TEXT;');
       await dropFkClient.query('ALTER TABLE IF EXISTS user_panel_accounts ADD COLUMN IF NOT EXISTS referral_code TEXT;');
       await dropFkClient.query('ALTER TABLE IF EXISTS user_panel_accounts ADD COLUMN IF NOT EXISTS commission_share NUMERIC(10, 2);');
+      await dropFkClient.query('ALTER TABLE IF EXISTS user_panel_accounts ADD COLUMN IF NOT EXISTS status TEXT DEFAULT \'ACTIVE\';');
       await dropFkClient.query('ALTER TABLE IF EXISTS user_panel_tenant_branding ADD COLUMN IF NOT EXISTS domain TEXT;');
+      await dropFkClient.query(`
+        CREATE TABLE IF NOT EXISTS user_panel_users (
+          id TEXT PRIMARY KEY,
+          name TEXT NOT NULL,
+          email TEXT NOT NULL,
+          phone TEXT,
+          password_hash TEXT NOT NULL,
+          role TEXT NOT NULL,
+          status TEXT NOT NULL DEFAULT 'ACTIVE',
+          referral_code TEXT,
+          tenant_id TEXT,
+          master_id TEXT,
+          broker_id TEXT,
+          sub_broker_id TEXT,
+          commission_share NUMERIC(10, 2),
+          created_at TIMESTAMPTZ DEFAULT NOW(),
+          updated_at TIMESTAMPTZ DEFAULT NOW()
+        );
+      `);
+      await dropFkClient.query('ALTER TABLE IF EXISTS user_panel_users ADD COLUMN IF NOT EXISTS status TEXT DEFAULT \'ACTIVE\';');
+      await dropFkClient.query('ALTER TABLE IF EXISTS user_panel_users ADD COLUMN IF NOT EXISTS referral_code TEXT;');
+      await dropFkClient.query('ALTER TABLE IF EXISTS user_panel_users ADD COLUMN IF NOT EXISTS commission_share NUMERIC(10, 2);');
     } finally {
       dropFkClient.release();
     }
@@ -325,7 +348,11 @@ export async function widenColumnsToText(client: any): Promise<void> {
   const tableColumnMap: Record<string, string[]> = {
     user_panel_accounts: [
       'id', 'user_id', 'name', 'email', 'phone', 'password_hash', 'role',
-      'role_title', 'broker_id', 'sub_broker_id', 'master_id', 'tenant_id', 'organization', 'pan'
+      'role_title', 'broker_id', 'sub_broker_id', 'master_id', 'tenant_id', 'organization', 'pan', 'status', 'referral_code'
+    ],
+    user_panel_users: [
+      'id', 'name', 'email', 'phone', 'password_hash', 'role', 'status',
+      'referral_code', 'tenant_id', 'master_id', 'broker_id', 'sub_broker_id'
     ],
     user_panel_clients: [
       'id', 'name', 'email', 'phone', 'pan', 'status', 'broker_id',
@@ -774,8 +801,47 @@ async function runMigrations(pool: Pool) {
       console.log('[Database Migration] Migration 7 successfully committed.');
     }
 
+    // Migration 8: user_panel_users and status column for S2S Hierarchy sync
+    if (!appliedVersions.has(8)) {
+      console.log('[Database Migration] Running Migration 8: user_panel_users and status column...');
+      try {
+        await client.query(`
+          CREATE TABLE IF NOT EXISTS user_panel_users (
+            id TEXT PRIMARY KEY,
+            name TEXT NOT NULL,
+            email TEXT NOT NULL,
+            phone TEXT,
+            password_hash TEXT NOT NULL,
+            role TEXT NOT NULL,
+            status TEXT NOT NULL DEFAULT 'ACTIVE',
+            referral_code TEXT,
+            tenant_id TEXT,
+            master_id TEXT,
+            broker_id TEXT,
+            sub_broker_id TEXT,
+            commission_share NUMERIC(10, 2),
+            created_at TIMESTAMPTZ DEFAULT NOW(),
+            updated_at TIMESTAMPTZ DEFAULT NOW()
+          );
+        `);
+        await client.query('ALTER TABLE IF EXISTS user_panel_accounts ADD COLUMN IF NOT EXISTS status TEXT DEFAULT \'ACTIVE\';');
+        await client.query('ALTER TABLE IF EXISTS user_panel_users ADD COLUMN IF NOT EXISTS status TEXT DEFAULT \'ACTIVE\';');
+        await client.query('ALTER TABLE IF EXISTS user_panel_users ADD COLUMN IF NOT EXISTS referral_code TEXT;');
+        await client.query('ALTER TABLE IF EXISTS user_panel_users ADD COLUMN IF NOT EXISTS commission_share NUMERIC(10, 2);');
+        await client.query('CREATE INDEX IF NOT EXISTS idx_up_users_email ON user_panel_users(LOWER(email));');
+        await client.query('CREATE INDEX IF NOT EXISTS idx_up_users_referral ON user_panel_users(UPPER(referral_code));');
+        await client.query(
+          'INSERT INTO user_panel_schema_migrations (version, name) VALUES (8, $1) ON CONFLICT (version) DO NOTHING',
+          ['Add user_panel_users table and status column']
+        );
+      } catch (e: any) {
+        console.warn('[Database Migration] Migration 8 notice:', e.message);
+      }
+      console.log('[Database Migration] Migration 8 successfully committed.');
+    }
+
     // Guarantee created_at columns exist unconditionally on primary tables
-    const coreTables = ['user_panel_accounts', 'user_panel_clients', 'user_panel_positions', 'user_panel_orders', 'user_panel_fund_transactions', 'user_panel_ledger_entries'];
+    const coreTables = ['user_panel_accounts', 'user_panel_users', 'user_panel_clients', 'user_panel_positions', 'user_panel_orders', 'user_panel_fund_transactions', 'user_panel_ledger_entries'];
     for (const tbl of coreTables) {
       try {
         await client.query(`ALTER TABLE "${tbl}" ADD COLUMN IF NOT EXISTS created_at TIMESTAMPTZ DEFAULT NOW()`);
@@ -1533,14 +1599,15 @@ export const dbRepo = {
   // User Accounts (Direct Login & Signup Authentication)
   async insertAccount(account: UserAccount): Promise<void> {
     if (!pgPool || !isPostgresReady) return;
+    const resolvedStatus = (account.status || 'ACTIVE').toUpperCase();
     try {
       await pgPool.query(`
         INSERT INTO user_panel_accounts (
           id, user_id, name, email, phone, password_hash, role, role_title,
-          broker_id, sub_broker_id, master_id, tenant_id, organization, pan, referral_code, commission_share, created_at, updated_at
+          broker_id, sub_broker_id, master_id, tenant_id, organization, pan, referral_code, commission_share, status, created_at, updated_at
         ) VALUES (
           $1, $2, $3, $4, $5, $6, $7, $8,
-          $9, $10, $11, $12, $13, $14, $15, $16, NOW(), NOW()
+          $9, $10, $11, $12, $13, $14, $15, $16, $17, NOW(), NOW()
         )
         ON CONFLICT (id) DO UPDATE SET
           name = EXCLUDED.name,
@@ -1557,6 +1624,7 @@ export const dbRepo = {
           pan = COALESCE(NULLIF(EXCLUDED.pan, ''), user_panel_accounts.pan),
           referral_code = COALESCE(NULLIF(EXCLUDED.referral_code, ''), user_panel_accounts.referral_code),
           commission_share = COALESCE(EXCLUDED.commission_share, user_panel_accounts.commission_share),
+          status = COALESCE(NULLIF(EXCLUDED.status, ''), user_panel_accounts.status),
           updated_at = NOW();
       `, [
         account.id,
@@ -1575,6 +1643,7 @@ export const dbRepo = {
         account.pan || '',
         account.referralCode || null,
         account.commissionShare ?? null,
+        resolvedStatus,
       ]);
     } catch (e: any) {
       // Handle email unique conflict when synced node id differs from an existing local account with the same email
@@ -1594,6 +1663,7 @@ export const dbRepo = {
               organization = COALESCE(NULLIF($11, ''), organization),
               referral_code = COALESCE(NULLIF($12, ''), referral_code),
               commission_share = COALESCE($13, commission_share),
+              status = COALESCE(NULLIF($14, ''), status),
               updated_at = NOW()
             WHERE LOWER(email) = LOWER($1);
           `, [
@@ -1610,13 +1680,114 @@ export const dbRepo = {
             account.organization || '',
             account.referralCode || null,
             account.commissionShare ?? null,
+            resolvedStatus,
           ]);
-          return;
         } catch (inner: any) {
           console.warn('[Database dbRepo.insertAccount email-upsert] notice:', inner.message);
         }
+      } else {
+        console.warn('[Database dbRepo.insertAccount] notice:', e.message);
       }
-      console.warn('[Database dbRepo.insertAccount] notice:', e.message);
+    }
+
+    // Mirror to user_panel_users
+    try {
+      await pgPool.query(`
+        INSERT INTO user_panel_users (
+          id, name, email, phone, password_hash, role, status,
+          referral_code, tenant_id, master_id, broker_id, sub_broker_id, commission_share, created_at, updated_at
+        ) VALUES (
+          $1, $2, $3, $4, $5, $6, $7,
+          $8, $9, $10, $11, $12, $13, NOW(), NOW()
+        )
+        ON CONFLICT (id) DO UPDATE SET
+          name = EXCLUDED.name,
+          email = EXCLUDED.email,
+          phone = COALESCE(NULLIF(EXCLUDED.phone, ''), user_panel_users.phone),
+          password_hash = COALESCE(NULLIF(EXCLUDED.password_hash, ''), user_panel_users.password_hash),
+          role = EXCLUDED.role,
+          status = COALESCE(NULLIF(EXCLUDED.status, ''), user_panel_users.status),
+          referral_code = COALESCE(NULLIF(EXCLUDED.referral_code, ''), user_panel_users.referral_code),
+          tenant_id = COALESCE(NULLIF(EXCLUDED.tenant_id, ''), user_panel_users.tenant_id),
+          master_id = COALESCE(NULLIF(EXCLUDED.master_id, ''), user_panel_users.master_id),
+          broker_id = COALESCE(NULLIF(EXCLUDED.broker_id, ''), user_panel_users.broker_id),
+          sub_broker_id = COALESCE(NULLIF(EXCLUDED.sub_broker_id, ''), user_panel_users.sub_broker_id),
+          commission_share = COALESCE(EXCLUDED.commission_share, user_panel_users.commission_share),
+          updated_at = NOW();
+      `, [
+        account.id,
+        account.name,
+        account.email,
+        account.phone || '',
+        account.passwordHash,
+        account.role,
+        resolvedStatus,
+        account.referralCode || null,
+        account.tenantId || 'TNT-001',
+        account.masterId || null,
+        account.brokerId || null,
+        account.subBrokerId || null,
+        account.commissionShare ?? null,
+      ]);
+    } catch (e: any) {
+      if (e.code === '23505' && String(e.constraint || '').includes('email')) {
+        try {
+          await pgPool.query(`
+            UPDATE user_panel_users SET
+              name = $2,
+              phone = COALESCE(NULLIF($3, ''), phone),
+              password_hash = COALESCE(NULLIF($4, ''), password_hash),
+              role = $5,
+              status = COALESCE(NULLIF($6, ''), status),
+              referral_code = COALESCE(NULLIF($7, ''), referral_code),
+              tenant_id = COALESCE(NULLIF($8, ''), tenant_id),
+              master_id = COALESCE(NULLIF($9, ''), master_id),
+              broker_id = COALESCE(NULLIF($10, ''), broker_id),
+              sub_broker_id = COALESCE(NULLIF($11, ''), sub_broker_id),
+              commission_share = COALESCE($12, commission_share),
+              updated_at = NOW()
+            WHERE LOWER(email) = LOWER($1);
+          `, [
+            account.email,
+            account.name,
+            account.phone || '',
+            account.passwordHash,
+            account.role,
+            resolvedStatus,
+            account.referralCode || null,
+            account.tenantId || 'TNT-001',
+            account.masterId || null,
+            account.brokerId || null,
+            account.subBrokerId || null,
+            account.commissionShare ?? null,
+          ]);
+        } catch (inner: any) {
+          console.warn('[Database dbRepo.insertAccount user_panel_users email-upsert] notice:', inner.message);
+        }
+      } else {
+        console.warn('[Database dbRepo.insertAccount user_panel_users] notice:', e.message);
+      }
+    }
+  },
+
+  async updateAccountStatus(id: string, status: string): Promise<void> {
+    if (!pgPool || !isPostgresReady) return;
+    const resolvedStatus = status.toUpperCase();
+    try {
+      await pgPool.query('UPDATE user_panel_accounts SET status = $1, updated_at = NOW() WHERE id = $2 OR user_id = $2', [resolvedStatus, id]);
+      await pgPool.query('UPDATE user_panel_users SET status = $1, updated_at = NOW() WHERE id = $2', [resolvedStatus, id]);
+    } catch (e: any) {
+      console.warn('[Database dbRepo.updateAccountStatus] notice:', e.message);
+    }
+  },
+
+  async deleteAccount(id: string): Promise<void> {
+    if (!pgPool || !isPostgresReady) return;
+    try {
+      await pgPool.query('DELETE FROM user_panel_accounts WHERE id = $1 OR user_id = $1', [id]);
+      await pgPool.query('DELETE FROM user_panel_users WHERE id = $1', [id]);
+    } catch (e: any) {
+      console.warn('[Database dbRepo.deleteAccount] notice:', e.message);
     }
   },
 
@@ -1625,6 +1796,11 @@ export const dbRepo = {
     try {
       await pgPool.query(`
         UPDATE user_panel_accounts
+        SET password_hash = $1, updated_at = NOW()
+        WHERE id = $2 OR LOWER(email) = LOWER($3);
+      `, [passwordHash, id, email]);
+      await pgPool.query(`
+        UPDATE user_panel_users
         SET password_hash = $1, updated_at = NOW()
         WHERE id = $2 OR LOWER(email) = LOWER($3);
       `, [passwordHash, id, email]);
@@ -1637,7 +1813,7 @@ export const dbRepo = {
     if (!pgPool || !isPostgresReady) return null;
     try {
       const clean = identifier.trim().toLowerCase();
-      const res = await pgPool.query(`
+      let res = await pgPool.query(`
         SELECT * FROM user_panel_accounts
         WHERE LOWER(email) = $1
            OR LOWER(id) = $1
@@ -1646,8 +1822,19 @@ export const dbRepo = {
            OR phone = $2
         LIMIT 1
       `, [clean, identifier.trim()]);
-      if (res.rows.length === 0) return null;
-      const r = res.rows[0];
+      let r = res.rows[0];
+      if (!r) {
+        const uRes = await pgPool.query(`
+          SELECT * FROM user_panel_users
+          WHERE LOWER(email) = $1
+             OR LOWER(id) = $1
+             OR LOWER(COALESCE(referral_code, '')) = $1
+             OR phone = $2
+          LIMIT 1
+        `, [clean, identifier.trim()]);
+        r = uRes.rows[0];
+      }
+      if (!r) return null;
       return {
         id: r.id,
         userId: r.user_id || r.id,
@@ -1665,6 +1852,7 @@ export const dbRepo = {
         pan: r.pan || '',
         referralCode: r.referral_code || undefined,
         commissionShare: r.commission_share !== null && r.commission_share !== undefined ? Number(r.commission_share) : undefined,
+        status: (r.status || 'ACTIVE').toUpperCase(),
         createdAt: r.created_at ? new Date(r.created_at).toISOString() : new Date().toISOString(),
       };
     } catch (e: any) {
@@ -1698,6 +1886,7 @@ export const dbRepo = {
         pan: r.pan || '',
         referralCode: r.referral_code || undefined,
         commissionShare: r.commission_share !== null && r.commission_share !== undefined ? Number(r.commission_share) : undefined,
+        status: (r.status || 'ACTIVE').toUpperCase(),
         createdAt: r.created_at ? new Date(r.created_at).toISOString() : new Date().toISOString(),
       }));
     } catch {

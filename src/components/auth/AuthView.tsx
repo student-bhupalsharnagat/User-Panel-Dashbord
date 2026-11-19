@@ -203,7 +203,7 @@ export const AuthView: React.FC = () => {
           <div>
             <div className="flex items-center gap-2">
               <span className="font-bold text-lg tracking-tight text-white font-mono">
-                {tenantBranding?.brandName || 'NexTrade'}
+                {tenantBranding?.brandName || 'NexTrade Institutional'}
               </span>
               <span className="text-[10px] uppercase font-semibold px-2 py-0.5 rounded-full bg-purple-500/10 text-purple-400 border border-purple-500/20">
                 Broker OS
@@ -530,7 +530,7 @@ export const AuthView: React.FC = () => {
       {/* Footer System Status & Security */}
       <footer className="w-full max-w-6xl mx-auto flex flex-col sm:flex-row items-center justify-between gap-3 pt-6 border-t border-[#161f36] text-xs text-slate-500">
         <div className="flex items-center gap-4">
-          <span>{tenantBranding?.footerCopyright || `© 2026 ${tenantBranding?.brandName || 'NexTrade'} Technologies Ltd.`}</span>
+          <span>{tenantBranding?.footerCopyright || `© 2026 ${tenantBranding?.brandName || 'NexTrade Institutional'} Technologies Ltd.`}</span>
           <span className="hidden sm:inline">•</span>
           <span className="text-slate-400">Production Build v4.3.0</span>
         </div>
