@@ -42,6 +42,8 @@ export const TopBar: React.FC = () => {
 
   const [isProfileOpen, setIsProfileOpen] = useState(false);
   const profileRef = useRef<HTMLDivElement>(null);
+  const currentRoleStr = String(currentUser?.role || '');
+  const isSuperAdmin = currentRoleStr === 'super_admin' || currentRoleStr === 'Super Admin' || currentRoleStr.toLowerCase() === 'super_admin';
 
   useEffect(() => {
     const handleClickOutside = (e: MouseEvent) => {
@@ -221,121 +223,123 @@ export const TopBar: React.FC = () => {
                 </div>
               </div>
 
-              {/* Role Switching Selector for RBAC Testing */}
-              <div className="px-3 py-2 border-b border-slate-800">
-                <div className="text-[10px] font-bold text-slate-400 uppercase tracking-wider mb-1.5">
-                  Switch Active Role (RBAC)
+              {/* Role Switching Selector for RBAC Testing - ONLY FOR SUPER_ADMIN */}
+              {isSuperAdmin && (
+                <div className="px-3 py-2 border-b border-slate-800">
+                  <div className="text-[10px] font-bold text-slate-400 uppercase tracking-wider mb-1.5">
+                    Switch Active Role (RBAC)
+                  </div>
+                  <div className="space-y-1">
+                    <button
+                      onClick={() => {
+                        switchRole('super_admin');
+                        setIsProfileOpen(false);
+                      }}
+                      className={`w-full text-left px-2.5 py-1.5 rounded-md text-xs flex items-center justify-between cursor-pointer ${
+                        currentRoleStr === 'super_admin' || currentRoleStr === 'Super Admin'
+                          ? 'bg-indigo-600/30 text-indigo-300 font-medium'
+                          : 'text-slate-300 hover:bg-slate-800'
+                      }`}
+                    >
+                      <div className="flex items-center gap-2">
+                        <Zap className="w-3.5 h-3.5 text-purple-400 shrink-0" />
+                        <span className="truncate">Super Admin (Central)</span>
+                      </div>
+                      {(currentRoleStr === 'super_admin' || currentRoleStr === 'Super Admin') && <span className="text-[10px] text-indigo-400 shrink-0">Active</span>}
+                    </button>
+
+                    <button
+                      onClick={() => {
+                        switchRole('master');
+                        setIsProfileOpen(false);
+                      }}
+                      className={`w-full text-left px-2.5 py-1.5 rounded-md text-xs flex items-center justify-between cursor-pointer ${
+                        currentRoleStr === 'master' || currentRoleStr === 'master_admin' || currentRoleStr === 'Master Admin'
+                          ? 'bg-indigo-600/30 text-indigo-300 font-medium'
+                          : 'text-slate-300 hover:bg-slate-800'
+                      }`}
+                    >
+                      <div className="flex items-center gap-2">
+                        <Zap className="w-3.5 h-3.5 text-amber-400 shrink-0" />
+                        <span className="truncate">Master Admin (Vikramaditya)</span>
+                      </div>
+                      {(currentRoleStr === 'master' || currentRoleStr === 'master_admin' || currentRoleStr === 'Master Admin') && <span className="text-[10px] text-indigo-400 shrink-0">Active</span>}
+                    </button>
+
+                    <button
+                      onClick={() => {
+                        switchRole('broker_admin');
+                        setIsProfileOpen(false);
+                      }}
+                      className={`w-full text-left px-2.5 py-1.5 rounded-md text-xs flex items-center justify-between cursor-pointer ${
+                        currentRoleStr === 'broker_admin' || currentRoleStr === 'Broker Admin'
+                          ? 'bg-indigo-600/30 text-indigo-300 font-medium'
+                          : 'text-slate-300 hover:bg-slate-800'
+                      }`}
+                    >
+                      <div className="flex items-center gap-2">
+                        <Shield className="w-3.5 h-3.5 text-indigo-400 shrink-0" />
+                        <span className="truncate">Broker Admin (Rohan Sen)</span>
+                      </div>
+                      {(currentRoleStr === 'broker_admin' || currentRoleStr === 'Broker Admin') && <span className="text-[10px] text-indigo-400 shrink-0">Active</span>}
+                    </button>
+
+                    <button
+                      onClick={() => {
+                        switchRole('sub_broker');
+                        setIsProfileOpen(false);
+                      }}
+                      className={`w-full text-left px-2.5 py-1.5 rounded-md text-xs flex items-center justify-between cursor-pointer ${
+                        currentRoleStr === 'sub_broker' || currentRoleStr === 'Sub-Broker'
+                          ? 'bg-indigo-600/30 text-indigo-300 font-medium'
+                          : 'text-slate-300 hover:bg-slate-800'
+                      }`}
+                    >
+                      <div className="flex items-center gap-2">
+                        <Shield className="w-3.5 h-3.5 text-emerald-400 shrink-0" />
+                        <span className="truncate">Sub-Broker (Karan Mehra)</span>
+                      </div>
+                      {(currentRoleStr === 'sub_broker' || currentRoleStr === 'Sub-Broker') && <span className="text-[10px] text-indigo-400 shrink-0">Active</span>}
+                    </button>
+
+                    <button
+                      onClick={() => {
+                        switchRole('operations');
+                        setIsProfileOpen(false);
+                      }}
+                      className={`w-full text-left px-2.5 py-1.5 rounded-md text-xs flex items-center justify-between cursor-pointer ${
+                        currentRoleStr === 'operations' || currentRoleStr === 'Staff / Ops'
+                          ? 'bg-indigo-600/30 text-indigo-300 font-medium'
+                          : 'text-slate-300 hover:bg-slate-800'
+                      }`}
+                    >
+                      <div className="flex items-center gap-2">
+                        <Shield className="w-3.5 h-3.5 text-cyan-400 shrink-0" />
+                        <span className="truncate">Staff / Ops (Pooja Nair)</span>
+                      </div>
+                      {(currentRoleStr === 'operations' || currentRoleStr === 'Staff / Ops') && <span className="text-[10px] text-indigo-400 shrink-0">Active</span>}
+                    </button>
+
+                    <button
+                      onClick={() => {
+                        switchRole('trader_client');
+                        setIsProfileOpen(false);
+                      }}
+                      className={`w-full text-left px-2.5 py-1.5 rounded-md text-xs flex items-center justify-between cursor-pointer ${
+                        currentRoleStr === 'trader_client'
+                          ? 'bg-indigo-600/30 text-indigo-300 font-medium'
+                          : 'text-slate-300 hover:bg-slate-800'
+                      }`}
+                    >
+                      <div className="flex items-center gap-2">
+                        <User className="w-3.5 h-3.5 text-cyan-400 shrink-0" />
+                        <span className="truncate">Trader Client (Aarav Mehta)</span>
+                      </div>
+                      {currentRoleStr === 'trader_client' && <span className="text-[10px] text-indigo-400 shrink-0">Active</span>}
+                    </button>
+                  </div>
                 </div>
-                <div className="space-y-1">
-                  <button
-                    onClick={() => {
-                      switchRole('super_admin');
-                      setIsProfileOpen(false);
-                    }}
-                    className={`w-full text-left px-2.5 py-1.5 rounded-md text-xs flex items-center justify-between cursor-pointer ${
-                      currentUser?.role === 'super_admin' || currentUser?.role === 'Super Admin'
-                        ? 'bg-indigo-600/30 text-indigo-300 font-medium'
-                        : 'text-slate-300 hover:bg-slate-800'
-                    }`}
-                  >
-                    <div className="flex items-center gap-2">
-                      <Zap className="w-3.5 h-3.5 text-purple-400 shrink-0" />
-                      <span className="truncate">Super Admin (Central)</span>
-                    </div>
-                    {(currentUser?.role === 'super_admin' || currentUser?.role === 'Super Admin') && <span className="text-[10px] text-indigo-400 shrink-0">Active</span>}
-                  </button>
-
-                  <button
-                    onClick={() => {
-                      switchRole('master');
-                      setIsProfileOpen(false);
-                    }}
-                    className={`w-full text-left px-2.5 py-1.5 rounded-md text-xs flex items-center justify-between cursor-pointer ${
-                      currentUser?.role === 'master' || currentUser?.role === 'master_admin' || currentUser?.role === 'Master Admin'
-                        ? 'bg-indigo-600/30 text-indigo-300 font-medium'
-                        : 'text-slate-300 hover:bg-slate-800'
-                    }`}
-                  >
-                    <div className="flex items-center gap-2">
-                      <Zap className="w-3.5 h-3.5 text-amber-400 shrink-0" />
-                      <span className="truncate">Master Admin (Vikramaditya)</span>
-                    </div>
-                    {(currentUser?.role === 'master' || currentUser?.role === 'master_admin' || currentUser?.role === 'Master Admin') && <span className="text-[10px] text-indigo-400 shrink-0">Active</span>}
-                  </button>
-
-                  <button
-                    onClick={() => {
-                      switchRole('broker_admin');
-                      setIsProfileOpen(false);
-                    }}
-                    className={`w-full text-left px-2.5 py-1.5 rounded-md text-xs flex items-center justify-between cursor-pointer ${
-                      currentUser?.role === 'broker_admin' || currentUser?.role === 'Broker Admin'
-                        ? 'bg-indigo-600/30 text-indigo-300 font-medium'
-                        : 'text-slate-300 hover:bg-slate-800'
-                    }`}
-                  >
-                    <div className="flex items-center gap-2">
-                      <Shield className="w-3.5 h-3.5 text-indigo-400 shrink-0" />
-                      <span className="truncate">Broker Admin (Rohan Sen)</span>
-                    </div>
-                    {(currentUser?.role === 'broker_admin' || currentUser?.role === 'Broker Admin') && <span className="text-[10px] text-indigo-400 shrink-0">Active</span>}
-                  </button>
-
-                  <button
-                    onClick={() => {
-                      switchRole('sub_broker');
-                      setIsProfileOpen(false);
-                    }}
-                    className={`w-full text-left px-2.5 py-1.5 rounded-md text-xs flex items-center justify-between cursor-pointer ${
-                      currentUser?.role === 'sub_broker' || currentUser?.role === 'Sub-Broker'
-                        ? 'bg-indigo-600/30 text-indigo-300 font-medium'
-                        : 'text-slate-300 hover:bg-slate-800'
-                    }`}
-                  >
-                    <div className="flex items-center gap-2">
-                      <Shield className="w-3.5 h-3.5 text-emerald-400 shrink-0" />
-                      <span className="truncate">Sub-Broker (Karan Mehra)</span>
-                    </div>
-                    {(currentUser?.role === 'sub_broker' || currentUser?.role === 'Sub-Broker') && <span className="text-[10px] text-indigo-400 shrink-0">Active</span>}
-                  </button>
-
-                  <button
-                    onClick={() => {
-                      switchRole('operations');
-                      setIsProfileOpen(false);
-                    }}
-                    className={`w-full text-left px-2.5 py-1.5 rounded-md text-xs flex items-center justify-between cursor-pointer ${
-                      currentUser?.role === 'operations' || currentUser?.role === 'Staff / Ops'
-                        ? 'bg-indigo-600/30 text-indigo-300 font-medium'
-                        : 'text-slate-300 hover:bg-slate-800'
-                    }`}
-                  >
-                    <div className="flex items-center gap-2">
-                      <Shield className="w-3.5 h-3.5 text-cyan-400 shrink-0" />
-                      <span className="truncate">Staff / Ops (Pooja Nair)</span>
-                    </div>
-                    {(currentUser?.role === 'operations' || currentUser?.role === 'Staff / Ops') && <span className="text-[10px] text-indigo-400 shrink-0">Active</span>}
-                  </button>
-
-                  <button
-                    onClick={() => {
-                      switchRole('trader_client');
-                      setIsProfileOpen(false);
-                    }}
-                    className={`w-full text-left px-2.5 py-1.5 rounded-md text-xs flex items-center justify-between cursor-pointer ${
-                      currentUser?.role === 'trader_client'
-                        ? 'bg-indigo-600/30 text-indigo-300 font-medium'
-                        : 'text-slate-300 hover:bg-slate-800'
-                    }`}
-                  >
-                    <div className="flex items-center gap-2">
-                      <User className="w-3.5 h-3.5 text-cyan-400 shrink-0" />
-                      <span className="truncate">Trader Client (Aarav Mehta)</span>
-                    </div>
-                    {currentUser?.role === 'trader_client' && <span className="text-[10px] text-indigo-400 shrink-0">Active</span>}
-                  </button>
-                </div>
-              </div>
+              )}
 
               <div className="px-2 pt-1">
                 <button

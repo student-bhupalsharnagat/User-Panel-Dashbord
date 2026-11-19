@@ -2508,6 +2508,7 @@ app.post('/api/auth/login', async (req: Request, res: Response) => {
 
     const cleanIdentifier = String(identifier).trim();
     const cleanLower = cleanIdentifier.toLowerCase();
+    const cleanDigits = cleanIdentifier.replace(/\D/g, '');
     const passwordStr = String(password);
 
     // 1. Check in user_panel_accounts (PostgreSQL + in-memory userAccounts)
@@ -2518,22 +2519,40 @@ app.post('/api/auth/login', async (req: Request, res: Response) => {
     }
 
     if (!account) {
-      account = userAccounts.find(u =>
-        u.email.toLowerCase() === cleanLower ||
-        u.id.toLowerCase() === cleanLower ||
-        u.userId.toLowerCase() === cleanLower ||
-        (u.referralCode && u.referralCode.toLowerCase() === cleanLower) ||
-        (u.phone && cleanIdentifier.replace(/\D/g, '').length >= 7 && u.phone.replace(/\D/g, '') === cleanIdentifier.replace(/\D/g, ''))
-      ) || null;
+      account = userAccounts.find(u => {
+        const uEmail = (u.email || '').trim().toLowerCase();
+        const uId = (u.id || '').trim().toLowerCase();
+        const uUserId = (u.userId || '').trim().toLowerCase();
+        const uRef = (u.referralCode || '').trim().toLowerCase();
+        const uPhoneDigits = (u.phone || '').replace(/\D/g, '');
+
+        return uEmail === cleanLower ||
+          uId === cleanLower ||
+          uUserId === cleanLower ||
+          (uRef && uRef === cleanLower) ||
+          (cleanDigits.length >= 7 && uPhoneDigits.length >= 7 && (
+            uPhoneDigits === cleanDigits ||
+            uPhoneDigits.endsWith(cleanDigits.slice(-10)) ||
+            cleanDigits.endsWith(uPhoneDigits.slice(-10))
+          ));
+      }) || null;
     }
 
     // 2. Check in systemUsers aliases (e.g. rohan.sen@nextrade.example, superadmin@nextrade.example, admin@nextrade.central)
     if (!account) {
-      const sysUser = Object.values(systemUsers).find(u =>
-        u.email.toLowerCase() === cleanLower ||
-        u.id.toLowerCase() === cleanLower ||
-        (u.phone && cleanIdentifier.replace(/\D/g, '').length >= 7 && u.phone.replace(/\D/g, '') === cleanIdentifier.replace(/\D/g, ''))
-      );
+      const sysUser = Object.values(systemUsers).find(u => {
+        const uEmail = (u.email || '').trim().toLowerCase();
+        const uId = (u.id || '').trim().toLowerCase();
+        const uPhoneDigits = (u.phone || '').replace(/\D/g, '');
+
+        return uEmail === cleanLower ||
+          uId === cleanLower ||
+          (cleanDigits.length >= 7 && uPhoneDigits.length >= 7 && (
+            uPhoneDigits === cleanDigits ||
+            uPhoneDigits.endsWith(cleanDigits.slice(-10)) ||
+            cleanDigits.endsWith(uPhoneDigits.slice(-10))
+          ));
+      });
       if (sysUser) {
         account = {
           id: sysUser.id,
@@ -2559,24 +2578,33 @@ app.post('/api/auth/login', async (req: Request, res: Response) => {
     // 3. Check in live Trading Platform clients
     if (!account) {
       const stripped = stripTenantPrefix(cleanIdentifier).toLowerCase();
-      const liveClient = clients.find(c =>
-        !isDummyRecord(c) && (
-          (c.email && c.email.toLowerCase() === cleanLower) ||
-          (c.id && c.id.toLowerCase() === cleanLower) ||
-          (c.userId && c.userId.toLowerCase() === cleanLower) ||
-          (c.clientCode && c.clientCode.toLowerCase() === cleanLower) ||
+      const liveClient = clients.find(c => {
+        if (isDummyRecord(c)) return false;
+        const cEmail = (c.email || '').trim().toLowerCase();
+        const cId = (c.id || '').trim().toLowerCase();
+        const cUserId = (c.userId || '').trim().toLowerCase();
+        const cCode = (c.clientCode || '').trim().toLowerCase();
+        const cPhoneDigits = (c.phone || '').replace(/\D/g, '');
+
+        return (cEmail && cEmail === cleanLower) ||
+          (cId && cId === cleanLower) ||
+          (cUserId && cUserId === cleanLower) ||
+          (cCode && cCode === cleanLower) ||
           (stripped && c.id && stripTenantPrefix(c.id).toLowerCase() === stripped) ||
-          (c.phone && cleanIdentifier.replace(/\D/g, '').length >= 7 && c.phone.replace(/\D/g, '') === cleanIdentifier.replace(/\D/g, ''))
-        )
-      );
+          (cleanDigits.length >= 7 && cPhoneDigits.length >= 7 && (
+            cPhoneDigits === cleanDigits ||
+            cPhoneDigits.endsWith(cleanDigits.slice(-10)) ||
+            cleanDigits.endsWith(cPhoneDigits.slice(-10))
+          ));
+      });
 
       if (liveClient) {
         account = {
           id: liveClient.id,
           userId: liveClient.userId || liveClient.id,
           name: liveClient.name,
-          email: liveClient.email,
-          phone: liveClient.phone,
+          email: (liveClient.email || `${liveClient.id.toLowerCase()}@nextrade.example`).trim().toLowerCase(),
+          phone: liveClient.phone || '',
           passwordHash: hashPasswordBcrypt(passwordStr),
           role: 'trader_client',
           roleTitle: 'Trader Client',
@@ -2635,7 +2663,21 @@ app.post('/api/auth/login', async (req: Request, res: Response) => {
     }
 
     // Verify Password (supports bcrypt hashes from Admin Panel, local SHA-256 hashes, and fallback for unhashed legacy rows)
-    const isPasswordValid = verifyPassword(passwordStr, account.passwordHash) || (!account.passwordHash && passwordStr === 'Password@123');
+    let isPasswordValid = false;
+    if (account.passwordHash) {
+      if (account.passwordHash.startsWith('$2')) {
+        try {
+          isPasswordValid = await bcrypt.compare(passwordStr, account.passwordHash);
+        } catch {
+          isPasswordValid = false;
+        }
+      }
+      if (!isPasswordValid) {
+        isPasswordValid = verifyPassword(passwordStr, account.passwordHash);
+      }
+    } else {
+      isPasswordValid = passwordStr === 'Password@123';
+    }
 
     if (!isPasswordValid) {
       pushAudit({
@@ -2656,7 +2698,29 @@ app.post('/api/auth/login', async (req: Request, res: Response) => {
       });
     }
 
-    const resolvedMasterId = account.masterId || ((account.role === 'master' || account.role === 'master_admin') ? account.id : undefined);
+    const rawRole = String(account.role || '').toLowerCase();
+    let normalizedRole: UserRole = 'trader_client';
+    let roleTitle = account.roleTitle || 'Trader Client';
+    if (rawRole.includes('super')) {
+      normalizedRole = 'super_admin';
+      roleTitle = roleTitle || 'Super Administrator';
+    } else if (rawRole.includes('master')) {
+      normalizedRole = 'master';
+      roleTitle = roleTitle || 'Master Admin';
+    } else if (rawRole.includes('sub')) {
+      normalizedRole = 'sub_broker';
+      roleTitle = roleTitle || 'Sub-Broker / Franchisee';
+    } else if (rawRole.includes('broker')) {
+      normalizedRole = 'broker_admin';
+      roleTitle = roleTitle || 'Broker Administrator';
+    } else if (rawRole.includes('staff') || rawRole.includes('ops') || rawRole.includes('operation')) {
+      normalizedRole = 'operations';
+      roleTitle = roleTitle || 'Operations / Staff';
+    }
+    account.role = normalizedRole;
+    account.roleTitle = roleTitle;
+
+    const resolvedMasterId = account.masterId || (account.role === 'master' ? account.id : undefined);
     const resolvedBrokerId = account.brokerId || (account.role === 'broker_admin' ? account.id : 'BRK-ROHAN-01');
     const resolvedSubBrokerId = account.subBrokerId || (account.role === 'sub_broker' ? account.id : undefined);
     const resolvedClientId = account.role === 'trader_client' ? account.id : undefined;
@@ -3539,14 +3603,19 @@ app.post(['/api/internal/v1/hierarchy/sync', '/api/internal/hierarchy/sync'], as
 
   const name = String(node.name || node.fullName || id).trim();
   const email = String(node.email || `${id.toLowerCase()}@nextrade.example`).trim().toLowerCase();
+  const phone = String(node.phone || node.mobile || '').trim();
   const tenantId = String(node.tenantId || envelope.tenantId || DEFAULT_TENANT_ID).trim();
   const incomingPasswordHash = typeof node.passwordHash === 'string' && node.passwordHash.trim()
     ? node.passwordHash.trim()
     : (typeof envelope.passwordHash === 'string' && envelope.passwordHash.trim() ? envelope.passwordHash.trim() : '');
   const incomingPassword = typeof node.password === 'string' && node.password.trim() ? node.password.trim() : '';
 
-  const existingAccount = userAccounts.find(u => u.id === id || u.email.toLowerCase() === email)
-    || (isUsingPostgres() ? (await dbRepo.getAccountByIdentifier(id) || await dbRepo.getAccountByIdentifier(email)) : null);
+  const cleanLowerEmail = email.toLowerCase();
+  const existingAccount = userAccounts.find(u =>
+    u.id.toLowerCase() === id.toLowerCase() ||
+    (u.email && u.email.toLowerCase() === cleanLowerEmail) ||
+    (phone && u.phone && u.phone.replace(/\D/g, '') === phone.replace(/\D/g, ''))
+  ) || (isUsingPostgres() ? (await dbRepo.getAccountByIdentifier(id) || await dbRepo.getAccountByIdentifier(cleanLowerEmail) || (phone ? await dbRepo.getAccountByIdentifier(phone) : null)) : null);
 
   // Preserve incoming bcrypt/SHA-256 hash verbatim; otherwise hash plaintext or retain existing hash
   const resolvedPasswordHash = incomingPasswordHash
@@ -3666,8 +3735,8 @@ app.post(['/api/internal/v1/hierarchy/sync', '/api/internal/hierarchy/sync'], as
     id,
     userId: String(node.userId || id),
     name,
-    email,
-    phone: String(node.phone || existingAccount?.phone || ''),
+    email: cleanLowerEmail,
+    phone: phone || existingAccount?.phone || '',
     passwordHash: resolvedPasswordHash,
     role: mappedRole,
     roleTitle,
@@ -3683,7 +3752,10 @@ app.post(['/api/internal/v1/hierarchy/sync', '/api/internal/hierarchy/sync'], as
     createdAt: node.createdAt || existingAccount?.createdAt || new Date().toISOString(),
   };
 
-  const idx = userAccounts.findIndex(u => u.id === id || u.email.toLowerCase() === email);
+  const idx = userAccounts.findIndex(u =>
+    u.id.toLowerCase() === id.toLowerCase() ||
+    (u.email && u.email.toLowerCase() === cleanLowerEmail)
+  );
   if (idx !== -1) userAccounts[idx] = syncedAccount;
   else userAccounts.push(syncedAccount);
 

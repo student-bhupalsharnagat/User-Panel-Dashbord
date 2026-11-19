@@ -41,6 +41,9 @@ export const Sidebar: React.FC = () => {
     setIsMobileMenuOpen,
   } = useApp();
 
+  const currentRoleStr = String(currentUser?.role || '');
+  const isSuperAdmin = currentRoleStr === 'super_admin' || currentRoleStr === 'Super Admin' || currentRoleStr.toLowerCase() === 'super_admin';
+
   const navigationItems: Array<{
     id: NavigationTab;
     label: string;
@@ -73,6 +76,9 @@ export const Sidebar: React.FC = () => {
 
   const roleCycle = ['super_admin', 'master', 'broker_admin', 'sub_broker', 'operations', 'trader_client'];
   const handleRoleSwitch = () => {
+    if (!isSuperAdmin) {
+      return;
+    }
     const current = (currentUser?.role || 'broker_admin').toLowerCase().replace(/[\s\-_/]+/g, '_');
     const currentIndex = roleCycle.indexOf(current === 'master_admin' ? 'master' : current === 'staff_ops' ? 'operations' : current);
     const nextRole = currentIndex >= 0 && currentIndex < roleCycle.length - 1 ? roleCycle[currentIndex + 1] : roleCycle[0];
@@ -216,17 +222,19 @@ export const Sidebar: React.FC = () => {
             <span>Contact Support</span>
           </button>
 
-          <button
-            onClick={handleRoleSwitch}
-            className="w-full flex items-center justify-between px-3 py-2 rounded-lg text-xs text-slate-400 hover:text-slate-200 hover:bg-[#131c30] transition-colors group cursor-pointer"
-            title={`Switch role (${currentUser?.roleTitle || 'Current'} -> Next)`}
-          >
-            <div className="flex items-center gap-3 min-w-0">
-              <Activity className="w-4 h-4 text-slate-500 group-hover:text-amber-400 transition-colors shrink-0" />
-              <span className="truncate">Role Switch</span>
-            </div>
-            <ChevronRight className="w-3.5 h-3.5 text-slate-600 group-hover:text-slate-400 shrink-0" />
-          </button>
+          {isSuperAdmin && (
+            <button
+              onClick={handleRoleSwitch}
+              className="w-full flex items-center justify-between px-3 py-2 rounded-lg text-xs text-slate-400 hover:text-slate-200 hover:bg-[#131c30] transition-colors group cursor-pointer"
+              title={`Switch role (${currentUser?.roleTitle || 'Current'} -> Next)`}
+            >
+              <div className="flex items-center gap-3 min-w-0">
+                <Activity className="w-4 h-4 text-slate-500 group-hover:text-amber-400 transition-colors shrink-0" />
+                <span className="truncate">Role Switch</span>
+              </div>
+              <ChevronRight className="w-3.5 h-3.5 text-slate-600 group-hover:text-slate-400 shrink-0" />
+            </button>
+          )}
 
           <button
             onClick={() => {

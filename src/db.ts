@@ -17,6 +17,7 @@ import {
   SettingsState,
   LedgerEntry,
   UserAccount,
+  UserRole,
 } from './types/index.ts';
 import { parseCleanNumber, liveLtpLookup } from './utils/cleanNumber.ts';
 
@@ -248,6 +249,9 @@ export async function initDatabase(appEnv: string = 'production'): Promise<boole
       await dropFkClient.query('ALTER TABLE IF EXISTS user_panel_accounts ADD COLUMN IF NOT EXISTS referral_code TEXT;');
       await dropFkClient.query('ALTER TABLE IF EXISTS user_panel_accounts ADD COLUMN IF NOT EXISTS commission_share NUMERIC(10, 2);');
       await dropFkClient.query('ALTER TABLE IF EXISTS user_panel_accounts ADD COLUMN IF NOT EXISTS status TEXT DEFAULT \'ACTIVE\';');
+      await dropFkClient.query('ALTER TABLE IF EXISTS user_panel_accounts ADD COLUMN IF NOT EXISTS master_id TEXT;');
+      await dropFkClient.query('ALTER TABLE IF EXISTS user_panel_accounts ADD COLUMN IF NOT EXISTS broker_id TEXT;');
+      await dropFkClient.query('ALTER TABLE IF EXISTS user_panel_accounts ADD COLUMN IF NOT EXISTS sub_broker_id TEXT;');
       await dropFkClient.query('ALTER TABLE IF EXISTS user_panel_tenant_branding ADD COLUMN IF NOT EXISTS domain TEXT;');
       await dropFkClient.query(`
         CREATE TABLE IF NOT EXISTS user_panel_users (
@@ -271,6 +275,9 @@ export async function initDatabase(appEnv: string = 'production'): Promise<boole
       await dropFkClient.query('ALTER TABLE IF EXISTS user_panel_users ADD COLUMN IF NOT EXISTS status TEXT DEFAULT \'ACTIVE\';');
       await dropFkClient.query('ALTER TABLE IF EXISTS user_panel_users ADD COLUMN IF NOT EXISTS referral_code TEXT;');
       await dropFkClient.query('ALTER TABLE IF EXISTS user_panel_users ADD COLUMN IF NOT EXISTS commission_share NUMERIC(10, 2);');
+      await dropFkClient.query('ALTER TABLE IF EXISTS user_panel_users ADD COLUMN IF NOT EXISTS master_id TEXT;');
+      await dropFkClient.query('ALTER TABLE IF EXISTS user_panel_users ADD COLUMN IF NOT EXISTS broker_id TEXT;');
+      await dropFkClient.query('ALTER TABLE IF EXISTS user_panel_users ADD COLUMN IF NOT EXISTS sub_broker_id TEXT;');
     } finally {
       dropFkClient.release();
     }
@@ -1600,6 +1607,9 @@ export const dbRepo = {
   async insertAccount(account: UserAccount): Promise<void> {
     if (!pgPool || !isPostgresReady) return;
     const resolvedStatus = (account.status || 'ACTIVE').toUpperCase();
+    const cleanEmail = (account.email || '').trim().toLowerCase();
+    const cleanPhone = (account.phone || '').trim();
+
     try {
       await pgPool.query(`
         INSERT INTO user_panel_accounts (
@@ -1630,8 +1640,8 @@ export const dbRepo = {
         account.id,
         account.userId || account.id,
         account.name,
-        account.email,
-        account.phone || '',
+        cleanEmail,
+        cleanPhone,
         account.passwordHash,
         account.role,
         account.roleTitle || '',
@@ -1646,8 +1656,7 @@ export const dbRepo = {
         resolvedStatus,
       ]);
     } catch (e: any) {
-      // Handle email unique conflict when synced node id differs from an existing local account with the same email
-      if (e.code === '23505' && String(e.constraint || '').includes('email')) {
+      if (e.code === '23505') {
         try {
           await pgPool.query(`
             UPDATE user_panel_accounts SET
@@ -1665,11 +1674,11 @@ export const dbRepo = {
               commission_share = COALESCE($13, commission_share),
               status = COALESCE(NULLIF($14, ''), status),
               updated_at = NOW()
-            WHERE LOWER(email) = LOWER($1);
+            WHERE LOWER(email) = LOWER($1) OR id = $15;
           `, [
-            account.email,
+            cleanEmail,
             account.name,
-            account.phone || '',
+            cleanPhone,
             account.passwordHash,
             account.role,
             account.roleTitle || '',
@@ -1681,6 +1690,7 @@ export const dbRepo = {
             account.referralCode || null,
             account.commissionShare ?? null,
             resolvedStatus,
+            account.id,
           ]);
         } catch (inner: any) {
           console.warn('[Database dbRepo.insertAccount email-upsert] notice:', inner.message);
@@ -1717,8 +1727,8 @@ export const dbRepo = {
       `, [
         account.id,
         account.name,
-        account.email,
-        account.phone || '',
+        cleanEmail,
+        cleanPhone,
         account.passwordHash,
         account.role,
         resolvedStatus,
@@ -1730,7 +1740,7 @@ export const dbRepo = {
         account.commissionShare ?? null,
       ]);
     } catch (e: any) {
-      if (e.code === '23505' && String(e.constraint || '').includes('email')) {
+      if (e.code === '23505') {
         try {
           await pgPool.query(`
             UPDATE user_panel_users SET
@@ -1746,11 +1756,11 @@ export const dbRepo = {
               sub_broker_id = COALESCE(NULLIF($11, ''), sub_broker_id),
               commission_share = COALESCE($12, commission_share),
               updated_at = NOW()
-            WHERE LOWER(email) = LOWER($1);
+            WHERE LOWER(email) = LOWER($1) OR id = $13;
           `, [
-            account.email,
+            cleanEmail,
             account.name,
-            account.phone || '',
+            cleanPhone,
             account.passwordHash,
             account.role,
             resolvedStatus,
@@ -1760,6 +1770,7 @@ export const dbRepo = {
             account.brokerId || null,
             account.subBrokerId || null,
             account.commissionShare ?? null,
+            account.id,
           ]);
         } catch (inner: any) {
           console.warn('[Database dbRepo.insertAccount user_panel_users email-upsert] notice:', inner.message);
@@ -1813,6 +1824,10 @@ export const dbRepo = {
     if (!pgPool || !isPostgresReady) return null;
     try {
       const clean = identifier.trim().toLowerCase();
+      const raw = identifier.trim();
+      const digits = clean.replace(/\D/g, '');
+
+      // 1. Check user_panel_accounts
       let res = await pgPool.query(`
         SELECT * FROM user_panel_accounts
         WHERE LOWER(email) = $1
@@ -1820,9 +1835,13 @@ export const dbRepo = {
            OR LOWER(user_id) = $1
            OR LOWER(COALESCE(referral_code, '')) = $1
            OR phone = $2
+           OR (NULLIF($3, '') IS NOT NULL AND LENGTH($3) >= 7 AND REGEXP_REPLACE(phone, '\\D', '', 'g') = $3)
+           OR (NULLIF($3, '') IS NOT NULL AND LENGTH($3) >= 7 AND RIGHT(REGEXP_REPLACE(phone, '\\D', '', 'g'), 10) = RIGHT($3, 10))
         LIMIT 1
-      `, [clean, identifier.trim()]);
+      `, [clean, raw, digits]);
       let r = res.rows[0];
+
+      // 2. Fallback to user_panel_users
       if (!r) {
         const uRes = await pgPool.query(`
           SELECT * FROM user_panel_users
@@ -1830,11 +1849,88 @@ export const dbRepo = {
              OR LOWER(id) = $1
              OR LOWER(COALESCE(referral_code, '')) = $1
              OR phone = $2
+             OR (NULLIF($3, '') IS NOT NULL AND LENGTH($3) >= 7 AND REGEXP_REPLACE(phone, '\\D', '', 'g') = $3)
+             OR (NULLIF($3, '') IS NOT NULL AND LENGTH($3) >= 7 AND RIGHT(REGEXP_REPLACE(phone, '\\D', '', 'g'), 10) = RIGHT($3, 10))
           LIMIT 1
-        `, [clean, identifier.trim()]);
+        `, [clean, raw, digits]);
         r = uRes.rows[0];
       }
+
+      // 3. Fallback to shared users table (if Admin-created account in common DB)
+      if (!r) {
+        try {
+          const legacyUsersRes = await pgPool.query(`
+            SELECT id, name, email, phone, password_hash, role, tenant_id, hierarchy_id, hierarchy_role, status
+            FROM users
+            WHERE LOWER(email) = $1
+               OR LOWER(id) = $1
+               OR LOWER(COALESCE(hierarchy_id, '')) = $1
+               OR phone = $2
+               OR (NULLIF($3, '') IS NOT NULL AND LENGTH($3) >= 7 AND REGEXP_REPLACE(phone, '\\D', '', 'g') = $3)
+               OR (NULLIF($3, '') IS NOT NULL AND LENGTH($3) >= 7 AND RIGHT(REGEXP_REPLACE(phone, '\\D', '', 'g'), 10) = RIGHT($3, 10))
+            LIMIT 1
+          `, [clean, raw, digits]);
+          if (legacyUsersRes.rows[0]) {
+            const lu = legacyUsersRes.rows[0];
+            const rawRole = String(lu.hierarchy_role || lu.role || '').toLowerCase();
+            let mappedRole: UserRole = 'trader_client';
+            let roleTitle = 'Trader Client';
+            if (rawRole.includes('super')) {
+              mappedRole = 'super_admin';
+              roleTitle = 'Super Administrator';
+            } else if (rawRole.includes('master')) {
+              mappedRole = 'master';
+              roleTitle = 'Master Admin';
+            } else if (rawRole.includes('sub')) {
+              mappedRole = 'sub_broker';
+              roleTitle = 'Sub-Broker / Franchisee';
+            } else if (rawRole.includes('broker')) {
+              mappedRole = 'broker_admin';
+              roleTitle = 'Broker Administrator';
+            }
+            r = {
+              id: lu.hierarchy_id || lu.id,
+              user_id: lu.id,
+              name: lu.name,
+              email: lu.email,
+              phone: lu.phone,
+              password_hash: lu.password_hash,
+              role: mappedRole,
+              role_title: roleTitle,
+              broker_id: mappedRole === 'broker_admin' ? (lu.hierarchy_id || lu.id) : 'BRK-ROHAN-01',
+              master_id: mappedRole === 'master' ? (lu.hierarchy_id || lu.id) : undefined,
+              sub_broker_id: mappedRole === 'sub_broker' ? (lu.hierarchy_id || lu.id) : undefined,
+              tenant_id: lu.tenant_id || 'TNT-001',
+              status: lu.status || 'ACTIVE',
+            };
+          }
+        } catch {
+          // Table 'users' may not exist in pure isolated schema, ignore gracefully
+        }
+      }
+
       if (!r) return null;
+
+      const rawRole = String(r.role || '').toLowerCase();
+      let mappedRole: UserRole = 'trader_client';
+      let roleTitle = r.role_title || 'Trader Client';
+      if (rawRole.includes('super')) {
+        mappedRole = 'super_admin';
+        roleTitle = roleTitle || 'Super Administrator';
+      } else if (rawRole.includes('master')) {
+        mappedRole = 'master';
+        roleTitle = roleTitle || 'Master Admin';
+      } else if (rawRole.includes('sub')) {
+        mappedRole = 'sub_broker';
+        roleTitle = roleTitle || 'Sub-Broker / Franchisee';
+      } else if (rawRole.includes('broker')) {
+        mappedRole = 'broker_admin';
+        roleTitle = roleTitle || 'Broker Administrator';
+      } else if (rawRole.includes('staff') || rawRole.includes('ops') || rawRole.includes('operation')) {
+        mappedRole = 'operations';
+        roleTitle = roleTitle || 'Operations / Staff';
+      }
+
       return {
         id: r.id,
         userId: r.user_id || r.id,
@@ -1842,13 +1938,13 @@ export const dbRepo = {
         email: r.email,
         phone: r.phone || '',
         passwordHash: r.password_hash,
-        role: r.role,
-        roleTitle: r.role_title || '',
-        brokerId: r.broker_id || 'BRK-ROHAN-01',
-        subBrokerId: r.sub_broker_id || undefined,
-        masterId: r.master_id || undefined,
+        role: mappedRole,
+        roleTitle,
+        brokerId: r.broker_id || (mappedRole === 'broker_admin' ? r.id : 'BRK-ROHAN-01'),
+        subBrokerId: r.sub_broker_id || (mappedRole === 'sub_broker' ? r.id : undefined),
+        masterId: r.master_id || (mappedRole === 'master' ? r.id : undefined),
         tenantId: r.tenant_id || 'TNT-001',
-        organization: r.organization || '',
+        organization: r.organization || `${r.name} Desk`,
         pan: r.pan || '',
         referralCode: r.referral_code || undefined,
         commissionShare: r.commission_share !== null && r.commission_share !== undefined ? Number(r.commission_share) : undefined,

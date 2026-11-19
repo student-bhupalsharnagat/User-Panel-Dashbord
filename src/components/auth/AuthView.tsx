@@ -17,84 +17,10 @@ import {
   ArrowRight,
   CheckCircle2,
   AlertCircle,
-  Zap,
-  Activity,
-  Briefcase,
   Terminal,
-  Sparkles,
 } from 'lucide-react';
 import { useApp } from '../../context/AppContext';
 import { UserRole } from '../../types';
-
-interface QuickCard {
-  role: UserRole;
-  title: string;
-  subtitle: string;
-  email: string;
-  id: string;
-  color: string;
-  borderColor: string;
-  bgHover: string;
-  icon: React.ComponentType<{ className?: string }>;
-}
-
-const QUICK_CARDS: QuickCard[] = [
-  {
-    role: 'broker_admin',
-    title: 'Broker Admin',
-    subtitle: 'Rohan Sen',
-    email: 'rohan.sen@nextrade.example',
-    id: 'BRK-ROHAN-01',
-    color: 'text-purple-400',
-    borderColor: 'border-purple-500/30',
-    bgHover: 'hover:border-purple-500/60 hover:bg-purple-950/20',
-    icon: Shield,
-  },
-  {
-    role: 'super_admin',
-    title: 'Super Admin',
-    subtitle: 'Central Administrator',
-    email: 'superadmin@nextrade.example',
-    id: 'SUPER-ADMIN-01',
-    color: 'text-rose-400',
-    borderColor: 'border-rose-500/30',
-    bgHover: 'hover:border-rose-500/60 hover:bg-rose-950/20',
-    icon: Shield,
-  },
-  {
-    role: 'master',
-    title: 'Master Admin',
-    subtitle: 'Vikramaditya Singhania',
-    email: 'master@nextrade.example',
-    id: 'MST-ALPHA-01',
-    color: 'text-amber-400',
-    borderColor: 'border-amber-500/30',
-    bgHover: 'hover:border-amber-500/60 hover:bg-amber-950/20',
-    icon: Zap,
-  },
-  {
-    role: 'sub_broker',
-    title: 'Sub-Broker',
-    subtitle: 'Vikram Joshi',
-    email: 'subbroker@nextrade.example',
-    id: 'SUB-BRK-001',
-    color: 'text-emerald-400',
-    borderColor: 'border-emerald-500/30',
-    bgHover: 'hover:border-emerald-500/60 hover:bg-emerald-950/20',
-    icon: Briefcase,
-  },
-  {
-    role: 'operations',
-    title: 'Staff / Ops',
-    subtitle: 'Pooja Nair',
-    email: 'operations@nextrade.example',
-    id: 'OPS-DESK-01',
-    color: 'text-cyan-400',
-    borderColor: 'border-cyan-500/30',
-    bgHover: 'hover:border-cyan-500/60 hover:bg-cyan-950/20',
-    icon: Activity,
-  },
-];
 
 export const AuthView: React.FC = () => {
   const { login, register, showToast, tenantBranding } = useApp();
@@ -105,8 +31,8 @@ export const AuthView: React.FC = () => {
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
 
   // Login form state
-  const [loginIdentifier, setLoginIdentifier] = useState('rohan.sen@nextrade.example');
-  const [loginPassword, setLoginPassword] = useState('Password@123');
+  const [loginIdentifier, setLoginIdentifier] = useState('');
+  const [loginPassword, setLoginPassword] = useState('');
 
   // Register form state
   const [regName, setRegName] = useState('');
@@ -132,22 +58,6 @@ export const AuthView: React.FC = () => {
       await login(loginIdentifier.trim(), loginPassword.trim());
     } catch (err: any) {
       setErrorMessage(err.message || 'Authentication failed. Please verify credentials.');
-      showToast(err.message || 'Login failed', 'error');
-    } finally {
-      setIsLoading(false);
-    }
-  };
-
-  // 1-Click Quick Demo Login
-  const handleQuickLogin = async (card: QuickCard) => {
-    setLoginIdentifier(card.email);
-    setLoginPassword('Password@123');
-    setErrorMessage(null);
-    setIsLoading(true);
-    try {
-      await login(card.email, 'Password@123');
-    } catch (err: any) {
-      setErrorMessage(err.message || 'Quick login failed.');
       showToast(err.message || 'Login failed', 'error');
     } finally {
       setIsLoading(false);
@@ -292,9 +202,8 @@ export const AuthView: React.FC = () => {
               </div>
 
               <div>
-                <label className="block text-xs font-medium text-slate-300 mb-1.5 flex items-center justify-between">
-                  <span>Password</span>
-                  <span className="text-[11px] text-purple-400 font-mono">Demo: Password@123</span>
+                <label className="block text-xs font-medium text-slate-300 mb-1.5">
+                  Password
                 </label>
                 <div className="relative">
                   <div className="absolute inset-y-0 left-0 pl-3.5 flex items-center pointer-events-none text-slate-500">
@@ -335,41 +244,6 @@ export const AuthView: React.FC = () => {
                   </>
                 )}
               </button>
-
-              {/* Quick 1-Click Role Login Cards */}
-              <div className="pt-6 border-t border-[#161f36]">
-                <div className="flex items-center justify-between mb-3">
-                  <span className="text-[11px] font-semibold tracking-wider text-slate-400 uppercase flex items-center gap-1.5">
-                    <Sparkles className="w-3.5 h-3.5 text-purple-400" />
-                    1-Click Demo Quick Logins
-                  </span>
-                  <span className="text-[10px] text-slate-500">Click to instantly launch</span>
-                </div>
-
-                <div className="grid grid-cols-2 sm:grid-cols-3 gap-2">
-                  {QUICK_CARDS.map((card) => {
-                    const CardIcon = card.icon;
-                    return (
-                      <button
-                        key={card.id}
-                        type="button"
-                        onClick={() => handleQuickLogin(card)}
-                        disabled={isLoading}
-                        className={`text-left p-2.5 rounded-xl border bg-[#0e1424] transition-all cursor-pointer ${card.borderColor} ${card.bgHover} group disabled:opacity-50`}
-                      >
-                        <div className="flex items-center gap-1.5 mb-1">
-                          <CardIcon className={`w-3.5 h-3.5 ${card.color}`} />
-                          <span className="text-[11px] font-semibold text-slate-200 truncate group-hover:text-white">
-                            {card.title}
-                          </span>
-                        </div>
-                        <div className="text-[10px] text-slate-400 truncate">{card.subtitle}</div>
-                        <div className="text-[9px] font-mono text-slate-500 truncate mt-0.5">{card.id}</div>
-                      </button>
-                    );
-                  })}
-                </div>
-              </div>
             </form>
           )}
 

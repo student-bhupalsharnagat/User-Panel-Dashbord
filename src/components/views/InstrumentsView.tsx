@@ -51,6 +51,7 @@ export const InstrumentsView: React.FC = () => {
 
   const handleToggleStatus = async (symbol: string) => {
     try {
+
       const updated = await api.toggleInstrument(symbol);
       showToast(`Trading status for ${symbol} set to ${updated.status}`, 'info');
       triggerRefresh();
@@ -111,11 +112,10 @@ export const InstrumentsView: React.FC = () => {
         <div>
           <div className="flex items-center gap-2.5">
             <h2 className="text-xl font-bold tracking-tight text-white">Instruments</h2>
-            <span className={`px-2 py-0.5 rounded text-[11px] font-semibold border ${
-              isLiveMode
+            <span className={`px-2 py-0.5 rounded text-[11px] font-semibold border ${isLiveMode
                 ? 'bg-emerald-500/15 text-emerald-400 border-emerald-500/30'
                 : 'bg-indigo-500/15 text-indigo-400 border border-indigo-500/30'
-            }`}>
+              }`}>
               {isLiveMode ? 'Live engine' : 'Sandbox mode'}
             </span>
           </div>
@@ -172,9 +172,8 @@ export const InstrumentsView: React.FC = () => {
                 <button
                   key={ex}
                   onClick={() => setExchangeFilter(ex)}
-                  className={`px-3 py-1 rounded text-[11px] font-medium transition-colors cursor-pointer ${
-                    exchangeFilter === ex ? 'bg-indigo-600 text-white font-bold' : 'text-slate-400 hover:text-white'
-                  }`}
+                  className={`px-3 py-1 rounded text-[11px] font-medium transition-colors cursor-pointer ${exchangeFilter === ex ? 'bg-indigo-600 text-white font-bold' : 'text-slate-400 hover:text-white'
+                    }`}
                 >
                   {ex}
                 </button>
@@ -233,20 +232,18 @@ export const InstrumentsView: React.FC = () => {
                   </td>
 
                   <td className={`${cellPad} text-center font-sans`}>
-                    <span className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-semibold ${
-                      inst.status === 'Enabled'
+                    <span className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-semibold ${inst.status === 'Enabled'
                         ? 'bg-emerald-500/15 text-emerald-400'
                         : inst.status === 'Disabled'
-                        ? 'bg-rose-500/15 text-rose-400'
-                        : 'bg-amber-500/15 text-amber-400'
-                    }`}>
-                      <span className={`w-1.5 h-1.5 rounded-full ${
-                        inst.status === 'Enabled'
+                          ? 'bg-rose-500/15 text-rose-400'
+                          : 'bg-amber-500/15 text-amber-400'
+                      }`}>
+                      <span className={`w-1.5 h-1.5 rounded-full ${inst.status === 'Enabled'
                           ? 'bg-emerald-400'
                           : inst.status === 'Disabled'
-                          ? 'bg-rose-400'
-                          : 'bg-amber-400'
-                      }`} />
+                            ? 'bg-rose-400'
+                            : 'bg-amber-400'
+                        }`} />
                       <span>{inst.status}</span>
                     </span>
                   </td>
@@ -257,11 +254,10 @@ export const InstrumentsView: React.FC = () => {
                     ) : (
                       <button
                         onClick={() => handleToggleStatus(inst.symbol)}
-                        className={`px-2.5 py-1 rounded text-[11px] font-semibold border transition-all cursor-pointer ${
-                          inst.status === 'Enabled'
+                        className={`px-2.5 py-1 rounded text-[11px] font-semibold border transition-all cursor-pointer ${inst.status === 'Enabled'
                             ? 'border-rose-500/40 text-rose-300 hover:bg-rose-600 hover:text-white'
                             : 'border-emerald-500/40 text-emerald-300 hover:bg-emerald-600 hover:text-white'
-                        }`}
+                          }`}
                       >
                         {inst.status === 'Enabled' ? 'Disable' : 'Enable'}
                       </button>
