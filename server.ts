@@ -60,10 +60,19 @@ app.use(express.json({
 // ==========================================
 const APP_ENV = process.env.APP_ENV || 'production';
 const JWT_SECRET = process.env.JWT_SECRET || 'nextrade-session-jwt-token-secret-2026';
-const INTERNAL_API_SECRET = process.env.INTERNAL_API_SECRET || process.env.INTERNAL_COMMUNICATION_SECRET || process.env.CENTRAL_ADMIN_INTERNAL_SECRET || 'nextrade-internal-hmac-secret-2026';
+const candidateSecrets = [
+  process.env.INTERNAL_API_SECRET,
+  process.env.INTERNAL_COMMUNICATION_SECRET,
+  process.env.CENTRAL_ADMIN_INTERNAL_SECRET,
+  process.env.S2S_SECRET,
+  'vertex-internal-s2s-secret',
+  'nextrade-internal-hmac-secret-2026',
+].filter(Boolean) as string[];
+const INTERNAL_API_SECRET = candidateSecrets[0] || 'vertex-internal-s2s-secret';
 // Authoritative Deployed Production Endpoints
+const ADMIN_PANEL_URL = (process.env.ADMIN_PANEL_URL || process.env.CENTRAL_ADMIN_URL || process.env.CENTRAL_ADMIN_BASE_URL || 'https://admin-dashbord-wxcq.onrender.com').replace(/\/+$/, '').replace(/\/api$/, '');
 const TRADING_PLATFORM_URL = (process.env.TRADING_PLATFORM_URL || process.env.TRADING_PLATFORM_BASE_URL || 'https://trading-platform-2t6r.onrender.com').replace(/\/+$/, '').replace(/\/api$/, '');
-const CENTRAL_ADMIN_URL = (process.env.CENTRAL_ADMIN_URL || process.env.CENTRAL_ADMIN_BASE_URL || 'https://admin-dashbord-wxcq.onrender.com').replace(/\/+$/, '').replace(/\/api$/, '');
+const CENTRAL_ADMIN_URL = ADMIN_PANEL_URL;
 const DEFAULT_TENANT_ID = process.env.DEFAULT_TENANT_ID || 'TNT-001';
 
 // Exact CORS Origins Configuration
@@ -342,9 +351,25 @@ export function verifyPassword(password: string, hash: string): boolean {
 
 async function dispatchS2SHierarchySync(node: Record<string, any>): Promise<void> {
   const path = '/api/internal/v1/hierarchy/sync';
-  const payload = { ...node, node, timestamp: new Date().toISOString() };
+  const roleMap: Record<string, string> = {
+    master: 'MASTER',
+    broker: 'BROKER',
+    sub_broker: 'SUB_BROKER',
+    client: 'CLIENT',
+  };
+  const rawType = String(node.nodeType || node.type || node.role || 'client').toLowerCase();
+  const normalizedRole = (node.role || roleMap[rawType] || 'CLIENT').toString().toUpperCase();
+  const payload = {
+    action: String(node.action || 'UPSERT').toUpperCase(),
+    nodeType: rawType,
+    type: rawType,
+    role: normalizedRole,
+    ...node,
+    node: { ...node },
+    timestamp: new Date().toISOString(),
+  };
   const bodyStr = JSON.stringify(payload);
-  const targets = Array.from(new Set([TRADING_PLATFORM_URL, CENTRAL_ADMIN_URL, process.env.ADMIN_PANEL_URL].filter(Boolean))) as string[];
+  const targets = Array.from(new Set([TRADING_PLATFORM_URL, ADMIN_PANEL_URL, CENTRAL_ADMIN_URL].filter(Boolean))) as string[];
 
   await Promise.allSettled(
     targets.map(async (baseUrl) => {
@@ -352,15 +377,16 @@ async function dispatchS2SHierarchySync(node: Record<string, any>): Promise<void
       const canonical = `${timestamp}.POST.${path}.${bodyStr}`;
       const signature = crypto.createHmac('sha256', INTERNAL_API_SECRET).update(canonical).digest('hex');
       const controller = new AbortController();
-      const timer = setTimeout(() => controller.abort(), 8000);
+      const timer = setTimeout(() => controller.abort(), 10000);
       try {
-        await fetch(`${baseUrl}${path}`, {
+        const res = await fetch(`${baseUrl}${path}`, {
           method: 'POST',
           headers: {
             'content-type': 'application/json',
             'x-internal-signature': signature,
             'x-s2s-signature': signature,
             'x-signature-sha256': signature,
+            'x-internal-secret': INTERNAL_API_SECRET,
             'x-internal-timestamp': timestamp,
             'x-timestamp': timestamp,
             'x-tenant-id': String(node.tenantId || DEFAULT_TENANT_ID),
@@ -368,8 +394,14 @@ async function dispatchS2SHierarchySync(node: Record<string, any>): Promise<void
           body: bodyStr,
           signal: controller.signal,
         });
+        if (!res.ok) {
+          const errText = await res.text().catch(() => '');
+          console.error(`[S2S Hierarchy Sync] Target ${baseUrl}${path} failed with HTTP ${res.status}: ${errText}`);
+        } else {
+          console.log(`[S2S Hierarchy Sync] Target ${baseUrl}${path} successfully synced node ${node.id} (HTTP ${res.status})`);
+        }
       } catch (err: any) {
-        console.warn(`[S2S Sync] Non-blocking dispatch failed for ${baseUrl}${path}:`, err?.message || err);
+        console.error(`[S2S Hierarchy Sync] Error dispatching to ${baseUrl}${path}:`, err?.message || err);
       } finally {
         clearTimeout(timer);
       }
@@ -2639,32 +2671,52 @@ app.post('/api/auth/login', async (req: Request, res: Response) => {
     }
 
     // 4. JIT Credential Lookup from Central Admin (Admin-Dashbord)
-    if (!account && (CENTRAL_ADMIN_URL || process.env.ADMIN_PANEL_URL)) {
-      try {
-        const adminUrl = CENTRAL_ADMIN_URL || (process.env.ADMIN_PANEL_URL || '').replace(/\/+$/, '').replace(/\/api$/, '');
-        const lookupPath = '/api/internal/v1/auth/lookup-credential';
-        const timestamp = Date.now().toString();
-        const lookupPayload = JSON.stringify({ identifier: cleanIdentifier, email: cleanLower, phone: cleanDigits });
-        const canonical = `${timestamp}.POST.${lookupPath}.${lookupPayload}`;
-        const signature = crypto.createHmac('sha256', INTERNAL_API_SECRET).update(canonical).digest('hex');
-        const controller = new AbortController();
-        const timer = setTimeout(() => controller.abort(), 4000);
-        const lRes = await fetch(`${adminUrl}${lookupPath}`, {
-          method: 'POST',
-          headers: {
-            'content-type': 'application/json',
-            'x-internal-signature': signature,
-            'x-s2s-signature': signature,
-            'x-signature-sha256': signature,
-            'x-internal-timestamp': timestamp,
-            'x-timestamp': timestamp,
-            'x-tenant-id': DEFAULT_TENANT_ID,
-          },
-          body: lookupPayload,
-          signal: controller.signal,
-        });
-        clearTimeout(timer);
-        if (lRes.ok) {
+    if (!account && (ADMIN_PANEL_URL || CENTRAL_ADMIN_URL)) {
+      const adminUrl = ADMIN_PANEL_URL || CENTRAL_ADMIN_URL;
+      const lookupPath = '/api/internal/v1/auth/lookup-credential';
+      const timestamp = Date.now().toString();
+      const lookupPayload = JSON.stringify({ identifier: cleanIdentifier, email: cleanLower, phone: cleanDigits });
+      const canonical = `${timestamp}.POST.${lookupPath}.${lookupPayload}`;
+
+      const lookupSecrets = Array.from(new Set([
+        process.env.INTERNAL_API_SECRET,
+        process.env.INTERNAL_COMMUNICATION_SECRET,
+        process.env.CENTRAL_ADMIN_INTERNAL_SECRET,
+        'vertex-internal-s2s-secret',
+        'nextrade-internal-hmac-secret-2026',
+      ].filter(Boolean))) as string[];
+
+      for (const secret of lookupSecrets) {
+        try {
+          const signature = crypto.createHmac('sha256', secret).update(canonical).digest('hex');
+          const controller = new AbortController();
+          const timer = setTimeout(() => controller.abort(), 6000);
+          const lRes = await fetch(`${adminUrl}${lookupPath}`, {
+            method: 'POST',
+            headers: {
+              'content-type': 'application/json',
+              'x-internal-signature': signature,
+              'x-s2s-signature': signature,
+              'x-signature-sha256': signature,
+              'x-internal-secret': secret,
+              'x-internal-timestamp': timestamp,
+              'x-timestamp': timestamp,
+              'x-tenant-id': DEFAULT_TENANT_ID,
+            },
+            body: lookupPayload,
+            signal: controller.signal,
+          });
+          clearTimeout(timer);
+
+          if (!lRes.ok) {
+            const errText = await lRes.text().catch(() => '');
+            console.warn(`[JIT Credential Lookup] Central Admin lookup failed for "${cleanIdentifier}" (${adminUrl}): HTTP ${lRes.status} - ${errText}`);
+            if (lRes.status === 401 || lRes.status === 403) {
+              continue; // try next candidate secret
+            }
+            break;
+          }
+
           const lData = await lRes.json().catch(() => ({}));
           if (lData?.found && lData?.user) {
             const u = lData.user;
@@ -2688,42 +2740,50 @@ app.post('/api/auth/login', async (req: Request, res: Response) => {
               roleTitle = 'Operations / Staff';
             }
 
-            const resolvedMasterId = normRole === 'master' ? u.id : (u.masterId || (normRole !== 'super_admin' ? 'MST-ALPHA-01' : undefined));
-            const resolvedBrokerId = normRole === 'broker_admin' ? u.id : (u.brokerId || (normRole === 'master' ? 'BRK-MASTER-01' : 'BRK-ROHAN-01'));
-            const resolvedSubBrokerId = normRole === 'sub_broker' ? u.id : (u.subBrokerId || undefined);
+            const resolvedMasterId = normRole === 'master' ? u.id : (u.masterId || u.master_id || (normRole !== 'super_admin' ? 'MST-ALPHA-01' : undefined));
+            const resolvedBrokerId = normRole === 'broker_admin' ? u.id : (u.brokerId || u.broker_id || (normRole === 'master' ? 'BRK-MASTER-01' : 'BRK-ROHAN-01'));
+            const resolvedSubBrokerId = normRole === 'sub_broker' ? u.id : (u.subBrokerId || u.sub_broker_id || undefined);
 
             account = {
               id: u.id,
               userId: u.userId || u.id,
               name: u.name,
               email: (u.email || cleanLower).trim().toLowerCase(),
-              phone: u.phone || '',
-              passwordHash: u.passwordHash || hashPasswordBcrypt(passwordStr),
+              phone: u.phone || cleanDigits || '',
+              passwordHash: u.passwordHash || u.password_hash || (u.password ? hashPasswordBcrypt(u.password) : hashPasswordBcrypt(passwordStr)),
               role: normRole,
               roleTitle,
               brokerId: resolvedBrokerId,
               subBrokerId: resolvedSubBrokerId,
               masterId: resolvedMasterId,
-              tenantId: u.tenantId || DEFAULT_TENANT_ID,
-              organization: u.organization || 'NexTrade Platform',
+              tenantId: u.tenantId || u.tenant_id || DEFAULT_TENANT_ID,
+              organization: u.organization || u.company || 'NexTrade Platform',
               pan: u.pan || 'ABCDE1234F',
-              referralCode: u.referralCode || deriveReferralCode(normRole, u.id),
+              referralCode: u.referralCode || u.referral_code || deriveReferralCode(normRole, u.id),
+              commissionShare: u.commissionShare ?? u.commission_share ?? null,
               status: u.status || 'ACTIVE',
-              createdAt: new Date().toISOString(),
+              createdAt: u.createdAt || u.created_at || new Date().toISOString(),
             };
-            userAccounts.push(account);
+
+            const existingIdx = userAccounts.findIndex(x => x.id === account!.id || x.email.toLowerCase() === account!.email.toLowerCase());
+            if (existingIdx !== -1) {
+              userAccounts[existingIdx] = account;
+            } else {
+              userAccounts.push(account);
+            }
+
             if (isUsingPostgres()) {
-              dbRepo.insertAccount(account).catch(() => {});
+              await dbRepo.insertAccount(account).catch(e => console.warn('[JIT Credential Lookup] DB upsert notice:', e.message));
             }
 
             if (normRole === 'trader_client') {
               const existingClient = clients.find(c => c.id === u.id || c.userId === u.id || c.email?.toLowerCase() === account!.email);
               if (!existingClient) {
-                const initialBal = Number(u.initialBalance || 0);
+                const initialBal = Number(u.initialBalance || u.balance || 0);
                 const newClientObj: Client = {
                   id: u.id,
                   userId: u.userId || u.id,
-                  clientCode: u.id,
+                  clientCode: u.clientCode || u.client_code || u.id,
                   name: u.name,
                   email: account.email,
                   phone: account.phone,
@@ -2738,7 +2798,7 @@ app.post('/api/auth/login', async (req: Request, res: Response) => {
                   marginAvailable: initialBal,
                   holding: 0,
                   reqHolding: 0,
-                  brokerId: resolvedBrokerId,
+                  brokerId: resolvedBrokerId || 'BRK-ROHAN-01',
                   brokerName: 'Broker Desk',
                   tenantId: account.tenantId,
                   subBrokerId: resolvedSubBrokerId,
@@ -2751,14 +2811,16 @@ app.post('/api/auth/login', async (req: Request, res: Response) => {
                 };
                 clients.unshift(newClientObj);
                 if (isUsingPostgres()) {
-                  dbRepo.insertClient(newClientObj).catch(() => {});
+                  await dbRepo.insertClient(newClientObj).catch(() => {});
                 }
               }
             }
+            console.log(`[JIT Credential Lookup] Successfully synced user ${u.name} (${u.id}) from Admin Panel to User Panel`);
+            break;
           }
+        } catch (jitErr: any) {
+          console.warn('[UserPanel Login] Central Admin JIT lookup notice:', jitErr?.message || jitErr);
         }
-      } catch (jitErr: any) {
-        console.warn('[UserPanel Login] Central Admin JIT lookup notice:', jitErr?.message || jitErr);
       }
     }
 
@@ -3576,8 +3638,8 @@ app.post(['/api/masters', '/api/admin/masters'], authMiddleware, requireRole(['s
     savePersistence();
   }
 
-  // S2S sync to Central Admin (Admin-Dashbord) and Trading Platform
-  dispatchS2SHierarchySync({
+  // Authoritative S2S sync to Central Admin (Admin-Dashbord) and Trading Platform
+  await dispatchS2SHierarchySync({
     action: 'UPSERT',
     nodeType: 'master',
     type: 'master',
@@ -3586,6 +3648,7 @@ app.post(['/api/masters', '/api/admin/masters'], authMiddleware, requireRole(['s
     masterId: newMasterId,
     name: masterName,
     fullName: masterName,
+    company: organization || company || `${masterName} Prime`,
     email: newMasterAccount.email,
     phone,
     passwordHash,
@@ -3676,8 +3739,8 @@ app.post(['/api/brokers', '/api/admin/brokers'], authMiddleware, requireRole(['s
     savePersistence();
   }
 
-  // S2S sync to Central Admin (Admin-Dashbord) and Trading Platform
-  dispatchS2SHierarchySync({
+  // Authoritative S2S sync to Central Admin (Admin-Dashbord) and Trading Platform
+  await dispatchS2SHierarchySync({
     action: 'UPSERT',
     nodeType: 'broker',
     type: 'broker',
@@ -3686,6 +3749,7 @@ app.post(['/api/brokers', '/api/admin/brokers'], authMiddleware, requireRole(['s
     brokerId: newBrokerId,
     name: brokerName,
     fullName: brokerName,
+    company: organization || company || `${brokerName} Securities`,
     email: newBrokerAccount.email,
     phone,
     passwordHash,
@@ -3693,6 +3757,7 @@ app.post(['/api/brokers', '/api/admin/brokers'], authMiddleware, requireRole(['s
     masterId: assignedMasterId,
     tenantId: user.tenantId || DEFAULT_TENANT_ID,
     commissionRate: commissionRate ?? markup ?? 12,
+    commissionShare: commissionRate ?? markup ?? 12,
     status: 'ACTIVE',
   }).catch((e: any) => console.warn('[AddBroker S2S] Admin-Dashbord sync notice:', e.message));
 
@@ -3714,6 +3779,7 @@ app.post(['/api/brokers', '/api/admin/brokers'], authMiddleware, requireRole(['s
       masterId: assignedMasterId,
       tenantId: user.tenantId || DEFAULT_TENANT_ID,
       commissionRate: commissionRate ?? markup ?? 12,
+      commissionShare: commissionRate ?? markup ?? 12,
       status: 'active',
     },
   }).catch((e: any) => console.warn('[AddBroker S2S] Upstream sync notice:', e.message));
@@ -3801,8 +3867,8 @@ app.post(['/api/sub-brokers', '/api/admin/sub-brokers'], authMiddleware, require
     savePersistence();
   }
 
-  // S2S sync to Central Admin (Admin-Dashbord) and Trading Platform
-  dispatchS2SHierarchySync({
+  // Authoritative S2S sync to Central Admin (Admin-Dashbord) and Trading Platform
+  await dispatchS2SHierarchySync({
     action: 'UPSERT',
     nodeType: 'sub_broker',
     type: 'sub_broker',
@@ -3811,6 +3877,7 @@ app.post(['/api/sub-brokers', '/api/admin/sub-brokers'], authMiddleware, require
     subBrokerId: newSubBrokerId,
     name: subBrokerName,
     fullName: subBrokerName,
+    company: organization || company || `${subBrokerName} Franchise`,
     email: newSubBrokerAccount.email,
     phone,
     passwordHash,
@@ -3819,6 +3886,7 @@ app.post(['/api/sub-brokers', '/api/admin/sub-brokers'], authMiddleware, require
     masterId: assignedMasterId,
     tenantId: user.tenantId || DEFAULT_TENANT_ID,
     commissionRate: commissionRate ?? markup ?? 8,
+    commissionShare: commissionRate ?? markup ?? 8,
     status: 'ACTIVE',
   }).catch((e: any) => console.warn('[AddSubBroker S2S] Admin-Dashbord sync notice:', e.message));
 
@@ -3841,6 +3909,7 @@ app.post(['/api/sub-brokers', '/api/admin/sub-brokers'], authMiddleware, require
       masterId: assignedMasterId,
       tenantId: user.tenantId || DEFAULT_TENANT_ID,
       commissionRate: commissionRate ?? markup ?? 8,
+      commissionShare: commissionRate ?? markup ?? 8,
       status: 'active',
     },
   }).catch((e: any) => console.warn('[AddSubBroker S2S] Upstream sync notice:', e.message));
@@ -4220,7 +4289,7 @@ app.get('/api/clients/:id', authMiddleware, (req: AuthenticatedRequest, res: Res
   });
 });
 
-app.post('/api/clients', authMiddleware, requireRole(['broker_admin', 'super_admin', 'master', 'master_admin', 'sub_broker']), (req: AuthenticatedRequest, res: Response) => {
+app.post(['/api/clients', '/api/admin/clients'], authMiddleware, requireRole(['broker_admin', 'super_admin', 'master', 'master_admin', 'sub_broker']), async (req: AuthenticatedRequest, res: Response) => {
   if (checkIdempotency(req, res)) return;
 
   const user = req.user!;
@@ -4332,7 +4401,7 @@ app.post('/api/clients', authMiddleware, requireRole(['broker_admin', 'super_adm
   };
   userAccounts.push(clientAccount);
   if (isUsingPostgres()) {
-    dbRepo.insertAccount(clientAccount).catch(() => {});
+    await dbRepo.insertAccount(clientAccount).catch(() => {});
   }
 
   // Authoritative S2S sync to Trading Platform
@@ -4355,14 +4424,17 @@ app.post('/api/clients', authMiddleware, requireRole(['broker_admin', 'super_adm
     },
   }).catch((e: any) => console.warn('[AddClient S2S] Upstream sync notice:', e.message));
 
-  // Authoritative S2S sync to Central Admin (Admin-Dashbord)
-  dispatchS2SHierarchySync({
-    action: 'CLIENT_CREATED',
-    nodeType: 'CLIENT',
+  // Authoritative dual S2S sync to Central Admin (Admin-Dashbord) and Trading Platform
+  await dispatchS2SHierarchySync({
+    action: 'UPSERT',
+    nodeType: 'client',
+    type: 'client',
     role: 'CLIENT',
     id: newClient.id,
     userId: newClient.id,
+    clientCode: newClient.clientCode || newClient.id,
     name: newClient.name,
+    fullName: newClient.name,
     email: newClient.email,
     phone: newClient.phone,
     pan: newClient.pan,

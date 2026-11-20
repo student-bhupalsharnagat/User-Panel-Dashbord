@@ -202,13 +202,15 @@ export class TradingPlatformClient extends EventEmitter {
   private lastSuccessful = new Map<string, any>();
 
   private centralAdminUrl: string;
+  private adminPanelUrl: string;
 
   constructor(config?: Partial<TradingPlatformConfig>) {
     super();
     this.baseUrl = (config?.baseUrl || process.env.TRADING_PLATFORM_URL || process.env.TRADING_PLATFORM_BASE_URL || 'https://trading-platform-2t6r.onrender.com').replace(/\/+$/, '').replace(/\/api$/, '');
     this.tenantId = config?.tenantId || process.env.DEFAULT_TENANT_ID || 'TNT-001';
-    this.secret = config?.secret || process.env.INTERNAL_API_SECRET || process.env.INTERNAL_COMMUNICATION_SECRET || process.env.CENTRAL_ADMIN_INTERNAL_SECRET || 'nextrade-internal-hmac-secret-2026';
-    this.centralAdminUrl = (process.env.CENTRAL_ADMIN_URL || 'https://admin-dashbord-wxcq.onrender.com').replace(/\/+$/, '');
+    this.secret = config?.secret || process.env.INTERNAL_API_SECRET || process.env.INTERNAL_COMMUNICATION_SECRET || process.env.CENTRAL_ADMIN_INTERNAL_SECRET || 'vertex-internal-s2s-secret';
+    this.adminPanelUrl = (process.env.ADMIN_PANEL_URL || process.env.CENTRAL_ADMIN_URL || process.env.CENTRAL_ADMIN_BASE_URL || 'https://admin-dashbord-wxcq.onrender.com').replace(/\/+$/, '').replace(/\/api$/, '');
+    this.centralAdminUrl = this.adminPanelUrl;
   }
 
   private getCached<T>(key: string, ttlMs = 10000): T | null {
@@ -1269,6 +1271,106 @@ export class TradingPlatformClient extends EventEmitter {
       this.token = null;
       await this.connectWebSocket();
     }, delay);
+  }
+
+  /**
+   * Authoritative dual S2S hierarchy synchronization to Trading Platform & Admin Dashboard
+   */
+  public async syncHierarchyNode(data: {
+    type: 'master' | 'broker' | 'sub_broker' | 'client';
+    action: string;
+    tenantId?: string;
+    node: any;
+  }): Promise<{ success: boolean; statusCode?: number; error?: string }> {
+    const outboundTenantId = this.resolveOutboundTenantId(data.tenantId || data.node?.tenantId || data.node?.tenant_id);
+    const n = data.node || {};
+    const roleMap: Record<string, string> = {
+      master: 'MASTER',
+      broker: 'BROKER',
+      sub_broker: 'SUB_BROKER',
+      client: 'CLIENT'
+    };
+    const normalizedRole = (n.role || roleMap[data.type] || 'CLIENT').toString().toUpperCase();
+    const actionUpper = String(data.action || 'UPSERT').toUpperCase();
+
+    const normalizedNode = {
+      action: actionUpper,
+      nodeType: data.type,
+      type: data.type,
+      role: normalizedRole,
+      id: String(n.id || n.userId || n.clientCode || n.brokerId || n.subBrokerId || n.masterId || ''),
+      userId: n.userId || n.id,
+      name: n.name || n.fullName || n.company || '',
+      fullName: n.fullName || n.name || '',
+      email: n.email ? String(n.email).trim().toLowerCase() : '',
+      phone: n.phone || '',
+      password: n.password,
+      passwordHash: n.passwordHash || n.password_hash,
+      tenantId: outboundTenantId,
+      masterId: n.masterId ?? n.master_id ?? (data.type === 'master' ? n.id : null),
+      brokerId: n.brokerId ?? n.broker_id ?? (data.type === 'broker' ? n.id : null),
+      subBrokerId: n.subBrokerId ?? n.sub_broker_id ?? (data.type === 'sub_broker' ? n.id : null),
+      commissionShare: n.commissionShare ?? n.commission_share ?? n.commissionRate ?? n.commission,
+      initialBalance: n.initialBalance ?? n.ledgerBalance ?? 0,
+      status: String(n.status || 'ACTIVE').toUpperCase(),
+      timestamp: new Date().toISOString(),
+    };
+
+    const path = '/api/internal/v1/hierarchy/sync';
+    const payload = { ...normalizedNode, node: normalizedNode };
+    const bodyStr = JSON.stringify(payload);
+    const targets = Array.from(new Set([this.baseUrl, this.adminPanelUrl].filter(Boolean)));
+    const candidateSecrets = [
+      process.env.INTERNAL_API_SECRET,
+      process.env.INTERNAL_COMMUNICATION_SECRET,
+      process.env.CENTRAL_ADMIN_INTERNAL_SECRET,
+      this.secret,
+      'vertex-internal-s2s-secret',
+      'nextrade-internal-hmac-secret-2026',
+    ].filter(Boolean) as string[];
+    const secret = candidateSecrets[0] || 'vertex-internal-s2s-secret';
+
+    const results = await Promise.allSettled(
+      targets.map(async (targetUrl) => {
+        const timestamp = Date.now().toString();
+        const canonical = `${timestamp}.POST.${path}.${bodyStr}`;
+        const signature = crypto.createHmac('sha256', secret).update(canonical).digest('hex');
+        const controller = new AbortController();
+        const timer = setTimeout(() => controller.abort(), 10000);
+        try {
+          const res = await fetch(`${targetUrl}${path}`, {
+            method: 'POST',
+            headers: {
+              'content-type': 'application/json',
+              'x-internal-signature': signature,
+              'x-s2s-signature': signature,
+              'x-signature-sha256': signature,
+              'x-internal-secret': secret,
+              'x-internal-timestamp': timestamp,
+              'x-timestamp': timestamp,
+              'x-tenant-id': outboundTenantId,
+            },
+            body: bodyStr,
+            signal: controller.signal,
+          });
+          const text = await res.text().catch(() => '');
+          if (!res.ok) {
+            console.error(`[TradingPlatformClient syncHierarchyNode] ${targetUrl}${path} returned HTTP ${res.status}: ${text}`);
+            return { target: targetUrl, ok: false, status: res.status, error: text };
+          }
+          console.log(`[TradingPlatformClient syncHierarchyNode] ${targetUrl}${path} returned HTTP 200 OK`);
+          return { target: targetUrl, ok: true, status: res.status };
+        } catch (err: any) {
+          console.error(`[TradingPlatformClient syncHierarchyNode] Error posting to ${targetUrl}${path}:`, err?.message || err);
+          return { target: targetUrl, ok: false, status: 500, error: err?.message || String(err) };
+        } finally {
+          clearTimeout(timer);
+        }
+      })
+    );
+
+    const allOk = results.every(r => r.status === 'fulfilled' && (r as PromiseFulfilledResult<any>).value.ok);
+    return { success: allOk, statusCode: allOk ? 200 : 207 };
   }
 
   public disconnect() {
