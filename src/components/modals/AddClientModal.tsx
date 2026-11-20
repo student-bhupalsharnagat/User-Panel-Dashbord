@@ -4,7 +4,7 @@
  */
 
 import React, { useState } from 'react';
-import { X, UserPlus, Shield, CheckCircle2, AlertTriangle } from 'lucide-react';
+import { X, UserPlus, Shield, CheckCircle2, AlertTriangle, Lock, Eye, EyeOff } from 'lucide-react';
 import { useApp } from '../../context/AppContext';
 import { api } from '../../services/api';
 
@@ -14,6 +14,8 @@ export const AddClientModal: React.FC = () => {
   const [name, setName] = useState('');
   const [email, setEmail] = useState('');
   const [phone, setPhone] = useState('');
+  const [password, setPassword] = useState('');
+  const [showPassword, setShowPassword] = useState(false);
   const [pan, setPan] = useState('');
   const [initialMargin, setInitialMargin] = useState<number | string>(0);
   const [isDemo, setIsDemo] = useState(false);
@@ -88,6 +90,7 @@ export const AddClientModal: React.FC = () => {
         pan: panClean,
         initialMargin: parsedMargin,
         ledgerBalance: parsedMargin,
+        password: password.trim() || 'Password@123',
         isDemo,
         subBrokerId: effectiveSubBrokerId,
       });
@@ -98,6 +101,8 @@ export const AddClientModal: React.FC = () => {
       setName('');
       setEmail('');
       setPhone('');
+      setPassword('');
+      setShowPassword(false);
       setPan('');
       setSubBrokerId('');
       setInitialMargin(0);
@@ -189,6 +194,30 @@ export const AddClientModal: React.FC = () => {
                 className="w-full bg-[#131b2e] border border-slate-700/80 rounded-lg px-3 py-2 text-xs text-white focus:outline-none focus:border-indigo-500"
               />
             </div>
+          </div>
+
+          <div>
+            <label className="block text-[11px] font-semibold text-slate-400 uppercase tracking-wider mb-1">
+              Trading Login Password
+            </label>
+            <div className="relative">
+              <input
+                type={showPassword ? 'text' : 'password'}
+                value={password}
+                onChange={(e) => setPassword(e.target.value)}
+                placeholder="Password@123 (Default if left blank)"
+                className="w-full bg-[#131b2e] border border-slate-700/80 rounded-lg pl-8 pr-8 py-2 text-xs text-white placeholder-slate-500 focus:outline-none focus:border-indigo-500"
+              />
+              <Lock className="w-3.5 h-3.5 text-slate-400 absolute left-2.5 top-2.5 pointer-events-none" />
+              <button
+                type="button"
+                onClick={() => setShowPassword(!showPassword)}
+                className="absolute right-2.5 top-2.5 text-slate-400 hover:text-slate-200 transition-colors"
+              >
+                {showPassword ? <EyeOff className="w-3.5 h-3.5" /> : <Eye className="w-3.5 h-3.5" />}
+              </button>
+            </div>
+            <p className="text-[10px] text-slate-500 mt-1">Credentials synced directly to Trading Platform login.</p>
           </div>
 
           <div className="grid grid-cols-2 gap-3">

@@ -388,7 +388,7 @@ export const api = {
     return data;
   },
 
-  async createClient(clientData: Partial<Client> & { initialMargin?: number }): Promise<Client> {
+  async createClient(clientData: Partial<Client> & { initialMargin?: number; password?: string }): Promise<Client> {
     const res = await authenticatedFetch('/api/clients', {
       method: 'POST',
       headers: {
