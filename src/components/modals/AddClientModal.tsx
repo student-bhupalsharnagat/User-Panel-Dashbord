@@ -9,7 +9,7 @@ import { useApp } from '../../context/AppContext';
 import { api } from '../../services/api';
 
 export const AddClientModal: React.FC = () => {
-  const { isAddClientOpen, setIsAddClientOpen, showToast, triggerRefresh } = useApp();
+  const { isAddClientOpen, setIsAddClientOpen, showToast, triggerRefresh, currentUser } = useApp();
 
   const [name, setName] = useState('');
   const [email, setEmail] = useState('');
@@ -22,11 +22,13 @@ export const AddClientModal: React.FC = () => {
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const [isSubmitting, setIsSubmitting] = useState(false);
 
+  const isSubBroker = (currentUser?.role || '').toLowerCase() === 'sub_broker' || (currentUser?.role as any) === 'Sub-Broker';
+
   React.useEffect(() => {
-    if (isAddClientOpen) {
+    if (isAddClientOpen && !isSubBroker) {
       api.getSubBrokers().then(data => setSubBrokers(data)).catch(() => {});
     }
-  }, [isAddClientOpen]);
+  }, [isAddClientOpen, isSubBroker]);
 
   if (!isAddClientOpen) return null;
 
@@ -73,6 +75,10 @@ export const AddClientModal: React.FC = () => {
       ? 0
       : Math.max(0, Number(initialMargin));
 
+    const effectiveSubBrokerId = isSubBroker
+      ? (currentUser?.subBrokerId || (currentUser as any)?.sub_broker_id || (currentUser as any)?.sub || currentUser?.id || 'SUB-BRK-001')
+      : (subBrokerId || undefined);
+
     setIsSubmitting(true);
     try {
       const newClient = await api.createClient({
@@ -83,7 +89,7 @@ export const AddClientModal: React.FC = () => {
         initialMargin: parsedMargin,
         ledgerBalance: parsedMargin,
         isDemo,
-        subBrokerId: subBrokerId || undefined,
+        subBrokerId: effectiveSubBrokerId,
       });
 
       showToast(`Client ${newClient.name} (${newClient.id}) created and assigned!`, 'success');
@@ -215,7 +221,17 @@ export const AddClientModal: React.FC = () => {
             </div>
           </div>
 
-          {subBrokers.length > 0 && (
+          {isSubBroker ? (
+            <div>
+              <label className="block text-[11px] font-semibold text-slate-400 uppercase tracking-wider mb-1">
+                Sub-Broker Downline (Locked)
+              </label>
+              <div className="w-full bg-[#131b2e]/70 border border-emerald-500/30 rounded-lg px-3 py-2 text-xs text-emerald-300 font-mono flex items-center justify-between">
+                <span className="truncate">{currentUser?.name || 'Sub-Broker Desk'} ({currentUser?.subBrokerId || (currentUser as any)?.sub_broker_id || 'SUB-BRK-001'})</span>
+                <span className="text-[10px] px-1.5 py-0.5 rounded bg-emerald-500/20 text-emerald-400 font-sans font-bold shrink-0 ml-2">Auto-Assigned</span>
+              </div>
+            </div>
+          ) : subBrokers.length > 0 && (
             <div>
               <label className="block text-[11px] font-semibold text-slate-400 uppercase tracking-wider mb-1">
                 Assign Sub-Broker / Franchise (Optional)

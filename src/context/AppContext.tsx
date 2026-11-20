@@ -100,7 +100,8 @@ interface AppContextType {
   closeOrderModal: () => void;
 
   selectedClientForDetail: Client | null;
-  openClientDetail: (client: Client) => void;
+  clientDetailInitialTab?: 'overview' | 'positions' | 'orders' | 'ledger' | 'kyc';
+  openClientDetail: (client: Client, initialTab?: 'overview' | 'positions' | 'orders' | 'ledger' | 'kyc') => void;
   closeClientDetail: () => void;
 
   isAddClientOpen: boolean;
@@ -222,6 +223,7 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
   }>({ isOpen: false });
 
   const [selectedClientForDetail, setSelectedClientForDetail] = useState<Client | null>(null);
+  const [clientDetailInitialTab, setClientDetailInitialTab] = useState<'overview' | 'positions' | 'orders' | 'ledger' | 'kyc'>('overview');
   const [isAddClientOpen, setIsAddClientOpen] = useState<boolean>(false);
 
   const [fundActionModal, setFundActionModal] = useState<{
@@ -1020,12 +1022,14 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
     setOrderModalState({ isOpen: false });
   }, []);
 
-  const openClientDetail = useCallback((client: Client) => {
+  const openClientDetail = useCallback((client: Client, initialTab?: 'overview' | 'positions' | 'orders' | 'ledger' | 'kyc') => {
     setSelectedClientForDetail(client);
+    setClientDetailInitialTab(initialTab || 'overview');
   }, []);
 
   const closeClientDetail = useCallback(() => {
     setSelectedClientForDetail(null);
+    setClientDetailInitialTab('overview');
   }, []);
 
   const openFundActionModal = useCallback((transaction: FundTransaction, actionType: 'approve' | 'reject') => {
@@ -1096,6 +1100,7 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
     openOrderModal,
     closeOrderModal,
     selectedClientForDetail,
+    clientDetailInitialTab,
     openClientDetail,
     closeClientDetail,
     isAddClientOpen,
@@ -1143,6 +1148,7 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
     openOrderModal,
     closeOrderModal,
     selectedClientForDetail,
+    clientDetailInitialTab,
     openClientDetail,
     closeClientDetail,
     isAddClientOpen,

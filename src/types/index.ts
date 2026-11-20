@@ -129,6 +129,8 @@ export interface Client {
   marginUsed: number;
   income: number;
   marginAvailable: number;
+  holding?: number;
+  reqHolding?: number;
   brokerId: string;
   brokerName: string;
   kycStatus: 'Verified' | 'Pending' | 'Rejected';

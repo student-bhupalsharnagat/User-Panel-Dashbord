@@ -109,3 +109,15 @@ export function getAllLivePrices(): Record<string, number> {
   return { ...AUTHORITATIVE_INSTRUMENT_PRICES };
 }
 
+export function formatIndianPhone(phone?: string): string {
+  if (!phone) return '—';
+  const digitsOnly = phone.replace(/\D/g, '');
+  const clean = digitsOnly.length === 12 && digitsOnly.startsWith('91')
+    ? digitsOnly.slice(2)
+    : (digitsOnly.length === 11 && digitsOnly.startsWith('0') ? digitsOnly.slice(1) : digitsOnly);
+  if (clean.length === 10) {
+    return `+91 ${clean.slice(0, 5)} ${clean.slice(5)}`;
+  }
+  return phone.startsWith('+91') ? phone : `+91 ${phone}`;
+}
+

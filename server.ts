@@ -2024,7 +2024,7 @@ let sseClients: SSEClient[] = [];
 let userWsClients: Set<UserWsClient> = new Set();
 let eventSequenceCounter = 1000;
 
-function broadcastScopedEvent(eventType: string, data: any, scope?: { brokerId?: string; tenantId?: string; clientId?: string }) {
+function broadcastScopedEvent(eventType: string, data: any, scope?: { brokerId?: string; tenantId?: string; clientId?: string; subBrokerId?: string }) {
   const eventId = `EVT-${++eventSequenceCounter}`;
   const timestamp = new Date().toISOString();
   const payload = `id: ${eventId}\nevent: ${eventType}\ndata: ${JSON.stringify({ ...data, eventId, timestamp })}\n\n`;
@@ -3945,7 +3945,7 @@ app.get('/api/clients/:id', authMiddleware, (req: AuthenticatedRequest, res: Res
   });
 });
 
-app.post('/api/clients', authMiddleware, requireRole(['broker_admin', 'super_admin', 'master', 'master_admin']), (req: AuthenticatedRequest, res: Response) => {
+app.post('/api/clients', authMiddleware, requireRole(['broker_admin', 'super_admin', 'master', 'master_admin', 'sub_broker']), (req: AuthenticatedRequest, res: Response) => {
   if (checkIdempotency(req, res)) return;
 
   const user = req.user!;
@@ -3987,7 +3987,15 @@ app.post('/api/clients', authMiddleware, requireRole(['broker_admin', 'super_adm
     assignedBrokerId = user.brokerId;
     assignedSubBrokerId = req.body.subBrokerId || user.subBrokerId || null;
     assignedMasterId = user.masterId || null;
+  } else if (user.role === 'sub_broker') {
+    assignedSubBrokerId = user.subBrokerId || (user as any).sub_broker_id || user.sub || (user as any).id || 'SUB-BRK-001';
+    assignedBrokerId = user.brokerId || (user as any).broker_id || 'BRK-ROHAN-01';
+    assignedMasterId = user.masterId || (user as any).master_id || 'MST-ALPHA-01';
   }
+
+  const assignedBrokerName = user.role === 'sub_broker'
+    ? (user.name ? `${user.name} (Sub-Broker)` : 'Sub-Broker Desk')
+    : (user.name || 'Rohan Sen');
 
   const newClient: Client = {
     id: newId,
@@ -4005,8 +4013,10 @@ app.post('/api/clients', authMiddleware, requireRole(['broker_admin', 'super_adm
     marginUsed: 0,
     income: 0,
     marginAvailable: margin,
+    holding: 0,
+    reqHolding: 0,
     brokerId: assignedBrokerId,
-    brokerName: user.name || 'Rohan Sen',
+    brokerName: assignedBrokerName,
     tenantId: user.tenantId || DEFAULT_TENANT_ID,
     subBrokerId: assignedSubBrokerId || undefined,
     masterId: assignedMasterId || undefined,
@@ -4067,6 +4077,26 @@ app.post('/api/clients', authMiddleware, requireRole(['broker_admin', 'super_adm
     },
   }).catch((e: any) => console.warn('[AddClient S2S] Upstream sync notice:', e.message));
 
+  // Authoritative S2S sync to Central Admin (Admin-Dashbord)
+  dispatchS2SHierarchySync({
+    action: 'CLIENT_CREATED',
+    nodeType: 'CLIENT',
+    role: 'CLIENT',
+    id: newClient.id,
+    userId: newClient.id,
+    name: newClient.name,
+    email: newClient.email,
+    phone: newClient.phone,
+    pan: newClient.pan,
+    tenantId: newClient.tenantId,
+    brokerId: assignedBrokerId,
+    subBrokerId: assignedSubBrokerId || undefined,
+    masterId: assignedMasterId || undefined,
+    initialBalance: margin,
+    ledgerBalance: margin,
+    isDemo: newClient.isDemo,
+  }).catch((e: any) => console.warn('[AddClient S2S] Admin-Dashbord sync notice:', e.message));
+
   pushAudit({
     id: `LOG-${Date.now().toString().slice(-4)}`,
     timestamp: new Date().toLocaleTimeString('en-GB') + ', Today',
@@ -4079,8 +4109,8 @@ app.post('/api/clients', authMiddleware, requireRole(['broker_admin', 'super_adm
     details: `Onboarded client ${name} with initial ledger balance ₹${margin.toLocaleString('en-IN')}`,
   });
 
-  broadcastScopedEvent('client_created', newClient, { brokerId: newClient.brokerId, tenantId: newClient.tenantId });
-  broadcastScopedEvent('client.registered', newClient, { brokerId: newClient.brokerId, tenantId: newClient.tenantId });
+  broadcastScopedEvent('client_created', newClient, { brokerId: newClient.brokerId, subBrokerId: newClient.subBrokerId, tenantId: newClient.tenantId });
+  broadcastScopedEvent('client.registered', newClient, { brokerId: newClient.brokerId, subBrokerId: newClient.subBrokerId, tenantId: newClient.tenantId });
   recordIdempotency(req, 200, { success: true, client: newClient });
   res.json({ success: true, client: newClient });
 });

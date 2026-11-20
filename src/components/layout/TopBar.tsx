@@ -45,6 +45,40 @@ export const TopBar: React.FC = () => {
   const currentRoleStr = String(currentUser?.role || '');
   const isSuperAdmin = currentRoleStr === 'super_admin' || currentRoleStr === 'Super Admin' || currentRoleStr.toLowerCase() === 'super_admin';
 
+  const getPartnerBadge = () => {
+    const role = (currentUser?.role || '').toLowerCase();
+    if (role === 'sub_broker' || (role as any) === 'sub-broker') {
+      return {
+        label: 'SUB_BROKER',
+        className: 'bg-emerald-500/20 text-emerald-400 border-emerald-500/40',
+      };
+    }
+    if (role === 'broker_admin' || role === 'broker') {
+      return {
+        label: 'BROKER',
+        className: 'bg-indigo-500/20 text-indigo-300 border-indigo-500/40',
+      };
+    }
+    if (role === 'master' || role === 'master_admin') {
+      return {
+        label: 'MASTER',
+        className: 'bg-amber-500/20 text-amber-400 border-amber-500/40',
+      };
+    }
+    if (role === 'super_admin') {
+      return {
+        label: 'MASTER',
+        className: 'bg-purple-500/20 text-purple-300 border-purple-500/40',
+      };
+    }
+    return null;
+  };
+
+  const partnerBadge = getPartnerBadge();
+  const partnerDisplayName = currentUser?.role === 'broker_admin'
+    ? (settings?.displayName || currentUser?.name || 'Rohan Sen')
+    : (currentUser?.name || 'Partner');
+
   useEffect(() => {
     const handleClickOutside = (e: MouseEvent) => {
       if (profileRef.current && !profileRef.current.contains(e.target as Node)) {
@@ -188,15 +222,20 @@ export const TopBar: React.FC = () => {
         <div className="relative shrink-0" ref={profileRef}>
           <button
             onClick={() => setIsProfileOpen(!isProfileOpen)}
-            className="flex items-center gap-2 p-1 sm:pl-2.5 rounded-lg bg-[#131b2e] border border-[#1e2a42] hover:border-slate-700 transition-colors cursor-pointer"
+            className="flex items-center gap-2 p-1 sm:pl-2.5 sm:pr-2 rounded-lg bg-[#131b2e] border border-[#1e2a42] hover:border-slate-700 transition-colors cursor-pointer"
             aria-label="User profile and role menu"
           >
+            {partnerBadge && (
+              <span className={`px-2 py-0.5 rounded text-[10px] font-mono font-bold tracking-wider border ${partnerBadge.className}`}>
+                {partnerBadge.label}
+              </span>
+            )}
             <div className="text-right hidden sm:block">
               <div className="text-xs font-semibold text-slate-200 leading-tight">
-                {currentUser?.role === 'broker_admin' ? (settings?.displayName || currentUser?.name || 'Rohan Sen') : (currentUser?.name || 'User')}
+                {partnerDisplayName}
               </div>
               <div className="text-[10px] text-slate-400 leading-tight">
-                {currentUser?.roleTitle || 'Broker Admin'}
+                {currentUser?.roleTitle || (partnerBadge ? partnerBadge.label : 'User')}
               </div>
             </div>
             <div className="w-7 h-7 sm:w-8 sm:h-8 rounded-md bg-indigo-600/30 border border-indigo-500/40 text-indigo-300 font-bold flex items-center justify-center text-xs shrink-0 overflow-hidden">
@@ -213,8 +252,15 @@ export const TopBar: React.FC = () => {
           {isProfileOpen && (
             <div className="absolute right-0 mt-2 w-64 max-w-[calc(100vw-24px)] rounded-xl bg-[#131b2e] border border-[#1e2a42] shadow-2xl shadow-black/80 py-2 z-50 animate-in fade-in zoom-in-95 duration-100">
               <div className="px-4 py-2.5 border-b border-slate-800">
-                <div className="text-xs font-semibold text-white">
-                  {currentUser?.role === 'broker_admin' ? (settings?.displayName || currentUser?.name || 'Rohan Sen') : (currentUser?.name || 'User')}
+                <div className="flex items-center justify-between gap-2">
+                  <div className="text-xs font-semibold text-white truncate">
+                    {partnerDisplayName}
+                  </div>
+                  {partnerBadge && (
+                    <span className={`px-1.5 py-0.5 rounded text-[9px] font-mono font-bold tracking-wider border shrink-0 ${partnerBadge.className}`}>
+                      {partnerBadge.label}
+                    </span>
+                  )}
                 </div>
                 <div className="text-[11px] text-slate-400 truncate">{currentUser?.email}</div>
                 <div className="mt-1 flex items-center gap-1.5">

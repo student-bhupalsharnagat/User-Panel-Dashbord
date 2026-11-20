@@ -25,6 +25,7 @@ import { useApp } from '../../context/AppContext';
 import { api } from '../../services/api';
 import { Client } from '../../types';
 import { matchesDateFilter } from '../../utils/dateUtils';
+import { formatINR, formatIndianPhone } from '../../utils/cleanNumber';
 
 export const ClientsView: React.FC = () => {
   const {
@@ -127,20 +128,45 @@ export const ClientsView: React.FC = () => {
 
   const handleExportCSV = () => {
     if (clients.length === 0) return;
-    const headers = ['Client ID', 'Name', 'Email', 'Phone', 'PAN', 'Status', 'Demo', 'Ledger Balance', 'Open PnL', 'Margin Used', 'Margin Available'];
-    const rows = clients.map(c => [
-      c.id,
-      `"${c.name}"`,
-      c.email,
-      c.phone,
-      c.pan,
-      c.status,
-      c.isDemo ? 'Yes' : 'No',
-      c.ledgerBalance,
-      c.openPnL,
-      c.marginUsed,
-      c.marginAvailable,
-    ]);
+    const headers = [
+      'User ID',
+      'Name',
+      'Phone',
+      'Email',
+      'PAN',
+      'Status',
+      'Demo',
+      'Ledger Bal',
+      'Open PnL',
+      'M2M Ledger',
+      'Margin Used',
+      'Holding',
+      'Req Holding',
+      'Margin Avail',
+    ];
+    const rows = clients.map((c) => {
+      const openPnL = c.openPnL ?? 0;
+      const m2mLedger = (c.ledgerBalance || 0) + openPnL;
+      const holding = (c as any).holding ?? (c as any).holdings ?? 0;
+      const reqHolding = (c as any).reqHolding ?? (c as any).requiredHolding ?? 0;
+      const marginAvail = c.marginAvailable !== undefined ? c.marginAvailable : (m2mLedger - (c.marginUsed || 0));
+      return [
+        c.id,
+        `"${c.name}"`,
+        `"${formatIndianPhone(c.phone)}"`,
+        c.email,
+        c.pan,
+        c.status,
+        c.isDemo ? 'Yes' : 'No',
+        c.ledgerBalance,
+        openPnL,
+        m2mLedger,
+        c.marginUsed || 0,
+        holding,
+        reqHolding,
+        marginAvail,
+      ];
+    });
     const csvContent = 'data:text/csv;charset=utf-8,' + [headers.join(','), ...rows.map(r => r.join(','))].join('\n');
     const encodedUri = encodeURI(csvContent);
     const link = document.createElement('a');
@@ -192,7 +218,7 @@ export const ClientsView: React.FC = () => {
             <FileText className="w-3.5 h-3.5 text-slate-400" />
             <span>Export PDF</span>
           </button>
-          {currentUser?.role !== 'sub_broker' && (currentUser?.role as any) !== 'Sub-Broker' && currentUser?.role !== 'trader_client' && currentUser?.role !== 'operations' && (currentUser?.role as any) !== 'Staff / Ops' && (
+          {['broker_admin', 'sub_broker', 'master', 'master_admin', 'super_admin'].includes((currentUser?.role || '').toLowerCase()) && (
             <button
               onClick={() => setIsAddClientOpen(true)}
               className="px-3.5 py-1.5 sm:py-2 rounded-lg bg-indigo-600 hover:bg-indigo-500 text-xs font-bold text-white transition-colors flex items-center gap-2 cursor-pointer shadow-md shadow-indigo-900/30"
@@ -339,25 +365,26 @@ export const ClientsView: React.FC = () => {
 
         {/* Clients Table */}
         <div className="overflow-x-auto rounded-xl border border-slate-800">
-          <table className="w-full min-w-[800px] text-xs text-left">
+          <table className="w-full min-w-[1000px] text-xs text-left">
             <thead className="bg-[#141d30] text-slate-400 uppercase font-bold text-[10px] tracking-wider border-b border-slate-800">
               <tr>
-                <th className={`${headPad} text-center`}>View / Actions</th>
-                <th className={headPad}>Client ID</th>
-                <th className={headPad}>Client Name</th>
+                <th className={`${headPad} text-center`}>View</th>
+                <th className={headPad}>User ID</th>
+                <th className={headPad}>Name</th>
                 <th className={`${headPad} text-center`}>Status</th>
-                <th className={`${headPad} text-right`}>Ledger Balance</th>
-                <th className={`${headPad} text-right`}>Open P&L</th>
-                <th className={`${headPad} text-right`}>Peak Ledger</th>
+                <th className={`${headPad} text-right`}>Ledger Bal</th>
+                <th className={`${headPad} text-right`}>Open PnL</th>
+                <th className={`${headPad} text-right`}>M2M Ledger</th>
                 <th className={`${headPad} text-right`}>Margin Used</th>
-                <th className={`${headPad} text-right`}>Income</th>
-                <th className={`${headPad} text-right`}>Margin Available</th>
+                <th className={`${headPad} text-right`}>Holding</th>
+                <th className={`${headPad} text-right`}>Req Holding</th>
+                <th className={`${headPad} text-right`}>Margin Avail</th>
               </tr>
             </thead>
             <tbody className="divide-y divide-slate-800/80 bg-slate-900/60 font-mono">
               {loading ? (
                 <tr>
-                  <td colSpan={10} className="px-4 py-12 text-center text-slate-400 font-sans">
+                  <td colSpan={11} className="px-4 py-12 text-center text-slate-400 font-sans">
                     <div className="flex flex-col items-center justify-center gap-2">
                       <div className="w-5 h-5 border-2 border-indigo-500 border-t-transparent rounded-full animate-spin" />
                       <span className="text-xs text-slate-400">Loading client directory...</span>
@@ -366,7 +393,7 @@ export const ClientsView: React.FC = () => {
                 </tr>
               ) : paginatedClients.length === 0 ? (
                 <tr>
-                  <td colSpan={10} className="px-4 py-12 text-center text-slate-400 font-sans">
+                  <td colSpan={11} className="px-4 py-12 text-center text-slate-400 font-sans">
                     <div className="flex flex-col items-center justify-center gap-2">
                       <Users className="w-8 h-8 text-slate-600 stroke-[1.5]" />
                       <span className="text-xs font-medium text-slate-300">No clients found</span>
@@ -375,36 +402,68 @@ export const ClientsView: React.FC = () => {
                   </td>
                 </tr>
               ) : paginatedClients.map((client) => {
-                const isPositivePnL = client.openPnL >= 0;
+                const openPnL = client.openPnL ?? 0;
+                const isPositivePnL = openPnL >= 0;
+                const m2mLedger = (client.ledgerBalance || 0) + openPnL;
+                const marginUsed = client.marginUsed || 0;
+                const holding = (client as any).holding ?? (client as any).holdings ?? 0;
+                const reqHolding = (client as any).reqHolding ?? (client as any).requiredHolding ?? 0;
+                const marginAvail = client.marginAvailable !== undefined
+                  ? client.marginAvailable
+                  : (m2mLedger - marginUsed);
+                const isMarginShort = marginAvail < 0;
+
                 return (
                   <tr
                     key={client.id}
                     className="hover:bg-slate-800/60 transition-colors group cursor-pointer"
-                    onClick={() => openClientDetail(client)}
+                    onClick={() => openClientDetail(client, 'overview')}
                   >
                     <td className={`${cellPad} text-center`} onClick={(e) => e.stopPropagation()}>
-                      <button
-                        onClick={() => openClientDetail(client)}
-                        className="p-1.5 rounded-lg bg-slate-800 hover:bg-indigo-600 text-slate-400 hover:text-white transition-colors"
-                        title="View Full Client Profile & Ledger"
-                      >
-                        <Eye className="w-3.5 h-3.5" />
-                      </button>
-                    </td>
-
-                    <td className={`${cellPad} font-sans`}>
-                      <div className="flex items-center gap-1.5">
-                        <span className="font-bold text-white text-xs">{client.id}</span>
-                        <span className={`text-[9px] px-1 py-0.2 rounded font-semibold ${
-                          client.isDemo ? 'bg-amber-500/20 text-amber-400' : 'bg-emerald-500/20 text-emerald-400'
-                        }`}>
-                          {client.isDemo ? 'Demo' : 'Live'}
-                        </span>
+                      <div className="flex items-center justify-center gap-1">
+                        <button
+                          onClick={() => openClientDetail(client, 'overview')}
+                          className="p-1 rounded-md bg-slate-800 hover:bg-indigo-600 text-slate-400 hover:text-white transition-colors cursor-pointer"
+                          title="Inspect Client Profile"
+                        >
+                          <Eye className="w-3.5 h-3.5" />
+                        </button>
+                        <button
+                          onClick={() => openClientDetail(client, 'positions')}
+                          className="w-5 h-5 rounded bg-indigo-500/15 border border-indigo-500/30 hover:bg-indigo-600 hover:text-white text-indigo-400 font-bold text-[10px] flex items-center justify-center transition-colors cursor-pointer"
+                          title="Open Positions Tab"
+                        >
+                          P
+                        </button>
+                        <button
+                          onClick={() => openClientDetail(client, 'ledger')}
+                          className="w-5 h-5 rounded bg-amber-500/15 border border-amber-500/30 hover:bg-amber-600 hover:text-white text-amber-400 font-bold text-[10px] flex items-center justify-center transition-colors cursor-pointer"
+                          title="Open Ledger Tab"
+                        >
+                          L
+                        </button>
                       </div>
                     </td>
 
-                    <td className={`${cellPad} font-sans text-xs font-semibold text-slate-200`}>
-                      {client.name}
+                    <td className={`${cellPad} font-sans`}>
+                      <div className="flex items-center gap-1.5 flex-wrap">
+                        <span className="font-bold text-white text-xs font-mono">{client.id}</span>
+                        <span className="text-[9px] px-1 py-0.2 rounded font-bold uppercase tracking-wider bg-slate-800 border border-slate-700 text-slate-300">
+                          CLIENT
+                        </span>
+                        {client.isDemo && (
+                          <span className="text-[9px] px-1 py-0.2 rounded font-semibold bg-amber-500/20 text-amber-400 border border-amber-500/30">
+                            Demo
+                          </span>
+                        )}
+                      </div>
+                    </td>
+
+                    <td className={`${cellPad} font-sans`}>
+                      <div className="flex flex-col min-w-0">
+                        <span className="font-semibold text-slate-200 text-xs truncate">{client.name}</span>
+                        <span className="font-mono text-[11px] text-slate-400 truncate">{formatIndianPhone(client.phone)}</span>
+                      </div>
                     </td>
 
                     <td className={`${cellPad} text-center font-sans`}>
@@ -418,27 +477,39 @@ export const ClientsView: React.FC = () => {
                     </td>
 
                     <td className={`${cellPad} text-right font-bold text-white text-xs`}>
-                      ₹{client.ledgerBalance.toLocaleString('en-IN')}
+                      ₹{formatINR(client.ledgerBalance)}
                     </td>
 
-                    <td className={`${cellPad} text-right font-medium ${isPositivePnL ? 'text-emerald-400' : 'text-rose-400'}`}>
-                      {isPositivePnL ? '+' : ''}₹{client.openPnL.toLocaleString('en-IN')}
+                    <td className={`${cellPad} text-right font-medium text-xs ${isPositivePnL ? 'text-emerald-400' : 'text-rose-400'}`}>
+                      {isPositivePnL ? '+' : ''}₹{formatINR(openPnL)}
                     </td>
 
-                    <td className={`${cellPad} text-right text-slate-400`}>
-                      ₹{client.peakLedger.toLocaleString('en-IN')}
+                    <td className={`${cellPad} text-right font-bold text-slate-100 text-xs`}>
+                      ₹{formatINR(m2mLedger)}
                     </td>
 
-                    <td className={`${cellPad} text-right text-slate-300`}>
-                      ₹{client.marginUsed.toLocaleString('en-IN')}
+                    <td className={`${cellPad} text-right text-slate-300 text-xs`}>
+                      ₹{formatINR(marginUsed)}
                     </td>
 
-                    <td className={`${cellPad} text-right text-slate-400`}>
-                      ₹{client.income.toLocaleString('en-IN')}
+                    <td className={`${cellPad} text-right text-slate-400 text-xs`}>
+                      ₹{formatINR(holding)}
                     </td>
 
-                    <td className={`${cellPad} text-right font-bold text-emerald-400`}>
-                      ₹{client.marginAvailable.toLocaleString('en-IN')}
+                    <td className={`${cellPad} text-right text-slate-400 text-xs`}>
+                      ₹{formatINR(reqHolding)}
+                    </td>
+
+                    <td className={`${cellPad} text-right font-bold text-xs`}>
+                      {isMarginShort ? (
+                        <span className="text-rose-400 font-bold bg-rose-500/15 border border-rose-500/40 px-1.5 py-0.5 rounded text-[11px] whitespace-nowrap">
+                          Short -₹{formatINR(Math.abs(marginAvail))}
+                        </span>
+                      ) : (
+                        <span className="text-emerald-400 font-bold">
+                          ₹{formatINR(marginAvail)}
+                        </span>
+                      )}
                     </td>
                   </tr>
                 );
@@ -450,7 +521,7 @@ export const ClientsView: React.FC = () => {
         {/* Footer & Pagination */}
         <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 text-xs text-slate-400 pt-2">
           <div className="text-[11px]">
-            Showing {paginatedClients.length} of {filteredClients.length} clients
+            Showing {filteredClients.length === 0 ? 0 : (page - 1) * pageSize + 1} to {Math.min(page * pageSize, filteredClients.length)} of {filteredClients.length} clients
           </div>
 
           <div className="flex items-center gap-3">

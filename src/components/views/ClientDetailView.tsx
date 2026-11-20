@@ -24,6 +24,7 @@ import { Client, Order, Position, LedgerEntry } from '../../types';
 export const ClientDetailView: React.FC = () => {
   const {
     selectedClientForDetail,
+    clientDetailInitialTab,
     closeClientDetail,
     openOrderModal,
     openSquareOffModal,
@@ -35,7 +36,13 @@ export const ClientDetailView: React.FC = () => {
   const [clientOrders, setClientOrders] = useState<Order[]>([]);
   const [clientPositions, setClientPositions] = useState<Position[]>([]);
   const [clientLedger, setClientLedger] = useState<LedgerEntry[]>([]);
-  const [activeTab, setActiveTab] = useState<'overview' | 'positions' | 'orders' | 'ledger' | 'kyc'>('overview');
+  const [activeTab, setActiveTab] = useState<'overview' | 'positions' | 'orders' | 'ledger' | 'kyc'>(clientDetailInitialTab || 'overview');
+
+  useEffect(() => {
+    if (clientDetailInitialTab) {
+      setActiveTab(clientDetailInitialTab);
+    }
+  }, [clientDetailInitialTab, selectedClientForDetail?.id]);
 
   useEffect(() => {
     if (selectedClientForDetail) {
