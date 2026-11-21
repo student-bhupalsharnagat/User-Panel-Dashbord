@@ -200,6 +200,8 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
   const [marketWatchLtpMap, setMarketWatchLtpMap] = useState<Record<string, number>>({});
   const [livePositionsMtm, setLivePositionsMtm] = useState<Record<string, { ltp: number; unrealisedPnL: number; totalPnL: number }>>({});
   const [liveClientsMtm, setLiveClientsMtm] = useState<Record<string, { openPnL: number; marginAvailable: number; marginUsed: number }>>({});
+  const lastSyncTimestampRef = useRef<number>(Date.now());
+  const isWsConnectedRef = useRef<boolean>(false);
 
   const [isSearchOpen, setIsSearchOpen] = useState<boolean>(false);
   const [globalSearchQuery, setGlobalSearchQuery] = useState<string>('');
@@ -827,7 +829,9 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
         });
 
         eventSource.onerror = () => {
-          setIsRealtimeConnected(false);
+          if (!isWsConnectedRef.current && Date.now() - lastSyncTimestampRef.current > 10000) {
+            setIsRealtimeConnected(false);
+          }
           if (eventSource) {
             eventSource.close();
             eventSource = null;
@@ -840,7 +844,9 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
           }
         };
       } catch {
-        setIsRealtimeConnected(false);
+        if (!isWsConnectedRef.current && Date.now() - lastSyncTimestampRef.current > 10000) {
+          setIsRealtimeConnected(false);
+        }
         if (!isDisposed) {
           clearTimeout(reconnectTimer);
           const delay = Math.min(1000 * Math.pow(1.5, reconnectAttempts) + Math.random() * 400, 10000);
@@ -878,16 +884,25 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
         ws = new WebSocket(wsUrl);
 
         ws.onopen = () => {
+          isWsConnectedRef.current = true;
+          lastSyncTimestampRef.current = Date.now();
+          setIsRealtimeConnected(true);
           if (wsReconnectAttempts > 0) {
             triggerRefresh(false);
           }
           wsReconnectAttempts = 0;
-          setIsRealtimeConnected(true);
         };
 
         ws.onmessage = (event) => {
+          isWsConnectedRef.current = true;
+          lastSyncTimestampRef.current = Date.now();
+          setIsRealtimeConnected(true);
           try {
             const msg = JSON.parse(event.data);
+            if (msg.type === 'heartbeat') {
+              try { ws?.send(JSON.stringify({ type: 'pong' })); } catch {}
+              return;
+            }
             const evtType = msg.eventType || msg.type || msg.event || '';
             if (
               evtType === 'tick' ||
@@ -962,6 +977,10 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
         };
 
         ws.onclose = () => {
+          isWsConnectedRef.current = false;
+          if (Date.now() - lastSyncTimestampRef.current > 10000) {
+            setIsRealtimeConnected(false);
+          }
           if (ws) {
             try { ws.close(); } catch {}
             ws = null;
@@ -998,12 +1017,25 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
     };
   }, [showToast, triggerRefresh, currentUser, queueTickUpdates]);
 
-  // High-frequency silent background polling:
+  // High-frequency silent background polling with live connectivity health check:
   // Set to 2500ms (2.5 seconds) so active positions, orders, funds, and ledger reflect immediately
   useEffect(() => {
     const pollInterval = 2500;
-    const poll = setInterval(() => {
+    const poll = setInterval(async () => {
       triggerRefresh(false);
+      try {
+        const res = await fetch(`${API_BASE}/api/health`, { method: 'GET' });
+        if (res.ok) {
+          lastSyncTimestampRef.current = Date.now();
+          setIsRealtimeConnected(true);
+        } else if (!isWsConnectedRef.current && Date.now() - lastSyncTimestampRef.current > 10000) {
+          setIsRealtimeConnected(false);
+        }
+      } catch {
+        if (!isWsConnectedRef.current && Date.now() - lastSyncTimestampRef.current > 10000) {
+          setIsRealtimeConnected(false);
+        }
+      }
     }, pollInterval);
     return () => clearInterval(poll);
   }, [triggerRefresh]);

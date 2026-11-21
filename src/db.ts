@@ -84,6 +84,12 @@ export const DUMMY_PATTERNS = [
   'meera nair',
   'vivaan shah',
   'rohan gupta',
+  'demo-user-uuid-0000-000000000001',
+  'pos-bn-01',
+  'pos-rel-02',
+  'pos-itc-03',
+  'ftx-958310421',
+  'led-init-01',
   'nt10482',
   'nt10387',
   'dm20791',
@@ -106,7 +112,6 @@ export function isDummyString(val?: any): boolean {
     if (pat === 'aarav mehta' && ['arrav', 'aarav', 'aarav mehta'].includes(str)) continue;
     if (str.includes(pat)) return true;
   }
-  if (str === 'ord-98421' || str === 'ord-98416') return false;
   if (/^ord-984/i.test(str)) return true;
   if (/^pos-77/i.test(str)) return true;
   if (/^txn-804/i.test(str)) return true;

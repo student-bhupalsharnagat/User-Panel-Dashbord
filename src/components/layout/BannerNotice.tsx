@@ -10,7 +10,7 @@ import { useApp } from '../../context/AppContext';
 export const BannerNotice: React.FC = () => {
   const [isDismissed, setIsDismissed] = useState(false);
   const [showLearnMore, setShowLearnMore] = useState(false);
-  const { isLiveMode, isRealtimeConnected } = useApp();
+  const { isLiveMode, isRealtimeConnected, currentUser } = useApp();
   const [hasConnectedOnce, setHasConnectedOnce] = useState(false);
 
   React.useEffect(() => {
@@ -20,8 +20,11 @@ export const BannerNotice: React.FC = () => {
   }, [isRealtimeConnected]);
 
   const showReconnectBanner = hasConnectedOnce && !isRealtimeConnected;
+  const userRole = (currentUser?.role || '').toLowerCase();
+  const isPartner = ['master', 'master_admin', 'broker', 'broker_admin', 'sub_broker', 'super_admin'].includes(userRole);
+  const showDemoBanner = !isDismissed && !isPartner;
 
-  if (isDismissed && !showReconnectBanner) return null;
+  if (!showDemoBanner && !showReconnectBanner) return null;
 
   return (
     <>
@@ -41,7 +44,7 @@ export const BannerNotice: React.FC = () => {
         </div>
       )}
 
-      {!isDismissed && (
+      {showDemoBanner && (
         <div className="bg-[#0e1627] border-b border-[#1c2840] px-3 sm:px-6 py-1.5 sm:py-2 flex items-center justify-between text-[11px] sm:text-xs text-slate-300 gap-2">
           <div className="flex items-center gap-1.5 sm:gap-2 truncate min-w-0">
             <span className="font-semibold text-slate-200 shrink-0">Demo workspace</span>

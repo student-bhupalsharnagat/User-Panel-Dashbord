@@ -1052,152 +1052,7 @@ const DATA_DIR = path.join(__dirname, 'data');
 const PERSISTENCE_FILE = path.join(DATA_DIR, 'persistence-store.json');
 
 function seedDefaultNotificationOrders() {
-  if (!orders.some(o => o.id === 'ORD-98421')) {
-    orders.unshift({
-      id: 'ORD-98421',
-      clientId: 'CLI-AARAV-01',
-      clientName: 'Aarav Mehta',
-      instrument: 'RELIANCE',
-      exchange: 'NSE',
-      side: 'BUY',
-      type: 'LIMIT',
-      quantity: 120,
-      orderPrice: 2981.90,
-      executedQty: 120,
-      avgPrice: 2981.90,
-      status: 'Executed',
-      created: new Date().toLocaleTimeString('en-GB') + ', Today',
-      brokerId: 'BRK-ROHAN-01',
-      subBrokerId: 'SUB-BRK-001',
-      masterId: 'MST-ALPHA-01',
-      tenantId: DEFAULT_TENANT_ID,
-    });
-  }
-  if (!orders.some(o => o.id === 'ORD-98416')) {
-    orders.unshift({
-      id: 'ORD-98416',
-      clientId: 'CLI-KABIR-01',
-      clientName: 'Kabir Rao',
-      instrument: 'BANKNIFTY',
-      exchange: 'NFO',
-      side: 'BUY',
-      type: 'MARKET',
-      quantity: 15,
-      orderPrice: 48920.00,
-      executedQty: 0,
-      avgPrice: 0,
-      status: 'Rejected',
-      created: new Date().toLocaleTimeString('en-GB') + ', Today',
-      brokerId: 'BRK-ROHAN-01',
-      subBrokerId: 'SUB-BRK-001',
-      masterId: 'MST-ALPHA-01',
-      tenantId: DEFAULT_TENANT_ID,
-    });
-  }
-  if (!fundTransactions.some(f => f.referenceId === 'UTR958310421' || f.id === 'FTX-958310421')) {
-    fundTransactions.unshift({
-      id: 'FTX-958310421',
-      clientId: 'CLI-AARAV-01',
-      clientName: 'Aarav Mehta',
-      type: 'Deposit',
-      amount: 250000,
-      method: 'Bank transfer',
-      requestDate: new Date().toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' }),
-      referenceId: 'UTR958310421',
-      status: 'Pending',
-      verification: 'Manual verification required',
-      proofDocument: 'bank_slip_958310421.pdf',
-      brokerId: 'BRK-ROHAN-01',
-      subBrokerId: 'SUB-BRK-001',
-      masterId: 'MST-ALPHA-01',
-      tenantId: DEFAULT_TENANT_ID,
-    });
-  }
-  if (!positions.some(p => p.instrument === 'BANKNIFTY')) {
-    positions.unshift({
-      id: 'POS-BN-01',
-      clientId: 'demo-user-uuid-0000-000000000001',
-      clientName: 'NexTrade Broker Client',
-      instrument: 'BANKNIFTY',
-      exchange: 'NFO',
-      product: 'NRML',
-      netQty: 30,
-      buyQty: 30,
-      sellQty: 0,
-      avgPrice: 48500.00,
-      currentPrice: 48940.00,
-      unrealisedPnL: 13200.00,
-      realisedPnL: 0,
-      totalPnL: 13200.00,
-      marginUsed: 145000,
-      brokerId: 'BRK-ROHAN-01',
-      subBrokerId: 'SUB-BRK-001',
-      masterId: 'MST-ALPHA-01',
-      tenantId: DEFAULT_TENANT_ID,
-    });
-  }
-  if (!positions.some(p => p.instrument === 'RELIANCE')) {
-    positions.unshift({
-      id: 'POS-REL-02',
-      clientId: 'demo-user-uuid-0000-000000000001',
-      clientName: 'NexTrade Broker Client',
-      instrument: 'RELIANCE',
-      exchange: 'NSE',
-      product: 'MIS',
-      netQty: 100,
-      buyQty: 100,
-      sellQty: 0,
-      avgPrice: 2940.00,
-      currentPrice: 2958.50,
-      unrealisedPnL: 1850.00,
-      realisedPnL: 1200.00,
-      totalPnL: 3050.00,
-      marginUsed: 58800,
-      brokerId: 'BRK-ROHAN-01',
-      subBrokerId: 'SUB-BRK-001',
-      masterId: 'MST-ALPHA-01',
-      tenantId: DEFAULT_TENANT_ID,
-    });
-  }
-  if (!positions.some(p => p.instrument === 'ITC')) {
-    positions.unshift({
-      id: 'POS-ITC-03',
-      clientId: 'demo-user-uuid-0000-000000000001',
-      clientName: 'NexTrade Broker Client',
-      instrument: 'ITC',
-      exchange: 'NSE',
-      product: 'MIS',
-      netQty: 500,
-      buyQty: 500,
-      sellQty: 0,
-      avgPrice: 492.50,
-      currentPrice: 498.80,
-      unrealisedPnL: 3150.00,
-      realisedPnL: 0,
-      totalPnL: 3150.00,
-      marginUsed: 49250,
-      brokerId: 'BRK-ROHAN-01',
-      subBrokerId: 'SUB-BRK-001',
-      masterId: 'MST-ALPHA-01',
-      tenantId: DEFAULT_TENANT_ID,
-    });
-  }
-  if (ledgerEntries.length === 0) {
-    ledgerEntries.unshift({
-      id: 'LED-INIT-01',
-      date: new Date().toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' }),
-      referenceId: 'DEP-INIT-01',
-      description: 'Account Opening Deposit Balance (NexTrade Broker Client)',
-      debit: 0,
-      credit: 1000000,
-      runningBalance: 1000000,
-      status: 'Completed',
-      type: 'Deposit',
-      clientId: 'demo-user-uuid-0000-000000000001',
-      brokerId: 'BRK-ROHAN-01',
-      tenantId: DEFAULT_TENANT_ID,
-    });
-  }
+  // Purely zeroed: zero dummy orders, zero dummy positions, zero dummy transactions
 }
 
 export function initPersistenceStore() {
@@ -1491,12 +1346,11 @@ export function resolveClientForRecord(
     }
   }
 
-  // 3. Fallback to first available clean client if rawIdOrCode is missing or unknown
-  const defaultClient = clientList.find(c => !isDummyRecord(c));
-  const resolvedId = rawIdOrCode ? String(rawIdOrCode).trim() : (defaultClient?.id || 'CLT-001');
+  // 3. Fallback without grabbing arbitrary clients from clientList
+  const resolvedId = rawIdOrCode ? String(rawIdOrCode).trim() : '';
   const resolvedName = (rawName && rawName !== 'Trader' && rawName !== 'Unknown')
     ? String(rawName).trim()
-    : (defaultClient?.name || 'Trader');
+    : (resolvedId || 'Trader');
 
   return { clientId: resolvedId, clientName: resolvedName };
 }
@@ -1554,11 +1408,11 @@ export function mergeClients(existing: Client[], incomingRaw: any[]): Client[] {
         marginUsed: parseFloat(rc.marginUsed ?? rc.margin ?? '0'),
         income: parseFloat(rc.income ?? '0'),
         marginAvailable: isNaN(equity) ? 0 : equity,
-        brokerId: rc.brokerId || 'BRK-ROHAN-01',
-        brokerName: rc.brokerName || 'Rohan Sen',
-        subBrokerId: rc.subBrokerId || 'SUB-BRK-001',
-        masterId: rc.masterId || 'MST-ALPHA-01',
-        tenantId: rc.tenantId || 'TNT-001',
+        brokerId: rc.brokerId || rc.broker_id || undefined,
+        brokerName: rc.brokerName || rc.broker_name || undefined,
+        subBrokerId: rc.subBrokerId || rc.sub_broker_id || undefined,
+        masterId: rc.masterId || rc.master_id || undefined,
+        tenantId: rc.tenantId || rc.tenant_id || DEFAULT_TENANT_ID,
         kycStatus: rc.kycStatus || 'Verified',
         kycDocuments: rc.kycDocuments || [],
         createdDate: rc.createdDate || (rc.createdAt ? new Date(rc.createdAt).toISOString().split('T')[0] : '2026-03-29'),
@@ -2305,18 +2159,14 @@ function requireRole(allowedRoles: string[]) {
 // ==========================================
 // AUTHORITATIVE CALCULATIONS & HIERARCHY FILTERING
 // ==========================================
-export function filterByHierarchy<T extends { clientId?: string; id?: string; userId?: string; brokerId?: string; subBrokerId?: string; masterId?: string; tenantId?: string; client_id?: string; broker_id?: string; sub_broker_id?: string; master_id?: string; tenant_id?: string }>(
+export function filterByHierarchy<T extends Record<string, any>>(
   items: T[],
   user?: TokenPayload
 ): T[] {
   if (!user || !user.role) return items;
 
   const role = user.role.toLowerCase().replace(/[\s\-_/]+/g, '_');
-  const userTenant = user.tenantId || user.tenant_id;
-  const userBroker = user.brokerId || user.broker_id;
-  const userSubBroker = user.subBrokerId || user.sub_broker_id;
-  const userMaster = user.masterId || user.master_id;
-  const userClient = user.clientId || user.client_id;
+  const userTenant = user.tenantId || (user as any).tenant_id;
 
   const isTenantMatch = (itemTenant?: string) => {
     if (!userTenant || userTenant === 'all') return true;
@@ -2340,49 +2190,64 @@ export function filterByHierarchy<T extends { clientId?: string; id?: string; us
     return items;
   }
 
-  // master / master_admin sees records strictly scoped to their masterId and tenantId
+  // Resolve an item's lineage (either directly on the item, or via matching client)
+  const getItemLineage = (item: any) => {
+    let mId = item.masterId || item.master_id;
+    let bId = item.brokerId || item.broker_id;
+    let sId = item.subBrokerId || item.sub_broker_id;
+    const rawClient = item.clientId || item.client_id || item.userId || item.user_id;
+    if ((!mId || !bId || !sId) && rawClient) {
+      const cQuery = String(rawClient).trim().toLowerCase();
+      const matchedClient = clients.find(c => c.id.toLowerCase() === cQuery || (c.userId && c.userId.toLowerCase() === cQuery) || (c.clientCode && c.clientCode.toLowerCase() === cQuery));
+      if (matchedClient) {
+        if (!mId) mId = matchedClient.masterId;
+        if (!bId) bId = matchedClient.brokerId;
+        if (!sId) sId = matchedClient.subBrokerId;
+      }
+    }
+    return {
+      masterId: mId ? String(mId).trim().toLowerCase() : undefined,
+      brokerId: bId ? String(bId).trim().toLowerCase() : undefined,
+      subBrokerId: sId ? String(sId).trim().toLowerCase() : undefined,
+    };
+  };
+
+  // master / master_admin: Return ONLY records where masterId === user.masterId or user.id
   if (role === 'master' || role === 'master_admin') {
-    const mId = userMaster || user.sub;
+    const targetMaster = String(user.masterId || (user as any).master_id || user.sub || (user as any).id).trim().toLowerCase();
     return items.filter(item => {
-      const itemTenant = item.tenantId || item.tenant_id;
-      const itemMaster = item.masterId || item.master_id;
-      const itemBroker = item.brokerId || item.broker_id;
-      const matchTenant = isTenantMatch(itemTenant);
-      const matchMaster = !mId || !itemMaster || itemMaster === mId || itemBroker === userBroker;
-      return matchTenant && matchMaster;
+      const lineage = getItemLineage(item);
+      const itemId = String(item.id || item.userId || '').trim().toLowerCase();
+      return (lineage.masterId && lineage.masterId === targetMaster) || itemId === targetMaster;
     });
   }
 
-  // broker_admin / operations sees records strictly scoped to their brokerId and tenantId
-  if (role === 'broker_admin' || role === 'operations' || role === 'staff_ops') {
+  // broker_admin / broker: Return ONLY records where brokerId === user.brokerId or user.id
+  if (role === 'broker_admin' || role === 'broker' || role === 'operations' || role === 'staff_ops') {
+    const targetBroker = String(user.brokerId || (user as any).broker_id || user.sub || (user as any).id).trim().toLowerCase();
     return items.filter(item => {
-      const itemTenant = item.tenantId || item.tenant_id;
-      const itemBroker = item.brokerId || item.broker_id;
-      const matchTenant = isTenantMatch(itemTenant);
-      const matchBroker = userBroker ? (itemBroker === userBroker) : true;
-      return matchTenant && matchBroker;
+      const lineage = getItemLineage(item);
+      const itemId = String(item.id || item.userId || '').trim().toLowerCase();
+      return (lineage.brokerId && lineage.brokerId === targetBroker) || itemId === targetBroker;
     });
   }
 
-  // sub_broker sees only records belonging to their assigned subBrokerId
+  // sub_broker: Return ONLY records where subBrokerId === user.subBrokerId or user.id (no dummy SUB-BRK-001 fallback)
   if (role === 'sub_broker') {
-    const sId = userSubBroker || user.sub;
+    const targetSubBroker = String(user.subBrokerId || (user as any).sub_broker_id || user.sub || (user as any).id).trim().toLowerCase();
     return items.filter(item => {
-      const itemTenant = item.tenantId || item.tenant_id;
-      const itemSub = item.subBrokerId || item.sub_broker_id;
-      const matchTenant = isTenantMatch(itemTenant);
-      const matchSub = sId ? (itemSub === sId || itemSub === 'SUB-BRK-001') : true;
-      return matchTenant && matchSub;
+      const lineage = getItemLineage(item);
+      const itemId = String(item.id || item.userId || '').trim().toLowerCase();
+      return (lineage.subBrokerId && lineage.subBrokerId === targetSubBroker) || itemId === targetSubBroker;
     });
   }
 
-  // trader_client sees only their own records
+  // trader_client: Return ONLY their own records
   if (role === 'trader_client' || role === 'client') {
-    const cId = userClient || user.sub;
-    const allowedClientIds = new Set([cId, 'arav12', 'demo-user-uuid-0000-000000000001', 'USR-TRADER-01']);
+    const targetClient = String(user.clientId || (user as any).client_id || user.sub || (user as any).id).trim().toLowerCase();
     return items.filter(item => {
-      const itemId = item.clientId || item.client_id || item.id || item.userId;
-      return itemId === cId || (cId && allowedClientIds.has(cId) && allowedClientIds.has(String(itemId)));
+      const itemId = String(item.clientId || item.client_id || item.id || item.userId || '').trim().toLowerCase();
+      return itemId === targetClient;
     });
   }
 
@@ -2405,6 +2270,32 @@ function calculateAuthoritativeMetrics(userRole: string, brokerId: string, clien
     filteredPositions = realPositions.filter(p => p.clientId === clientId);
     filteredOrders = realOrders.filter(o => o.clientId === clientId);
     filteredFunds = realFunds.filter(f => f.clientId === clientId);
+  }
+
+  // Strict: If a partner account has 0 clients, return zero metrics (no dummy fallback)
+  if (filteredClients.length === 0 && userRole !== 'super_admin') {
+    return {
+      totalClients: 0,
+      totalClientsChangePct: 0,
+      activeClients: 0,
+      activeClientsRatio: 0,
+      ledgerBalanceCr: 0,
+      ledgerBalanceNetWeekL: 0,
+      openPnLL: 0,
+      openPnLDayChangePct: 0,
+      inactiveClients: 0,
+      newToday: 0,
+      marginUsedCr: 0,
+      marginAvailableCr: 0,
+      todaysOrders: 0,
+      pendingDeposits: 0,
+      pendingWithdrawals: 0,
+      clientTurnoverCr: 0,
+      commissionL: 0,
+      realisedPnL: 0,
+      unrealisedPnL: 0,
+      totalPnLFormatted: '₹0',
+    };
   }
 
   const activeCount = filteredClients.filter(c => c.status === 'Active').length;
@@ -2761,9 +2652,9 @@ app.post('/api/auth/login', async (req: Request, res: Response) => {
               roleTitle = 'Operations / Staff';
             }
 
-            const resolvedMasterId = normRole === 'master' ? u.id : (u.masterId || u.master_id || (normRole !== 'super_admin' ? 'MST-ALPHA-01' : undefined));
-            const resolvedBrokerId = normRole === 'broker_admin' ? u.id : (u.brokerId || u.broker_id || (normRole === 'master' ? 'BRK-MASTER-01' : 'BRK-ROHAN-01'));
-            const resolvedSubBrokerId = normRole === 'sub_broker' ? u.id : (u.subBrokerId || u.sub_broker_id || undefined);
+            const resolvedMasterId = normRole === 'master' ? (u.masterId || u.id) : (u.masterId || u.master_id || undefined);
+            const resolvedBrokerId = normRole === 'broker_admin' ? (u.brokerId || u.id) : (u.brokerId || u.broker_id || (normRole === 'master' ? 'BRK-DIRECT-01' : 'BRK-DEFAULT-01'));
+            const resolvedSubBrokerId = normRole === 'sub_broker' ? (u.subBrokerId || u.id) : (u.subBrokerId || u.sub_broker_id || undefined);
 
             account = {
               id: u.id,
@@ -3588,27 +3479,34 @@ app.get(['/api/dashboard/summary', '/api/dashboard/metrics'], authMiddleware, as
 
   let metrics = calculateAuthoritativeMetrics(user.role, user.brokerId, user.role === 'trader_client' ? user.sub : undefined, user);
 
-  // Actively fetch live authoritative metrics from Trading Platform
-  try {
-    const liveSummaryRes = await tradingPlatformClient.fetchLiveSummary(user.tenantId);
-    if (liveSummaryRes.success && liveSummaryRes.metrics) {
-      const sm = liveSummaryRes.metrics;
-      const openPositions = positions.filter(p => !isDummyRecord(p) && p.netQty !== 0);
-      if (openPositions.length === 0 && sm.total_pnl !== undefined) {
-        metrics.openPnLL = +(sm.total_pnl / 100000).toFixed(2);
-        metrics.unrealisedPnL = Number(sm.total_pnl);
-        const net = (metrics.realisedPnL || 0) + metrics.unrealisedPnL;
-        metrics.totalPnLFormatted = `${net >= 0 ? '+' : '-'}₹${Math.abs(net).toLocaleString('en-IN')}`;
+  // Actively fetch live authoritative metrics from Trading Platform only for platform super_admin
+  if (user.role === 'super_admin') {
+    try {
+      const liveSummaryRes = await tradingPlatformClient.fetchLiveSummary(user.tenantId);
+      if (liveSummaryRes.success && liveSummaryRes.metrics) {
+        const sm = liveSummaryRes.metrics;
+        const openPositions = positions.filter(p => !isDummyRecord(p) && p.netQty !== 0);
+        if (openPositions.length === 0 && sm.total_pnl !== undefined) {
+          metrics.openPnLL = +(sm.total_pnl / 100000).toFixed(2);
+          metrics.unrealisedPnL = Number(sm.total_pnl);
+          const net = (metrics.realisedPnL || 0) + metrics.unrealisedPnL;
+          metrics.totalPnLFormatted = `${net >= 0 ? '+' : '-'}₹${Math.abs(net).toLocaleString('en-IN')}`;
+        }
+        if (sm.total_used_margin !== undefined && metrics.marginUsedCr === 0) {
+          metrics.marginUsedCr = +(sm.total_used_margin / 10000000).toFixed(2);
+        }
       }
-      if (sm.total_used_margin !== undefined && metrics.marginUsedCr === 0) {
-        metrics.marginUsedCr = +(sm.total_used_margin / 10000000).toFixed(2);
-      }
+    } catch (err: any) {
+      console.warn('[Dashboard Summary API] Remote fetch notice:', err.message);
     }
-  } catch (err: any) {
-    console.warn('[Dashboard Summary API] Remote fetch notice:', err.message);
   }
 
-  const turnoverTrend = [
+  const scopedClientsForQueue = filterByHierarchy(clients.filter(c => !isDummyRecord(c)), user);
+  const scopedOrdersForQueue = filterByHierarchy(orders.filter(o => !isDummyRecord(o)), user);
+  const hasData = scopedClientsForQueue.length > 0 || scopedOrdersForQueue.length > 0 || user.role === 'super_admin';
+
+  const dates = ['16 Apr', '17 Apr', '18 Apr', '19 Apr', '20 Apr', '21 Apr', '22 Apr'];
+  const turnoverTrend = hasData ? [
     { date: '16 Apr', turnoverCr: 182.4, volume: 5120000 },
     { date: '17 Apr', turnoverCr: 215.1, volume: 6420000 },
     { date: '18 Apr', turnoverCr: 198.8, volume: 5890000 },
@@ -3616,18 +3514,16 @@ app.get(['/api/dashboard/summary', '/api/dashboard/metrics'], authMiddleware, as
     { date: '20 Apr', turnoverCr: 232.0, volume: 7100000 },
     { date: '21 Apr', turnoverCr: 310.6, volume: 9400000 },
     { date: '22 Apr', turnoverCr: 248.6, volume: 7600000 },
-  ];
+  ] : dates.map(d => ({ date: d, turnoverCr: 0, volume: 0 }));
 
-  const accountActivity = [
+  const days = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri'];
+  const accountActivity = hasData ? [
     { day: 'Mon', depositsCr: 3.4, withdrawalsCr: 1.8 },
     { day: 'Tue', depositsCr: 4.1, withdrawalsCr: 2.1 },
     { day: 'Wed', depositsCr: 2.9, withdrawalsCr: 1.5 },
     { day: 'Thu', depositsCr: 5.2, withdrawalsCr: 2.4 },
     { day: 'Fri', depositsCr: 4.82, withdrawalsCr: 2.16 },
-  ];
-
-  const scopedClientsForQueue = filterByHierarchy(clients.filter(c => !isDummyRecord(c)), user);
-  const scopedOrdersForQueue = filterByHierarchy(orders.filter(o => !isDummyRecord(o)), user);
+  ] : days.map(day => ({ day, depositsCr: 0, withdrawalsCr: 0 }));
   const pendingKycCount = scopedClientsForQueue.filter(c => c.kycStatus === 'Pending').length;
   const orderExceptionsCount = scopedOrdersForQueue.filter(o => o.status === 'Rejected' || o.status === 'Cancelled').length;
 
@@ -4138,13 +4034,13 @@ app.post(['/api/internal/v1/hierarchy/sync', '/api/internal/hierarchy/sync'], as
   }
 
   const resolvedMasterId = mappedRole === 'master'
-    ? id
-    : (node.masterId || existingAccount?.masterId || (mappedRole !== 'super_admin' ? 'MST-ALPHA-01' : undefined));
+    ? (node.masterId || id)
+    : (node.masterId || existingAccount?.masterId || undefined);
   const resolvedBrokerId = mappedRole === 'broker_admin'
-    ? id
-    : (node.brokerId || existingAccount?.brokerId || (mappedRole === 'master' ? 'BRK-MASTER-01' : 'BRK-ROHAN-01'));
+    ? (node.brokerId || id)
+    : (node.brokerId || existingAccount?.brokerId || (mappedRole === 'master' ? 'BRK-DIRECT-01' : 'BRK-DEFAULT-01'));
   const resolvedSubBrokerId = mappedRole === 'sub_broker'
-    ? id
+    ? (node.subBrokerId || id)
     : (node.subBrokerId || existingAccount?.subBrokerId || undefined);
   const resolvedReferralCode = deriveReferralCode(mappedRole, id, node.referralCode || existingAccount?.referralCode);
   const commissionShare = node.commissionShare !== undefined && node.commissionShare !== null
@@ -4378,51 +4274,62 @@ app.post(['/api/clients', '/api/admin/clients'], authMiddleware, requireRole(['b
   const user = req.user!;
   const { name, email, phone, pan, initialMargin, isDemo } = req.body;
 
-  if (!name || !email || !phone) {
-    return res.status(400).json({ success: false, message: 'Name, email, and phone are required' });
+  if (!name || !email) {
+    return res.status(400).json({ success: false, message: 'Full name and email address are required' });
   }
 
-  const panClean = String(pan || '').trim().toUpperCase();
-  if (!panClean || !/^[A-Z]{5}[0-9]{4}[A-Z]{1}$/.test(panClean)) {
-    return res.status(400).json({ success: false, message: 'Invalid PAN format. Standard format is 5 letters, 4 digits, 1 letter (e.g. ABCDE1234F).' });
+  // PAN is optional: clean if provided, default to ABCDE1234F if omitted
+  let panClean = String(pan || '').trim().toUpperCase();
+  if (panClean && !/^[A-Z]{5}[0-9]{4}[A-Z]{1}$/.test(panClean)) {
+    panClean = 'ABCDE1234F';
+  }
+  if (!panClean) {
+    panClean = 'ABCDE1234F';
   }
 
+  // Mobile number is optional: clean if provided, default to +91 98000 00000 if omitted
   const digitsOnly = String(phone || '').replace(/\D/g, '');
-  const phoneClean = digitsOnly.length === 12 && digitsOnly.startsWith('91')
+  let phoneClean = digitsOnly.length === 12 && digitsOnly.startsWith('91')
     ? digitsOnly.slice(2)
     : (digitsOnly.length === 11 && digitsOnly.startsWith('0') ? digitsOnly.slice(1) : digitsOnly);
-  if (!/^[6-9]\d{9}$/.test(phoneClean)) {
-    return res.status(400).json({ success: false, message: 'Please enter a valid 10-digit Indian mobile number starting with 6-9' });
+  if (!phoneClean || phoneClean.length !== 10) {
+    phoneClean = '9800000000';
   }
+  const formattedPhone = `+91 ${phoneClean}`;
 
   const newId = isDemo ? `CLT-DM-${Date.now()}` : `CLT-LIVE-${Date.now()}`;
   const margin = req.body.initialMargin !== undefined ? Math.max(0, Number(req.body.initialMargin)) : (req.body.ledgerBalance !== undefined ? Math.max(0, Number(req.body.ledgerBalance)) : 0);
 
-  let assignedBrokerId = user.brokerId || 'BRK-ROHAN-01';
-  let assignedMasterId = user.masterId || (user as any).master_id || null;
-  let assignedSubBrokerId = req.body.subBrokerId || user.subBrokerId || (user as any).sub_broker_id || null;
+  // Exact hierarchy lineage binding
+  let assignedBrokerId: string = 'BRK-DEFAULT-01';
+  let assignedMasterId: string | undefined = undefined;
+  let assignedSubBrokerId: string | undefined = undefined;
 
-  if (user.role === 'super_admin') {
+  const roleLower = String(user.role || '').toLowerCase();
+  if (roleLower === 'super_admin') {
+    assignedMasterId = req.body.masterId || user.masterId || undefined;
     assignedBrokerId = req.body.brokerId || user.brokerId || 'BRK-ROHAN-01';
-    assignedMasterId = req.body.masterId || null;
-    assignedSubBrokerId = req.body.subBrokerId || null;
-  } else if (user.role === 'master' || user.role === 'master_admin') {
-    assignedMasterId = user.masterId || user.sub;
-    assignedBrokerId = req.body.brokerId || user.brokerId || 'BRK-MASTER-01';
-    assignedSubBrokerId = req.body.subBrokerId || null;
-  } else if (user.role === 'broker_admin') {
-    assignedBrokerId = user.brokerId;
-    assignedSubBrokerId = req.body.subBrokerId || user.subBrokerId || null;
-    assignedMasterId = user.masterId || null;
-  } else if (user.role === 'sub_broker') {
-    assignedSubBrokerId = user.subBrokerId || (user as any).sub_broker_id || user.sub || (user as any).id || 'SUB-BRK-001';
-    assignedBrokerId = user.brokerId || (user as any).broker_id || 'BRK-ROHAN-01';
-    assignedMasterId = user.masterId || (user as any).master_id || 'MST-ALPHA-01';
+    assignedSubBrokerId = req.body.subBrokerId || undefined;
+  } else if (roleLower === 'master' || roleLower === 'master_admin') {
+    // If created by master: set masterId = req.user.masterId || req.user.id
+    assignedMasterId = user.masterId || user.sub || (user as any).id;
+    assignedBrokerId = req.body.brokerId || user.brokerId || 'BRK-DEFAULT-01';
+    assignedSubBrokerId = req.body.subBrokerId || undefined;
+  } else if (roleLower === 'broker_admin' || roleLower === 'broker') {
+    // If created by broker_admin: set brokerId = req.user.brokerId || req.user.id and masterId = req.user.masterId
+    assignedBrokerId = user.brokerId || user.sub || (user as any).id || 'BRK-DEFAULT-01';
+    assignedMasterId = user.masterId || (user as any).master_id || undefined;
+    assignedSubBrokerId = req.body.subBrokerId || user.subBrokerId || undefined;
+  } else if (roleLower === 'sub_broker') {
+    // If created by sub_broker: set subBrokerId = req.user.subBrokerId || req.user.id, brokerId = req.user.brokerId, and masterId = req.user.masterId
+    assignedSubBrokerId = user.subBrokerId || user.sub || (user as any).id;
+    assignedBrokerId = user.brokerId || (user as any).broker_id || 'BRK-DEFAULT-01';
+    assignedMasterId = user.masterId || (user as any).master_id || undefined;
   }
 
-  const assignedBrokerName = user.role === 'sub_broker'
+  const assignedBrokerName = roleLower === 'sub_broker'
     ? (user.name ? `${user.name} (Sub-Broker)` : 'Sub-Broker Desk')
-    : (user.name || 'Rohan Sen');
+    : (user.name || 'NexTrade Broker');
 
   const newClient: Client = {
     id: newId,
@@ -4430,7 +4337,7 @@ app.post(['/api/clients', '/api/admin/clients'], authMiddleware, requireRole(['b
     clientCode: newId,
     name,
     email,
-    phone,
+    phone: formattedPhone,
     pan: panClean,
     status: 'Active',
     isDemo: Boolean(isDemo),
@@ -4495,8 +4402,8 @@ app.post(['/api/clients', '/api/admin/clients'], authMiddleware, requireRole(['b
     body: {
       fullName: name,
       email,
-      phone,
-      pan: pan || 'ABCDE1234F',
+      phone: formattedPhone,
+      pan: panClean,
       password: defaultPassword,
       passwordHash: bcryptPasswordHash,
       tenantId: user.tenantId || DEFAULT_TENANT_ID,
@@ -4519,8 +4426,8 @@ app.post(['/api/clients', '/api/admin/clients'], authMiddleware, requireRole(['b
     name: newClient.name,
     fullName: newClient.name,
     email: newClient.email,
-    phone: newClient.phone,
-    pan: newClient.pan,
+    phone: formattedPhone,
+    pan: panClean,
     password: defaultPassword,
     passwordHash: bcryptPasswordHash,
     tenantId: newClient.tenantId,
@@ -4583,10 +4490,11 @@ app.get('/api/orders', authMiddleware, async (req: AuthenticatedRequest, res: Re
           clients
         );
 
+        const matchingClient = clients.find(c => c.id === clientId || c.userId === clientId || c.clientCode === clientId);
         const orderObj: Order = {
           id: orderId,
           clientId,
-          clientName,
+          clientName: clientName || matchingClient?.name || 'Trader',
           instrument: remoteOrder.symbol || remoteOrder.instrument || 'RELIANCE',
           exchange: remoteOrder.symbol?.includes('FUT') ? 'NFO' : (remoteOrder.symbol?.includes('/') ? 'MCX' : 'NSE'),
           side,
@@ -4597,10 +4505,10 @@ app.get('/api/orders', authMiddleware, async (req: AuthenticatedRequest, res: Re
           avgPrice: price,
           status: mappedStatus,
           created: remoteOrder.created_at ? new Date(remoteOrder.created_at).toLocaleTimeString('en-GB') : (remoteOrder.time ? `${remoteOrder.time}, ${remoteOrder.date || 'Today'}` : new Date().toLocaleTimeString('en-GB')),
-          brokerId: remoteOrder.brokerId || 'BRK-ROHAN-01',
-          subBrokerId: remoteOrder.subBrokerId || 'SUB-BRK-001',
-          masterId: remoteOrder.masterId || 'MST-ALPHA-01',
-          tenantId: remoteOrder.tenantId || 'TNT-001',
+          brokerId: remoteOrder.brokerId || matchingClient?.brokerId,
+          subBrokerId: remoteOrder.subBrokerId || matchingClient?.subBrokerId,
+          masterId: remoteOrder.masterId || matchingClient?.masterId,
+          tenantId: remoteOrder.tenantId || matchingClient?.tenantId || DEFAULT_TENANT_ID,
         };
 
         if (isDummyRecord(orderObj)) return;
@@ -5137,10 +5045,11 @@ app.get('/api/positions', authMiddleware, async (req: AuthenticatedRequest, res:
           marginUsed = Number((avgPrice * Math.abs(netQty) * 0.2).toFixed(2));
         }
 
+        const matchingClient = clients.find(c => c.id === clientId || c.userId === clientId || c.clientCode === clientId);
         const posObj: Position = {
           id: posId,
           clientId,
-          clientName,
+          clientName: clientName || matchingClient?.name || 'Trader',
           instrument: symbol,
           exchange: remotePos.exchange || (symbol.includes('FUT') ? 'NFO' : (symbol.includes('/') ? 'MCX' : 'NSE')),
           product: remotePos.product === 'CNC' ? 'CNC' : 'MIS',
@@ -5153,10 +5062,10 @@ app.get('/api/positions', authMiddleware, async (req: AuthenticatedRequest, res:
           unrealisedPnL,
           totalPnL: Number((realisedPnL + unrealisedPnL).toFixed(2)),
           marginUsed,
-          brokerId: remotePos.brokerId || 'BRK-ROHAN-01',
-          subBrokerId: remotePos.subBrokerId || 'SUB-BRK-001',
-          masterId: remotePos.masterId || 'MST-ALPHA-01',
-          tenantId: remotePos.tenantId || 'TNT-001',
+          brokerId: remotePos.brokerId || matchingClient?.brokerId,
+          subBrokerId: remotePos.subBrokerId || matchingClient?.subBrokerId,
+          masterId: remotePos.masterId || matchingClient?.masterId,
+          tenantId: remotePos.tenantId || matchingClient?.tenantId || DEFAULT_TENANT_ID,
         };
 
         if (isDummyRecord(posObj)) return;
@@ -5344,10 +5253,11 @@ app.get('/api/funds', authMiddleware, async (req: AuthenticatedRequest, res: Res
             clients
           );
 
+          const matchingClient = clients.find(c => c.id === clientId || c.userId === clientId || c.clientCode === clientId);
           const fundObj: FundTransaction = {
             id,
             clientId,
-            clientName,
+            clientName: clientName || matchingClient?.name || 'Trader',
             type: tType as 'Deposit' | 'Withdrawal',
             amount: Math.abs(parseFloat(rf.amount || '0')),
             method,
@@ -5358,10 +5268,10 @@ app.get('/api/funds', authMiddleware, async (req: AuthenticatedRequest, res: Res
             proofDocument: proofDoc,
             approvedBy: rf.approvedBy || rf.approved_by || 'Trading Platform S2S',
             rejectionReason: rf.rejectionReason || rf.failureReason || undefined,
-            brokerId: rf.brokerId || rf.broker_id || 'BRK-ROHAN-01',
-            subBrokerId: rf.subBrokerId || 'SUB-BRK-001',
-            masterId: rf.masterId || 'MST-ALPHA-01',
-            tenantId: rf.tenantId || rf.tenant_id || 'TNT-001',
+            brokerId: rf.brokerId || rf.broker_id || matchingClient?.brokerId,
+            subBrokerId: rf.subBrokerId || rf.sub_broker_id || matchingClient?.subBrokerId,
+            masterId: rf.masterId || rf.master_id || matchingClient?.masterId,
+            tenantId: rf.tenantId || rf.tenant_id || matchingClient?.tenantId || DEFAULT_TENANT_ID,
           };
           if (!isDummyRecord(fundObj)) {
             fundTransactions.unshift(fundObj);
@@ -5683,13 +5593,13 @@ app.get('/api/ledger', authMiddleware, async (req: AuthenticatedRequest, res: Re
   }
 
   let resultEntries = filterByHierarchy(ledgerEntries.filter(l => !isDummyRecord(l)), user);
+  const userClientsForBal = user ? filterByHierarchy(clients.filter(c => !isDummyRecord(c)), user) : clients;
 
-  // If ledger table is empty for the active role scope, synthesize authoritative ledger entries
-  if (resultEntries.length === 0) {
+  // If ledger table is empty for the active role scope, synthesize only if the partner has real scoped clients
+  if (resultEntries.length === 0 && (userClientsForBal.length > 0 || user?.role === 'super_admin')) {
     const scopedFunds = filterByHierarchy(fundTransactions.filter(f => !isDummyRecord(f) && (f.status === 'Approved' || f.status === 'Completed')), user);
     const scopedOrders = filterByHierarchy(orders.filter(o => !isDummyRecord(o) && o.status === 'Executed'), user);
-    const userClientsForBal = user ? filterByHierarchy(clients.filter(c => !isDummyRecord(c)), user) : clients;
-    let runningBalance = userClientsForBal.reduce((acc, c) => acc + (c.ledgerBalance || 0), 0) || 100000;
+    let runningBalance = userClientsForBal.reduce((acc, c) => acc + (c.ledgerBalance || 0), 0);
     const synthesized: LedgerEntry[] = [];
 
     // Synthesize entries from approved fund deposits & withdrawals
@@ -5706,8 +5616,8 @@ app.get('/api/ledger', authMiddleware, async (req: AuthenticatedRequest, res: Re
         status: 'Completed',
         type: isDeposit ? 'Deposit' : 'Withdrawal',
         clientId: f.clientId,
-        brokerId: f.brokerId || 'BRK-ROHAN-01',
-        tenantId: f.tenantId || 'TNT-001'
+        brokerId: f.brokerId,
+        tenantId: f.tenantId || DEFAULT_TENANT_ID
       });
     });
 
@@ -5725,8 +5635,8 @@ app.get('/api/ledger', authMiddleware, async (req: AuthenticatedRequest, res: Re
         status: 'Completed',
         type: 'Charges' as any,
         clientId: o.clientId,
-        brokerId: o.brokerId || 'BRK-ROHAN-01',
-        tenantId: o.tenantId || 'TNT-001'
+        brokerId: o.brokerId,
+        tenantId: o.tenantId || DEFAULT_TENANT_ID
       });
     });
 
@@ -5744,7 +5654,7 @@ app.get('/api/ledger', authMiddleware, async (req: AuthenticatedRequest, res: Re
   const userPositions = user ? filterByHierarchy(positions.filter(p => !isDummyRecord(p)), user) : positions;
   const userOrders = user ? filterByHierarchy(orders.filter(o => !isDummyRecord(o)), user) : orders;
 
-  const totalLedger = userClients.reduce((acc, c) => acc + (c.ledgerBalance || 0), 0) || (resultEntries[0]?.runningBalance || 0);
+  const totalLedger = userClients.reduce((acc, c) => acc + (c.ledgerBalance || 0), 0);
   const totalMarginUsed = userPositions.reduce((acc, p) => acc + (p.marginUsed || 0), 0);
   const totalMarginAvail = Math.max(0, totalLedger - totalMarginUsed);
   const totalCommission = userOrders.filter(o => o.status === 'Executed').length * 20;
@@ -5809,9 +5719,11 @@ app.get('/api/analytics', authMiddleware, (req: AuthenticatedRequest, res: Respo
   }
 
   const daysInPeriod = timeRange === '90 Days' ? 90 : (timeRange === '30 Days' ? 30 : 7);
-  const turnoverCr = +(baseTurnover / 10000000).toFixed(2);
-  const commissionEarnedL = +(baseCommission / 100000).toFixed(2);
-  const netPnLL = +(baseNetPnL / 100000).toFixed(2);
+  const isZeroScope = userClients.length === 0 && user?.role !== 'super_admin';
+  const turnoverCr = isZeroScope ? 0 : +(baseTurnover / 10000000).toFixed(2);
+  const commissionEarnedL = isZeroScope ? 0 : +(baseCommission / 100000).toFixed(2);
+  const netPnLL = isZeroScope ? 0 : +(baseNetPnL / 100000).toFixed(2);
+  const effectiveLedger = isZeroScope ? 0 : totalLedgerBalance;
   const dailyTurnoverBase = turnoverCr / daysInPeriod;
   const dailyCommBase = commissionEarnedL / daysInPeriod;
 
@@ -5827,9 +5739,9 @@ app.get('/api/analytics', authMiddleware, (req: AuthenticatedRequest, res: Respo
       netPnLL: netPnLL,
       netPnLChangePct: netPnLL !== 0 ? 8.8 : 0,
       totalClients: userClients.length,
-      activeCount,
-      inactiveCount,
-      ledgerBalanceCr: +(totalLedgerBalance / 10000000).toFixed(2),
+      activeCount: isZeroScope ? 0 : activeCount,
+      inactiveCount: isZeroScope ? 0 : inactiveCount,
+      ledgerBalanceCr: +(effectiveLedger / 10000000).toFixed(2),
       orderBreakdown,
       turnoverTrend: dates.map((d, i) => ({
         day: d,
@@ -6625,6 +6537,20 @@ async function startServer() {
       }));
     } catch {}
 
+    // 20-second WebSocket server heartbeat for Render reverse proxy persistence
+    const heartbeatTimer = setInterval(() => {
+      if (ws.readyState === WebSocket.OPEN) {
+        try {
+          ws.ping();
+          ws.send(JSON.stringify({ type: 'heartbeat', ts: Date.now() }));
+        } catch {}
+      } else {
+        clearInterval(heartbeatTimer);
+      }
+    }, 20000);
+
+    ws.on('pong', () => {});
+
     ws.on('message', (raw: any) => {
       try {
         const msg = JSON.parse(raw.toString());
@@ -6635,10 +6561,12 @@ async function startServer() {
     });
 
     ws.on('close', () => {
+      clearInterval(heartbeatTimer);
       userWsClients.delete(wsClient);
     });
 
     ws.on('error', () => {
+      clearInterval(heartbeatTimer);
       userWsClients.delete(wsClient);
     });
   });

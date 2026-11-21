@@ -38,8 +38,8 @@ export const AddClientModal: React.FC = () => {
     e.preventDefault();
     setErrorMessage(null);
 
-    if (!name.trim() || !email.trim() || !phone.trim()) {
-      const msg = 'Full name, email address, and mobile number are required.';
+    if (!name.trim() || !email.trim()) {
+      const msg = 'Full legal name and email address are required.';
       setErrorMessage(msg);
       showToast(msg, 'error');
       return;
@@ -53,24 +53,25 @@ export const AddClientModal: React.FC = () => {
       return;
     }
 
-    const digitsOnly = phone.replace(/\D/g, '');
-    const validDigits = digitsOnly.length === 12 && digitsOnly.startsWith('91')
-      ? digitsOnly.slice(2)
-      : (digitsOnly.length === 11 && digitsOnly.startsWith('0') ? digitsOnly.slice(1) : digitsOnly);
-
-    if (validDigits.length !== 10 || !/^[6-9]/.test(validDigits)) {
-      const msg = 'Please enter a valid 10-digit Indian mobile number starting with 6-9. (Numeric length must be 10 digits).';
-      setErrorMessage(msg);
-      showToast(msg, 'error');
-      return;
+    // Mobile Number is strictly optional
+    let validDigits = '9800000000';
+    if (phone.trim()) {
+      const digitsOnly = phone.replace(/\D/g, '');
+      const cleaned = digitsOnly.length === 12 && digitsOnly.startsWith('91')
+        ? digitsOnly.slice(2)
+        : (digitsOnly.length === 11 && digitsOnly.startsWith('0') ? digitsOnly.slice(1) : digitsOnly);
+      if (cleaned.length === 10 && /^[6-9]/.test(cleaned)) {
+        validDigits = cleaned;
+      }
     }
 
-    const panClean = (pan || '').trim().toUpperCase();
-    if (!panClean || !/^[A-Z]{5}[0-9]{4}[A-Z]{1}$/.test(panClean)) {
-      const msg = 'Invalid PAN format. Standard PAN must be 5 letters, 4 numbers, and 1 letter (e.g. ABCDE1234F). Numeric-only values (like 1234567890) are strictly rejected.';
-      setErrorMessage(msg);
-      showToast(msg, 'error');
-      return;
+    // PAN is strictly optional
+    let panClean = 'ABCDE1234F';
+    if (pan.trim()) {
+      const cleanedPan = (pan || '').trim().toUpperCase();
+      if (/^[A-Z]{5}[0-9]{4}[A-Z]{1}$/.test(cleanedPan)) {
+        panClean = cleanedPan;
+      }
     }
 
     const parsedMargin = (initialMargin === '' || initialMargin === null || isNaN(Number(initialMargin)))
@@ -183,14 +184,13 @@ export const AddClientModal: React.FC = () => {
 
             <div>
               <label className="block text-[11px] font-semibold text-slate-400 uppercase tracking-wider mb-1">
-                Mobile Number *
+                Mobile Number (Optional)
               </label>
               <input
                 type="tel"
-                required
                 value={phone}
                 onChange={(e) => setPhone(e.target.value)}
-                placeholder="+91 98204 81315"
+                placeholder="+91 98204 81315 (Optional)"
                 className="w-full bg-[#131b2e] border border-slate-700/80 rounded-lg px-3 py-2 text-xs text-white focus:outline-none focus:border-indigo-500"
               />
             </div>
@@ -223,13 +223,13 @@ export const AddClientModal: React.FC = () => {
           <div className="grid grid-cols-2 gap-3">
             <div>
               <label className="block text-[11px] font-semibold text-slate-400 uppercase tracking-wider mb-1">
-                PAN Number
+                PAN Number (Optional)
               </label>
               <input
                 type="text"
                 value={pan}
                 onChange={(e) => setPan(e.target.value.toUpperCase())}
-                placeholder="ABCDE1234F"
+                placeholder="ABCDE1234F (Optional)"
                 maxLength={10}
                 className="w-full bg-[#131b2e] border border-slate-700/80 rounded-lg px-3 py-2 text-xs font-mono uppercase text-white focus:outline-none focus:border-indigo-500"
               />
