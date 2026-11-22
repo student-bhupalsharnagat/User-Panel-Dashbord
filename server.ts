@@ -1523,25 +1523,27 @@ export function mergeClients(existing: Client[], incomingRaw: any[]): Client[] {
         match.marginAvailable = localMatch.marginAvailable;
       } else if (item.ledgerBalance > match.ledgerBalance) {
         match.ledgerBalance = item.ledgerBalance;
-        if (localMatch && hasLiveBal) {
-          localMatch.ledgerBalance = Number(item.ledgerBalance);
-          localMatch.peakLedger = Math.max(localMatch.peakLedger || 0, Number(item.ledgerBalance));
-          if (hasLiveEquity) localMatch.marginAvailable = Number(item.marginAvailable);
-        }
-        if (localMatch) {
-          match.marginAvailable = localMatch.marginAvailable;
-        } else if (item.marginAvailable > match.marginAvailable) {
-          match.marginAvailable = item.marginAvailable;
-        }
-        if (item.openPnL !== 0) {
-          match.openPnL = item.openPnL;
-        }
+      }
 
-        if (item.status === 'Active') {
-          match.status = 'Active';
-        }
-        match.isLive = true;
-      } else {
+      if (localMatch && hasLiveBal) {
+        localMatch.ledgerBalance = Number(item.ledgerBalance);
+        localMatch.peakLedger = Math.max(localMatch.peakLedger || 0, Number(item.ledgerBalance));
+        if (hasLiveEquity) localMatch.marginAvailable = Number(item.marginAvailable);
+      }
+      if (localMatch) {
+        match.marginAvailable = localMatch.marginAvailable;
+      } else if (item.marginAvailable > match.marginAvailable) {
+        match.marginAvailable = item.marginAvailable;
+      }
+      if (item.openPnL !== 0) {
+        match.openPnL = item.openPnL;
+      }
+
+      if (item.status === 'Active') {
+        match.status = 'Active';
+      }
+      match.isLive = true;
+    } else {
         if (isSyntheticPrefix(item.id) && strippedId && strippedId !== item.id.toLowerCase()) {
           item.id = stripTenantPrefix(item.id);
           item.userId = stripTenantPrefix(item.userId || item.id);
@@ -2229,12 +2231,10 @@ export function mergeClients(existing: Client[], incomingRaw: any[]): Client[] {
       let bId = item.brokerId || item.broker_id;
       let bName = item.brokerName || item.broker_name;
       let sId = item.subBrokerId || item.sub_broker_id;
-      const rawClient = item.clientId || item.client_id || item.userId || item.user_id;
       let sName = item.subBrokerName || item.sub_broker_name;
       const rawClient = item.clientId || item.client_id || item.userId || item.user_id || item.id;
       if ((!mId || !bId || !sId) && rawClient) {
         const cQuery = String(rawClient).trim().toLowerCase();
-        const matchedClient = clients.find(c => c.id.toLowerCase() === cQuery || (c.userId && c.userId.toLowerCase() === cQuery) || (c.clientCode && c.clientCode.toLowerCase() === cQuery));
         const matchedClient = clients.find(c =>
           c.id.toLowerCase() === cQuery ||
           (c.userId && c.userId.toLowerCase() === cQuery) ||
@@ -3555,8 +3555,9 @@ export function mergeClients(existing: Client[], incomingRaw: any[]): Client[] {
       } catch (err: any) {
         console.warn('[Dashboard Summary API] Remote sync notice:', err?.message || err);
       }
+    }
 
-      let metrics = calculateAuthoritativeMetrics(user.role, user.brokerId, user.role === 'trader_client' ? user.sub : undefined, user);
+    let metrics = calculateAuthoritativeMetrics(user.role, user.brokerId, user.role === 'trader_client' ? user.sub : undefined, user);
 
       // Actively fetch live authoritative metrics from Trading Platform only for platform super_admin
       if (user.role === 'super_admin') {
@@ -4120,20 +4121,14 @@ export function mergeClients(existing: Client[], incomingRaw: any[]): Client[] {
     const incomingSubBrokerName = node.subBrokerName || node.sub_broker_name || envelope.subBrokerName || envelope.sub_broker_name || undefined;
 
     const resolvedMasterId = mappedRole === 'master'
-      ? (node.masterId || id)
-      : (node.masterId || existingAccount?.masterId || undefined);
-    ?(incomingMasterId || id)
-    : (incomingMasterId !== undefined ? incomingMasterId : (existingAccount?.masterId || undefined));
+      ? (incomingMasterId || id)
+      : (incomingMasterId !== undefined ? incomingMasterId : (existingAccount?.masterId || undefined));
     const resolvedBrokerId = mappedRole === 'broker_admin'
-      ? (node.brokerId || id)
-      : (node.brokerId || existingAccount?.brokerId || (mappedRole === 'master' ? 'BRK-DIRECT-01' : 'BRK-DEFAULT-01'));
-    ?(incomingBrokerId || id)
-    : (incomingBrokerId !== undefined ? incomingBrokerId : (existingAccount?.brokerId || (mappedRole === 'master' ? 'BRK-DIRECT-01' : 'BRK-DEFAULT-01')));
+      ? (incomingBrokerId || id)
+      : (incomingBrokerId !== undefined ? incomingBrokerId : (existingAccount?.brokerId || (mappedRole === 'master' ? 'BRK-DIRECT-01' : 'BRK-DEFAULT-01')));
     const resolvedSubBrokerId = mappedRole === 'sub_broker'
-      ? (node.subBrokerId || id)
-      : (node.subBrokerId || existingAccount?.subBrokerId || undefined);
-    ?(incomingSubBrokerId || id)
-    : (incomingSubBrokerId !== undefined ? incomingSubBrokerId : (existingAccount?.subBrokerId || undefined));
+      ? (incomingSubBrokerId || id)
+      : (incomingSubBrokerId !== undefined ? incomingSubBrokerId : (existingAccount?.subBrokerId || undefined));
     const resolvedReferralCode = deriveReferralCode(mappedRole, id, node.referralCode || existingAccount?.referralCode);
     const commissionShare = node.commissionShare !== undefined && node.commissionShare !== null
       ? Number(node.commissionShare)
@@ -4180,7 +4175,6 @@ export function mergeClients(existing: Client[], incomingRaw: any[]): Client[] {
     }
 
     if (mappedRole === 'trader_client' || rawType.includes('client')) {
-      const existingClient = clients.find(c => c.id === id || (c.userId && c.userId === id) || c.email?.toLowerCase() === email);
       const existingClient = clients.find(c =>
         c.id.toLowerCase() === id.toLowerCase() ||
         (c.userId && c.userId.toLowerCase() === id.toLowerCase()) ||
@@ -4224,8 +4218,7 @@ export function mergeClients(existing: Client[], incomingRaw: any[]): Client[] {
           income: 0,
           marginAvailable: Number(node.marginAvailable ?? node.balance ?? 0) || 0,
           brokerId: resolvedBrokerId,
-          brokerName: String(node.brokerName || 'Broker Desk'),
-          brokerName: incomingBrokerName || 'Broker Desk',
+          brokerName: incomingBrokerName || String(node.brokerName || 'Broker Desk'),
           subBrokerId: resolvedSubBrokerId,
           masterId: resolvedMasterId,
           masterName: incomingMasterName,
@@ -4324,8 +4317,9 @@ export function mergeClients(existing: Client[], incomingRaw: any[]): Client[] {
       } catch (err: any) {
         console.warn('[Clients API] Remote fetch notice:', err?.message || err);
       }
+    }
 
-      // Display records according to hierarchy role
+    // Display records according to hierarchy role
       let result = filterByHierarchy(clients.filter(c => !isDummyRecord(c)), user);
 
       if (hideDemo === 'true') {
@@ -4367,7 +4361,6 @@ export function mergeClients(existing: Client[], incomingRaw: any[]): Client[] {
       }
 
       result.forEach(c => {
-        const m = pnlByClient.get(c.id.toLowerCase()) || pnlByClient.get(c.name.toLowerCase()) || (c.clientCode ? pnlByClient.get(c.clientCode.toLowerCase()) : null);
         const m = pnlByClient.get(c.id.toLowerCase()) ||
           (c.userId ? pnlByClient.get(c.userId.toLowerCase()) : null) ||
           pnlByClient.get(c.name.toLowerCase()) ||
@@ -4488,10 +4481,6 @@ export function mergeClients(existing: Client[], incomingRaw: any[]): Client[] {
       assignedMasterId = user.masterId || (user as any).master_id || req.body.masterId || undefined;
       assignedMasterName = (user as any).masterName || (user as any).master_name || req.body.masterName || undefined;
     }
-
-    const assignedBrokerName = roleLower === 'sub_broker'
-      ? (user.name ? `${user.name} (Sub-Broker)` : 'Sub-Broker Desk')
-      : (user.name || 'NexTrade Broker');
 
     const newClient: Client = {
       id: newId,
