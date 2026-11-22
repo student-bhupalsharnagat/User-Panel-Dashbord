@@ -655,6 +655,18 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
           triggerRefresh(false);
         });
 
+        eventSource.addEventListener('client_reassigned', () => {
+          triggerRefresh(false);
+        });
+
+        eventSource.addEventListener('hierarchy_synced', () => {
+          triggerRefresh(false);
+        });
+
+        eventSource.addEventListener('refresh', () => {
+          triggerRefresh(false);
+        });
+
         eventSource.addEventListener('broker.added', () => {
           triggerRefresh(false);
         });
@@ -944,6 +956,9 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
               evtType === 'client.registered' ||
               evtType === 'client.created' ||
               evtType === 'client_created' ||
+              evtType === 'client_reassigned' ||
+              evtType === 'hierarchy_synced' ||
+              evtType === 'refresh' ||
               evtType === 'clients_updated' ||
               evtType === 'client_updated' ||
               evtType === 'broker.added' ||

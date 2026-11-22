@@ -251,12 +251,18 @@ export async function initDatabase(appEnv: string = 'production'): Promise<boole
       await dropForeignKeyConstraints(dropFkClient);
       await dropFkClient.query('ALTER TABLE IF EXISTS user_panel_clients ADD COLUMN IF NOT EXISTS user_id TEXT;');
       await dropFkClient.query('ALTER TABLE IF EXISTS user_panel_clients ADD COLUMN IF NOT EXISTS client_code TEXT;');
+      await dropFkClient.query('ALTER TABLE IF EXISTS user_panel_clients ADD COLUMN IF NOT EXISTS master_name TEXT;');
+      await dropFkClient.query('ALTER TABLE IF EXISTS user_panel_clients ADD COLUMN IF NOT EXISTS broker_name TEXT;');
+      await dropFkClient.query('ALTER TABLE IF EXISTS user_panel_clients ADD COLUMN IF NOT EXISTS sub_broker_name TEXT;');
       await dropFkClient.query('ALTER TABLE IF EXISTS user_panel_accounts ADD COLUMN IF NOT EXISTS referral_code TEXT;');
       await dropFkClient.query('ALTER TABLE IF EXISTS user_panel_accounts ADD COLUMN IF NOT EXISTS commission_share NUMERIC(10, 2);');
       await dropFkClient.query('ALTER TABLE IF EXISTS user_panel_accounts ADD COLUMN IF NOT EXISTS status TEXT DEFAULT \'ACTIVE\';');
       await dropFkClient.query('ALTER TABLE IF EXISTS user_panel_accounts ADD COLUMN IF NOT EXISTS master_id TEXT;');
       await dropFkClient.query('ALTER TABLE IF EXISTS user_panel_accounts ADD COLUMN IF NOT EXISTS broker_id TEXT;');
       await dropFkClient.query('ALTER TABLE IF EXISTS user_panel_accounts ADD COLUMN IF NOT EXISTS sub_broker_id TEXT;');
+      await dropFkClient.query('ALTER TABLE IF EXISTS user_panel_accounts ADD COLUMN IF NOT EXISTS master_name TEXT;');
+      await dropFkClient.query('ALTER TABLE IF EXISTS user_panel_accounts ADD COLUMN IF NOT EXISTS broker_name TEXT;');
+      await dropFkClient.query('ALTER TABLE IF EXISTS user_panel_accounts ADD COLUMN IF NOT EXISTS sub_broker_name TEXT;');
       await dropFkClient.query('ALTER TABLE IF EXISTS user_panel_tenant_branding ADD COLUMN IF NOT EXISTS domain TEXT;');
       await dropFkClient.query(`
         CREATE TABLE IF NOT EXISTS user_panel_users (
@@ -1034,6 +1040,8 @@ export const dbRepo = {
           margin_available = EXCLUDED.margin_available,
           user_id = COALESCE(EXCLUDED.user_id, user_panel_clients.user_id),
           client_code = COALESCE(EXCLUDED.client_code, user_panel_clients.client_code),
+          broker_id = COALESCE(EXCLUDED.broker_id, user_panel_clients.broker_id),
+          broker_name = COALESCE(EXCLUDED.broker_name, user_panel_clients.broker_name),
           sub_broker_id = COALESCE(EXCLUDED.sub_broker_id, user_panel_clients.sub_broker_id),
           master_id = COALESCE(EXCLUDED.master_id, user_panel_clients.master_id),
           tenant_id = COALESCE(EXCLUDED.tenant_id, user_panel_clients.tenant_id),
@@ -1048,6 +1056,52 @@ export const dbRepo = {
       ]);
     } catch (e: any) {
       console.warn('[Database dbRepo.insertClient] insert notice:', e.message);
+    }
+  },
+
+  async updateClientHierarchy(
+    id: string,
+    masterId?: string | null,
+    brokerId?: string | null,
+    subBrokerId?: string | null,
+    masterName?: string | null,
+    brokerName?: string | null,
+    subBrokerName?: string | null
+  ): Promise<void> {
+    if (!pgPool || !isPostgresReady) return;
+    try {
+      await pgPool.query(`
+        UPDATE user_panel_clients
+        SET master_id = COALESCE($2, master_id),
+            broker_id = COALESCE($3, broker_id),
+            sub_broker_id = COALESCE($4, sub_broker_id),
+            master_name = COALESCE($5, master_name),
+            broker_name = COALESCE($6, broker_name),
+            sub_broker_name = COALESCE($7, sub_broker_name),
+            updated_at = NOW()
+        WHERE id = $1 OR user_id = $1 OR LOWER(email) = LOWER($1);
+      `, [id, masterId || null, brokerId || null, subBrokerId || null, masterName || null, brokerName || null, subBrokerName || null]);
+      await pgPool.query(`
+        UPDATE user_panel_accounts
+        SET master_id = COALESCE($2, master_id),
+            broker_id = COALESCE($3, broker_id),
+            sub_broker_id = COALESCE($4, sub_broker_id),
+            master_name = COALESCE($5, master_name),
+            broker_name = COALESCE($6, broker_name),
+            sub_broker_name = COALESCE($7, sub_broker_name),
+            updated_at = NOW()
+        WHERE id = $1 OR user_id = $1 OR LOWER(email) = LOWER($1);
+      `, [id, masterId || null, brokerId || null, subBrokerId || null, masterName || null, brokerName || null, subBrokerName || null]);
+      await pgPool.query(`
+        UPDATE user_panel_users
+        SET master_id = COALESCE($2, master_id),
+            broker_id = COALESCE($3, broker_id),
+            sub_broker_id = COALESCE($4, sub_broker_id),
+            updated_at = NOW()
+        WHERE id = $1 OR LOWER(email) = LOWER($1);
+      `, [id, masterId || null, brokerId || null, subBrokerId || null]);
+    } catch (e: any) {
+      console.warn('[Database dbRepo.updateClientHierarchy] notice:', e.message);
     }
   },
 

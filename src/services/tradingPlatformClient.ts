@@ -345,7 +345,7 @@ export class TradingPlatformClient extends EventEmitter {
   public async fetchLiveClients(tenantId?: string): Promise<{ success: boolean; clients: any[] }> {
     const cleanTenant = this.resolveOutboundTenantId(tenantId);
     const cacheKey = `clients:${cleanTenant}`;
-    const cached = this.getCached<any[]>(cacheKey, 15000);
+    const cached = this.getCached<any[]>(cacheKey, 3000);
     if (cached) {
       return { success: true, clients: cached };
     }
@@ -562,7 +562,7 @@ export class TradingPlatformClient extends EventEmitter {
    * Multi-Tenant Aggregation: Aggregates live clients across TNT-001, vertex-default, and Central Admin
    */
   public async fetchAllLiveClients(tenantId?: string): Promise<{ success: boolean; clients: any[] }> {
-    const cached = this.getCached<any[]>('clients:all', 10000);
+    const cached = this.getCached<any[]>('clients:all', 3000);
     if (cached && cached.length > 0) {
       return { success: true, clients: cached };
     }

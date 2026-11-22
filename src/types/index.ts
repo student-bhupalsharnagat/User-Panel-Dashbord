@@ -71,6 +71,12 @@ export interface MetricSummary {
   realisedPnL: number;
   unrealisedPnL: number;
   totalPnLFormatted: string;
+  ledgerBalance?: number;
+  openPnL?: number;
+  marginUsed?: number;
+  availMargin?: number;
+  todayOrders?: number;
+  turnover?: number;
 }
 
 export interface TurnoverTrendPoint {
@@ -139,8 +145,17 @@ export interface Client {
   lastActive: string;
   riskLimit: number;
   subBrokerId?: string;
+  sub_broker_id?: string;
+  subBrokerName?: string;
+  sub_broker_name?: string;
   masterId?: string;
+  master_id?: string;
+  masterName?: string;
+  master_name?: string;
+  broker_id?: string;
+  broker_name?: string;
   tenantId?: string;
+  tenant_id?: string;
   isLive?: boolean;
   balance?: number;
   equity?: number;
@@ -168,14 +183,19 @@ export interface Order {
   brokerId: string;
   rejectionReason?: string;
   subBrokerId?: string;
+  sub_broker_id?: string;
+  subBrokerName?: string;
+  sub_broker_name?: string;
   masterId?: string;
+  master_id?: string;
+  masterName?: string;
+  master_name?: string;
+  broker_id?: string;
+  broker_name?: string;
   tenantId?: string;
+  tenant_id?: string;
   product?: string;
   client_id?: string;
-  broker_id?: string;
-  sub_broker_id?: string;
-  master_id?: string;
-  tenant_id?: string;
 }
 
 export interface Position {
@@ -196,13 +216,18 @@ export interface Position {
   marginUsed: number;
   brokerId: string;
   subBrokerId?: string;
-  masterId?: string;
-  tenantId?: string;
-  client_id?: string;
-  broker_id?: string;
   sub_broker_id?: string;
+  subBrokerName?: string;
+  sub_broker_name?: string;
+  masterId?: string;
   master_id?: string;
+  masterName?: string;
+  master_name?: string;
+  broker_id?: string;
+  broker_name?: string;
+  tenantId?: string;
   tenant_id?: string;
+  client_id?: string;
 }
 
 export interface FundTransaction {
@@ -221,13 +246,18 @@ export interface FundTransaction {
   rejectionReason?: string;
   brokerId: string;
   subBrokerId?: string;
-  masterId?: string;
-  tenantId?: string;
-  client_id?: string;
-  broker_id?: string;
   sub_broker_id?: string;
+  subBrokerName?: string;
+  sub_broker_name?: string;
+  masterId?: string;
   master_id?: string;
+  masterName?: string;
+  master_name?: string;
+  broker_id?: string;
+  broker_name?: string;
+  tenantId?: string;
   tenant_id?: string;
+  client_id?: string;
 }
 
 export interface LedgerEntry {
