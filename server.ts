@@ -1411,7 +1411,9 @@ export function mergeClients(existing: Client[], incomingRaw: any[]): Client[] {
         brokerId: rc.brokerId || rc.broker_id || undefined,
         brokerName: rc.brokerName || rc.broker_name || undefined,
         subBrokerId: rc.subBrokerId || rc.sub_broker_id || undefined,
+        subBrokerName: rc.subBrokerName || rc.sub_broker_name || undefined,
         masterId: rc.masterId || rc.master_id || undefined,
+        masterName: rc.masterName || rc.master_name || undefined,
         tenantId: rc.tenantId || rc.tenant_id || DEFAULT_TENANT_ID,
         kycStatus: rc.kycStatus || 'Verified',
         kycDocuments: rc.kycDocuments || [],
@@ -1505,10 +1507,13 @@ export function mergeClients(existing: Client[], incomingRaw: any[]): Client[] {
         match.marginUsed = item.marginUsed;
       }
 
-      // Preserve local hierarchy assignments so stale upstream values cannot overwrite reassigned clients
-      if (!match.masterId && item.masterId) match.masterId = item.masterId;
-      if (!match.brokerId && item.brokerId) match.brokerId = item.brokerId;
-      if (!match.subBrokerId && item.subBrokerId) match.subBrokerId = item.subBrokerId;
+      // Update hierarchy assignments when incoming client has authoritative assignments
+      if (item.masterId) match.masterId = item.masterId;
+      if (item.masterName || (item as any).master_name) (match as any).masterName = item.masterName || (item as any).master_name;
+      if (item.brokerId) match.brokerId = item.brokerId;
+      if (item.brokerName || (item as any).broker_name) match.brokerName = item.brokerName || (item as any).broker_name;
+      if (item.subBrokerId) match.subBrokerId = item.subBrokerId;
+      if (item.subBrokerName || (item as any).sub_broker_name) (match as any).subBrokerName = item.subBrokerName || (item as any).sub_broker_name;
 
       // Keep persistentLocalClients in sync with authoritative live balance
       const localMatch = persistentLocalClients.get(match.id) ||
@@ -1913,6 +1918,22 @@ export function mergeClients(existing: Client[], incomingRaw: any[]): Client[] {
     return syncAuthoritativeData();
   }
 
+  /**
+   * Helper: Pull Authoritative Scoped Hierarchy Clients from Admin-Dashbord
+   * Cached for 3s with a 10s timeout to never stall UI requests.
+   */
+  async function fetchScopedClientsFromAdmin(user: any): Promise<Client[]> {
+    try {
+      const res = await tradingPlatformClient.fetchScopedClientsFromAdmin(user);
+      if (res.success && Array.isArray(res.clients) && res.clients.length > 0) {
+        return res.clients;
+      }
+    } catch (err: any) {
+      console.warn('[fetchScopedClientsFromAdmin] Notice:', err?.message || err);
+    }
+    return [];
+  }
+
   // Background initial probe and sync
   setTimeout(async () => {
     await probeUpstreamTradingPlatform().catch(() => { });
@@ -2260,47 +2281,47 @@ export function mergeClients(existing: Client[], incomingRaw: any[]): Client[] {
       };
     };
 
-    // master / master_admin: Return ONLY records where masterId === user.masterId or user.id
+    // master / master_admin: Return records where masterId === user.masterId or masterName matches user.name / targetMaster
     if (role === 'master' || role === 'master_admin') {
       const targetMaster = String(user.masterId || (user as any).master_id || user.sub || (user as any).id).trim().toLowerCase();
       const targetName = String(user.name || '').trim().toLowerCase();
       return items.filter(item => {
         const lineage = getItemLineage(item);
         const itemId = String(item.id || item.userId || '').trim().toLowerCase();
-        return (lineage.masterId && lineage.masterId === targetMaster) || itemId === targetMaster;
         const itemMasterName = String(item.masterName || item.master_name || lineage.masterName || '').trim().toLowerCase();
         return (lineage.masterId && lineage.masterId === targetMaster) ||
           (targetName && itemMasterName && itemMasterName === targetName) ||
+          (targetMaster && itemMasterName && itemMasterName === targetMaster) ||
           itemId === targetMaster;
       });
     }
 
-    // broker_admin / broker: Return ONLY records where brokerId === user.brokerId or user.id
+    // broker_admin / broker: Return records where brokerId === user.brokerId or brokerName matches user.name / targetBroker
     if (role === 'broker_admin' || role === 'broker' || role === 'operations' || role === 'staff_ops') {
       const targetBroker = String(user.brokerId || (user as any).broker_id || user.sub || (user as any).id).trim().toLowerCase();
       const targetName = String(user.name || '').trim().toLowerCase();
       return items.filter(item => {
         const lineage = getItemLineage(item);
         const itemId = String(item.id || item.userId || '').trim().toLowerCase();
-        return (lineage.brokerId && lineage.brokerId === targetBroker) || itemId === targetBroker;
         const itemBrokerName = String(item.brokerName || item.broker_name || lineage.brokerName || '').trim().toLowerCase();
         return (lineage.brokerId && lineage.brokerId === targetBroker) ||
           (targetName && itemBrokerName && itemBrokerName === targetName) ||
+          (targetBroker && itemBrokerName && itemBrokerName === targetBroker) ||
           itemId === targetBroker;
       });
     }
 
-    // sub_broker: Return ONLY records where subBrokerId === user.subBrokerId or user.id (no dummy SUB-BRK-001 fallback)
+    // sub_broker: Return records where subBrokerId === user.subBrokerId or subBrokerName matches user.name / targetSubBroker
     if (role === 'sub_broker') {
       const targetSubBroker = String(user.subBrokerId || (user as any).sub_broker_id || user.sub || (user as any).id).trim().toLowerCase();
       const targetName = String(user.name || '').trim().toLowerCase();
       return items.filter(item => {
         const lineage = getItemLineage(item);
         const itemId = String(item.id || item.userId || '').trim().toLowerCase();
-        return (lineage.subBrokerId && lineage.subBrokerId === targetSubBroker) || itemId === targetSubBroker;
         const itemSubName = String(item.subBrokerName || item.sub_broker_name || lineage.subBrokerName || '').trim().toLowerCase();
         return (lineage.subBrokerId && lineage.subBrokerId === targetSubBroker) ||
           (targetName && itemSubName && itemSubName === targetName) ||
+          (targetSubBroker && itemSubName && itemSubName === targetSubBroker) ||
           itemId === targetSubBroker;
       });
     }
@@ -3541,20 +3562,31 @@ export function mergeClients(existing: Client[], incomingRaw: any[]): Client[] {
   app.get(['/api/dashboard/summary', '/api/dashboard/metrics'], authMiddleware, async (req: AuthenticatedRequest, res: Response) => {
     const user = req.user!;
 
-    if (clients.filter(c => !isDummyRecord(c)).length === 0) {
-      try {
-        const liveClientsRes = await tradingPlatformClient.fetchAllLiveClients(user.tenantId);
-        if (liveClientsRes.success && Array.isArray(liveClientsRes.clients) && liveClientsRes.clients.length > 0) {
-          clients = mergeClients(clients, liveClientsRes.clients).filter(c => !isDummyRecord(c));
-        }
-      } catch (err: any) {
-        console.warn('[Dashboard Summary API] Remote client fetch notice:', err.message);
+    // 1. Authoritatively pull latest hierarchy clients from Central Admin (Admin-Dashbord)
+    try {
+      const adminClients = await fetchScopedClientsFromAdmin(user);
+      if (adminClients.length > 0) {
+        clients = mergeClients(clients, adminClients).filter(c => !isDummyRecord(c));
       }
-      try {
-        await syncAuthoritativeData(user.tenantId);
-      } catch (err: any) {
-        console.warn('[Dashboard Summary API] Remote sync notice:', err?.message || err);
+    } catch (err: any) {
+      console.warn('[Dashboard Metrics] Admin hierarchy fetch notice:', err?.message || err);
+    }
+
+    // 2. Fetch live authoritative clients and trading balances from Trading Platform
+    try {
+      const liveClientsRes = await tradingPlatformClient.fetchAllLiveClients(user.tenantId);
+      if (liveClientsRes.success && Array.isArray(liveClientsRes.clients) && liveClientsRes.clients.length > 0) {
+        clients = mergeClients(clients, liveClientsRes.clients).filter(c => !isDummyRecord(c));
       }
+    } catch (err: any) {
+      console.warn('[Dashboard Summary API] Remote client fetch notice:', err?.message || err);
+    }
+
+    // 3. Sync authoritative trading data (orders, positions, funds, ledger)
+    try {
+      await syncAuthoritativeData(user.tenantId);
+    } catch (err: any) {
+      console.warn('[Dashboard Summary API] Remote sync notice:', err?.message || err);
     }
 
     let metrics = calculateAuthoritativeMetrics(user.role, user.brokerId, user.role === 'trader_client' ? user.sub : undefined, user);
@@ -4301,22 +4333,31 @@ export function mergeClients(existing: Client[], incomingRaw: any[]): Client[] {
     const user = req.user!;
     const { q, status, hideDemo } = req.query;
 
-    // Actively fetch live authoritative clients from Trading Platform if not yet populated
-    if (clients.filter(c => !isDummyRecord(c)).length === 0) {
-      try {
-        const liveClientsRes = await tradingPlatformClient.fetchAllLiveClients(user.tenantId);
-        if (liveClientsRes.success && Array.isArray(liveClientsRes.clients) && liveClientsRes.clients.length > 0) {
-          clients = mergeClients(clients, liveClientsRes.clients).filter(c => !isDummyRecord(c));
-        }
-      } catch (err: any) {
-        console.warn('[Clients API] Remote fetch notice:', err.message);
+    // 1. Authoritatively pull latest hierarchy clients from Central Admin (Admin-Dashbord)
+    try {
+      const adminClients = await fetchScopedClientsFromAdmin(user);
+      if (adminClients.length > 0) {
+        clients = mergeClients(clients, adminClients).filter(c => !isDummyRecord(c));
       }
-      // Actively fetch live authoritative clients and trading data from Trading Platform
-      try {
-        await syncAuthoritativeData(user.tenantId);
-      } catch (err: any) {
-        console.warn('[Clients API] Remote fetch notice:', err?.message || err);
+    } catch (err: any) {
+      console.warn('[Clients API] Admin hierarchy fetch notice:', err?.message || err);
+    }
+
+    // 2. Actively fetch live authoritative clients and balances from Trading Platform
+    try {
+      const liveClientsRes = await tradingPlatformClient.fetchAllLiveClients(user.tenantId);
+      if (liveClientsRes.success && Array.isArray(liveClientsRes.clients) && liveClientsRes.clients.length > 0) {
+        clients = mergeClients(clients, liveClientsRes.clients).filter(c => !isDummyRecord(c));
       }
+    } catch (err: any) {
+      console.warn('[Clients API] Remote fetch notice:', err.message);
+    }
+
+    // 3. Actively sync authoritative trading data
+    try {
+      await syncAuthoritativeData(user.tenantId);
+    } catch (err: any) {
+      console.warn('[Clients API] Remote sync notice:', err?.message || err);
     }
 
     // Display records according to hierarchy role
@@ -4738,12 +4779,12 @@ export function mergeClients(existing: Client[], incomingRaw: any[]): Client[] {
         pan: 'ABCDE1234F',
         status: 'Active',
         isDemo: false,
-        ledgerBalance: 1000000,
+        ledgerBalance: 0,
         openPnL: 0,
-        peakLedger: 1000000,
+        peakLedger: 0,
         marginUsed: 0,
         income: 0,
-        marginAvailable: 1000000,
+        marginAvailable: 0,
         brokerId: user.brokerId || 'BRK-ROHAN-01',
         brokerName: user.name || 'NexTrade Broker',
         kycStatus: 'Verified',

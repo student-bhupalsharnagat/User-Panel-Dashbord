@@ -404,6 +404,92 @@ export class TradingPlatformClient extends EventEmitter {
   }
 
   /**
+   * Authoritative S2S Scoped Clients from Admin-Dashbord for a specific partner/user
+   * Cached for 3s with a 10s timeout.
+   */
+  public async fetchScopedClientsFromAdmin(user: any): Promise<{ success: boolean; clients: any[] }> {
+    if (!user) return { success: false, clients: [] };
+    const roleStr = String(user.role || '').toLowerCase();
+    const mId = user.masterId || user.master_id || (roleStr.includes('master') ? (user.sub || user.id) : undefined);
+    const mName = user.name || (user as any).masterName || (user as any).master_name;
+    const bId = user.brokerId || user.broker_id || ((roleStr.includes('broker') && !roleStr.includes('sub')) ? (user.sub || user.id) : undefined);
+    const sId = user.subBrokerId || user.sub_broker_id || (roleStr.includes('sub') ? (user.sub || user.id) : undefined);
+    const uTenant = this.resolveOutboundTenantId(user.tenantId || user.tenant_id);
+
+    const cacheKey = `admin_hierarchy:${uTenant}:${roleStr}:${mId || ''}:${bId || ''}:${sId || ''}:${mName || ''}`;
+    const cached = this.getCached<any[]>(cacheKey, 3000);
+    if (cached) {
+      return { success: true, clients: cached };
+    }
+
+    try {
+      await this.syncClockOffset().catch(() => {});
+      const queryParams = new URLSearchParams();
+      if (roleStr.includes('master')) {
+        if (mId) queryParams.set('masterId', String(mId));
+        if (mName) queryParams.set('masterName', String(mName));
+      } else if (roleStr.includes('broker') && !roleStr.includes('sub')) {
+        if (bId) queryParams.set('brokerId', String(bId));
+        if (user.name) queryParams.set('brokerName', String(user.name));
+      } else if (roleStr.includes('sub')) {
+        if (sId) queryParams.set('subBrokerId', String(sId));
+      } else if (roleStr.includes('client') || roleStr.includes('trader')) {
+        const cId = user.clientId || user.client_id || user.sub || user.id;
+        if (cId) queryParams.set('clientId', String(cId));
+      }
+      if (uTenant && uTenant !== 'ALL' && uTenant !== 'ALL_TENANTS') {
+        queryParams.set('tenantId', uTenant);
+      }
+
+      const qs = queryParams.toString();
+      const pullPath = `/api/internal/v1/hierarchy/clients${qs ? `?${qs}` : ''}`;
+      const pathWithoutQuery = '/api/internal/v1/hierarchy/clients';
+      const timestamp = (Date.now() + this.clockOffsetMs).toString();
+      const nonce = crypto.randomUUID();
+      const effectiveSecret = process.env.INTERNAL_COMMUNICATION_SECRET || process.env.INTERNAL_API_SECRET || process.env.S2S_SECRET || this.secret || 'vertex-internal-s2s-secret';
+      const sigPayload = `${timestamp}.GET.${pathWithoutQuery}.`;
+      const signature = crypto.createHmac('sha256', effectiveSecret).update(sigPayload).digest('hex');
+
+      const url = `${this.adminPanelUrl}${pullPath}`;
+      const controller = new AbortController();
+      const timer = setTimeout(() => controller.abort(), 10000);
+
+      const res = await fetch(url, {
+        method: 'GET',
+        headers: {
+          'accept': 'application/json',
+          'x-s2s-signature': signature,
+          'x-internal-signature': signature,
+          'x-internal-secret': effectiveSecret,
+          'x-internal-timestamp': timestamp,
+          'x-timestamp': timestamp,
+          'x-internal-nonce': nonce,
+          'x-tenant-id': uTenant,
+        },
+        signal: controller.signal,
+      });
+      clearTimeout(timer);
+
+      if (res.ok) {
+        const data: any = await res.json().catch(() => ({}));
+        const rawList = Array.isArray(data?.clients) ? data.clients : (Array.isArray(data) ? data : []);
+        if (rawList.length > 0) {
+          this.setCache(cacheKey, rawList);
+          return { success: true, clients: rawList };
+        }
+      }
+    } catch (err: any) {
+      console.warn('[fetchScopedClientsFromAdmin] Notice:', err?.message || err);
+    }
+
+    const fallback = this.getLastSuccessful<any[]>(cacheKey);
+    if (fallback && fallback.length > 0) {
+      return { success: true, clients: fallback };
+    }
+    return { success: false, clients: [] };
+  }
+
+  /**
    * Live authoritative Dashboard summary metrics from Trading Platform for a specific tenant
    */
   public async fetchLiveSummary(tenantId?: string): Promise<{ success: boolean; metrics: any }> {
